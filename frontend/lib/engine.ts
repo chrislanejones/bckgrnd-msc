@@ -120,6 +120,11 @@ export class EngineHost {
     // The processor needs the context's real rate, which it also knows as a global;
     // passing it explicitly keeps the two from disagreeing after a device change.
     this.post({ type: 'init', wasm, sampleRate: ctx.sampleRate }, [wasm]);
+
+    // Then everything the app said before there was anything to say it to, in order.
+    const queued = this.pending;
+    this.pending = [];
+    for (const item of queued) this.post(item.message, item.transfer);
   }
 
   private onMessage(message: WorkletMessage): void {
@@ -145,8 +150,27 @@ export class EngineHost {
     }
   }
 
+  /**
+   * Messages sent before the worklet existed, replayed once it does.
+   *
+   * `boot()` needs a user gesture, but the app loads the opening track as soon as the
+   * library arrives — well before anyone has clicked. Those posts used to go to
+   * `this.node?`, which is null until boot, so they were dropped on the floor without
+   * a word: deck A came up with no track loaded, play produced silence, and the app
+   * only made a sound once you picked a *second* track, by which point booting had
+   * happened and the load actually landed.
+   */
+  private pending: Array<{ message: unknown; transfer: Transferable[] }> = [];
+
   private post(message: unknown, transfer: Transferable[] = []): void {
-    this.node?.port.postMessage(message, transfer);
+    const node = this.node;
+    if (!node) {
+      // Bounded, so a page that never gets its gesture cannot grow this without end.
+      // Far more than the handful of messages a cold start actually queues.
+      if (this.pending.length < 256) this.pending.push({ message, transfer });
+      return;
+    }
+    node.port.postMessage(message, transfer);
   }
 
   /**
@@ -334,6 +358,11 @@ export class EngineHost {
 
   setStereo(mode: 0 | 1 | 2): void {
     this.post({ type: 'stereo', mode });
+  }
+
+  /** Output balance, 0 mono-left through 0.5 stereo to 1 mono-right. */
+  setStereoBalance(balance: number): void {
+    this.post({ type: 'stereoBalance', value: balance });
   }
 
   setLoop(bars: number): void {

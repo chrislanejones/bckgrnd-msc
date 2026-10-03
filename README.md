@@ -57,15 +57,18 @@ Eight per track: kick, clap, hats, bass, stab, lead, pad, arp.
 | Filter | One tape-style lowpass sweep, 240 Hz to 18 kHz, exponential under the finger. |
 | EQ | Low shelf 180 Hz, mid bell 1 kHz, high shelf 3.2 kHz. |
 | Echo throw | Feeds the whole mix into the delay and opens the feedback up. |
-| Stereo | Mono-left, stereo, mono-right. |
+| Stereo | A balance fader. Left end is mono-left, the middle is full stereo, the right end is mono-right. |
 | Vinyl brake | Slows the transport to a stop on a curve. |
 | Backspin | Reverses the last quarter-second of output and spins it back. |
 | Nudge | Shoves the transport ahead or behind, then returns it. |
 | Cue | Jumps the playhead back to the start. |
-| Auto mix | Starts the other deck and crossfades to it. |
+| Next | The track Auto mix will bring in. Deck B always shows it. |
+| Auto mix | Crossfades to Next. The new track starts on a phrase boundary of the old one, at the old tempo, then eases to its own tempo over about twelve seconds. |
+| Continuous | Keeps doing that on its own. At bar 12 it hands over to Next, and each handover steps the stem groups on: full mix, no drums, no music. It runs until you turn it off. |
 
-There are two decks. Auto mix brings the second one up and hands over, and the panel
-follows whichever deck is live rather than assuming it's the first.
+There are two decks. Deck A starts on the first track, deck B holds whatever is in Next.
+A mix brings B up and hands over, and the panel follows whichever deck is live rather than
+assuming it's the first. Clicking a track plays it. Nothing starts on page load.
 
 ## How it's split
 

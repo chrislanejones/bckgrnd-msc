@@ -124,7 +124,7 @@ Compression and saturation happen **before** the EQ, on the summed signal. That 
 
 ## Things that were wrong and are now guarded by tests
 
-These were real defects found by measurement, not taste. Each has a test.
+These were real defects found by measurement, not taste. Most have a test. The ones that don't say so in the right-hand column, and those are the next thing to cover.
 
 | Defect | Guard |
 |---|---|
@@ -134,8 +134,19 @@ These were real defects found by measurement, not taste. Each has a test.
 | Stereo unison missing from the house lead; pad not doubled; chord panning mirrored | `a_chord_spreads_left_to_right`, `the_pad_doubles_every_note`, `the_house_lead_is_a_stereo_unison` |
 | Auto-mix never started the incoming deck — crossfaded a gain on a silent engine | deck label check in the browser pass |
 | Panel assumed deck A was always live, so labels went stale after a handover | `liveDeck` state |
+| `Osc` phase increment carried a stray `1/TAU`, so every pitch played 31 semitones flat (55 Hz rendered at 9 Hz, under the 28 Hz highpass) | `oscillators_play_the_pitch_they_were_asked_for`, `pitch_is_independent_of_sample_rate` |
+| The bass's saw layer was added to the stab, lead, pad and arp too | `only_the_bass_gets_the_saw_layer` |
+| The delay line advanced once per send, not per sample, so the echo arrived at 20 ms instead of 357 ms | `the_echo_lands_on_the_dotted_eighth_whatever_is_sending`, `the_echo_throw_does_not_retune_the_delay` |
+| `Ducker::trigger` compounded its own recovery time, so the pump was gone eight kicks in | `the_duck_recovery_does_not_shrink_across_hits` |
+| `lead_voicing` ignored velocity | `the_lead_responds_to_velocity` |
+| `ToneVoice` ran one mono biquad once per partial, so the pad and stab (the widest voicings) measured narrower than the hats | measured by hand: stab 4.7% to 18.5% width. No test yet. |
+| `samples_to_next_downbeat` compared samples against seconds, so the lead-in guard never held | `the_downbeat_respects_its_minimum_lead_in_seconds` |
+| Both decks rendered into one buffer pair and `Engine::process` assigns, so a crossfade discarded the outgoing track | browser: checked by hand |
+| A mix brought the incoming track in bassless and dark and never opened it up | browser: checked by hand |
+| The incoming deck started when the button was pressed, not on a downbeat, so the two grids ran at one tempo with an arbitrary offset | browser: checked by hand |
+| Messages sent before the first gesture were dropped, so the opening track never loaded and Play was silent until the second track was picked | browser: checked by hand |
 
-**A test that was measuring noise.** The bass low-band check read 70%, then 58% for the same signal. Cause: one Goertzel over ~1.4 M samples has sub-1 Hz resolution, so every probe sat in its neighbours' leakage skirt and the result depended on where the render started and stopped. It now averages 4096-sample windows and reads a stable 70.0%. If you add spectral tests, window them.
+**A test that was measuring noise.** The bass low-band check read 70%, then 58% for the same signal. Cause: one Goertzel over ~1.4 M samples has sub-1 Hz resolution, so every probe sat in its neighbours' leakage skirt and the result depended on where the render started and stopped. It now averages 4096-sample windows and reads a stable number. That number is 59.4% since the oscillators were put in tune, down from 70.0% while every partial sat at f / 6.28. The 70.0% was a reading of spectral leakage, not of the bass. `warehouse`'s own bassline has 11 of its 44 notes with a fundamental above 120 Hz, so the bar is 55%. If you add spectral tests, window them.
 
 **A test that was testing taste.** `check-arrangement.php` originally required 4 stems per bar. It failed on `deep` and `acid`, whose voicings are built to sit *above* their own fundamental (`acid` sets `fStart = max(80, freq * 1.1)`, putting the filter corner above the note). Both match the deployed engine exactly. The floor is now 2.
 

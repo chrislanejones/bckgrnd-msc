@@ -66,15 +66,43 @@ const LOOP_BARS = [1, 2, 4, 8, 16] as const;
 const PARTS = ['Intro', 'Groove', 'Break', 'Drop'];
 const STEPS = 256;
 
+/**
+ * The bar a continuous mix starts its handover on, of sixteen.
+ *
+ * Far enough in that the track has played, far enough from the end that the eight-beat
+ * crossfade still has a four-bar phrase boundary to start on rather than falling back
+ * to the next bar.
+ */
+const CONTINUOUS_MIX_BAR = 12;
+
+/**
+ * How long the tempo takes to ease from the outgoing track's to the incoming one's once
+ * a mix has landed. Long enough to be inaudible as a move, short enough that the tempo
+ * readout is telling the truth about the track within a phrase or two.
+ */
+const TEMPO_GLIDE_SECONDS = 12;
+
+/** The order a stem-swapping continuous mix steps the groups through. */
+const CONTINUOUS_MASKS: Mask[] = ['full', 'nodrums', 'nomusic'];
+
+/** Off, or running with or without the stem swap. */
+type ContinuousMode = 'off' | 'swap' | 'plain';
+
 type LoopBars = 0 | (typeof LOOP_BARS)[number];
 type Mask = 'full' | 'nodrums' | 'nomusic' | 'custom';
-type StereoMode = 'left' | 'stereo' | 'right';
 
-const STEREO_MODES: [StereoMode, string][] = [
-  ['left', 'Left'],
-  ['stereo', 'Stereo'],
-  ['right', 'Right'],
-];
+/**
+ * The balance fader reads out in words rather than a number: the useful positions are
+ * the two ends and the centre, and "0.62" says nothing about what you are hearing.
+ */
+function stereoLabel(balance: number): string {
+  if (balance <= 0.02) return 'Left';
+  if (balance >= 0.98) return 'Right';
+  if (Math.abs(balance - 0.5) <= 0.02) return 'Stereo';
+  return balance < 0.5
+    ? `Left ${Math.round((0.5 - balance) * 200)}%`
+    : `Right ${Math.round((balance - 0.5) * 200)}%`;
+}
 
 function cx(...parts: Array<string | false | undefined | null>) {
   return parts.filter(Boolean).join(' ');
@@ -106,9 +134,15 @@ export function App() {
   const [bands, setBands] = useState({ low: 1, mid: 1, high: 1 });
   const [open, setOpen] = useState(1);
   const [echo, setEcho] = useState(false);
-  const [stereo, setStereo] = useState<StereoMode>('stereo');
+  /** Output balance: 0 mono-left, 0.5 stereo, 1 mono-right. */
+  const [stereo, setStereo] = useState(0.5);
   const [mixing, setMixing] = useState<string | null>(null);
   const [nextId, setNextId] = useState<string>('');
+  /**
+   * Continuous mix. `swap` also steps the stem groups on at each handover; `plain`
+   * just runs one track into the next.
+   */
+  const [continuous, setContinuous] = useState<ContinuousMode>('off');
   /**
    * Which deck is currently live, and what is cued on the other one.
    *
@@ -220,6 +254,18 @@ export function App() {
   const col = songStep < 0 ? -1 : songStep % 16;
   const anySolo = STEM_ORDER.some((id) => solo[id]);
 
+  /**
+   * Which stems are not sounding: cut outright, or dropped because something else is
+   * soloed. The same rule the stem strips use for their own cut state.
+   */
+  const silenced = useMemo(
+    () =>
+      Object.fromEntries(
+        STEM_ORDER.map((id) => [id, Boolean(muted[id]) || (anySolo && !solo[id])]),
+      ) as Record<StemId, boolean>,
+    [muted, solo, anySolo],
+  );
+
   const tracks = library?.tracks ?? [];
   const edmTracks = useMemo(
     () => tracks.filter((t) => t.kind !== 'lofi'),
@@ -258,6 +304,7 @@ export function App() {
       try {
         const arranged = await loadArrangement(summary.id);
         if (!arranged) return;
+        cancelTempoGlide();
         const deck = liveDeck;
         engine.stop(deck);
         engine.loadTrack(deck, arranged);
@@ -305,6 +352,7 @@ export function App() {
 
   function autoMix() {
     if (mixing || !track) return;
+    cancelTempoGlide();
     void (async () => {
       try {
         const id = nextId && nextId !== track.id ? nextId : (tracks[1]?.id ?? track.id);
@@ -330,13 +378,37 @@ export function App() {
           // The deck that just went live is no longer the cued one, so the panel has to
           // follow the swap or the waveforms will label the wrong tracks.
           setLiveDeck(incoming);
-          setBpm(arranged.bpm);
+
+          // Everything below sets the engine as well as the screen. This callback used
+          // to update React state alone, so after every mix the display described a
+          // different session from the one playing: the new track's tempo and default
+          // faders on screen, the old tempo, faders and cuts still running underneath.
+          //
+          // Tempo glides rather than jumps. The incoming deck was matched to the
+          // outgoing tempo for the crossfade, which is what kept the beats together;
+          // snapping it to its own tempo the moment the fade ended would be an audible
+          // lurch, so it eases across a few bars instead.
+          glideTempo(bpm, arranged.bpm, TEMPO_GLIDE_SECONDS);
           setSwing(arranged.swing);
+          engine.setSwing(arranged.swing);
           setVols(arranged.mix);
-          const clear = emptyFlags();
-          setMuted(clear);
-          setSolo(clear);
-          setMask('full');
+          for (let i = 0; i < STEM_ORDER.length; i += 1) {
+            engine.setVolume(i, arranged.mix[STEM_ORDER[i]]);
+            engine.setSolo(i, false);
+          }
+          setSolo(emptyFlags());
+
+          // A continuous mix steps the stem groups on at each handover; a one-off auto
+          // mix lands on the full track, which is what you want when you pressed the
+          // button yourself.
+          if (continuousRef.current === 'swap') {
+            maskStep.current = (maskStep.current + 1) % CONTINUOUS_MASKS.length;
+            applyMask(CONTINUOUS_MASKS[maskStep.current] ?? 'full');
+          } else {
+            setMuted(emptyFlags());
+            setMask('full');
+            for (let i = 0; i < STEM_ORDER.length; i += 1) engine.setMuted(i, false);
+          }
           // The deck that just went live holds `arranged` now, so it must stop being
           // described as "cued" or the panel will show the same track on both decks.
           // Pointing Next at the following track re-cues the deck that just went idle,
@@ -348,6 +420,77 @@ export function App() {
         setError((e as Error).message);
       }
     })();
+  }
+
+  /**
+   * Continuous mix.
+   *
+   * Hands over to whatever is in Next once the playhead reaches the last section, so
+   * the crossfade has a phrase to land on and the set never stops. Each handover also
+   * steps the stem groups on — full mix, no drums, no music — which is what turns a
+   * run of tracks into one extended mix rather than a playlist: the drums carry the
+   * seam, then the music comes back over the new track.
+   */
+  const autoMixRef = useRef<() => void>(() => {});
+  /** Re-armed once the playhead is back before the trigger, so each pass fires once. */
+  const armed = useRef(true);
+  /** Where the group cycle has got to, and whether it should run at all. */
+  const maskStep = useRef(0);
+  const continuousRef = useRef(continuous);
+
+  // The mix callback runs on the audio thread's schedule, long after the render that
+  // set it up, so it reads these through refs rather than a stale closure.
+  autoMixRef.current = autoMix;
+  continuousRef.current = continuous;
+
+  useEffect(() => {
+    if (continuous === 'off' || !playing || mixing) return;
+    if (bar < CONTINUOUS_MIX_BAR) {
+      armed.current = true;
+      return;
+    }
+    if (!armed.current) return;
+    armed.current = false;
+    autoMixRef.current();
+  }, [continuous, playing, mixing, bar]);
+
+  /** The running tempo glide, so a new gesture can take it over. */
+  const tempoGlide = useRef<number | null>(null);
+
+  function cancelTempoGlide() {
+    if (tempoGlide.current !== null) {
+      window.clearInterval(tempoGlide.current);
+      tempoGlide.current = null;
+    }
+  }
+
+  // A glide must not outlive the page.
+  useEffect(() => cancelTempoGlide, []);
+
+  /**
+   * Ease the tempo from `from` to `to` over `seconds`, in small steps.
+   *
+   * The engine takes a tempo and the screen shows one, so this drives both together;
+   * a smoothstep keeps the start and end of the move gentle. Any other tempo gesture
+   * (the slider, loading a track, starting another mix) cancels it first, so the glide
+   * never fights the hand on the control.
+   */
+  function glideTempo(from: number, to: number, seconds: number) {
+    cancelTempoGlide();
+    if (Math.abs(to - from) < 0.5) {
+      engine.setBpm(to);
+      setBpm(Math.round(to));
+      return;
+    }
+    const started = performance.now();
+    tempoGlide.current = window.setInterval(() => {
+      const t = Math.min(1, (performance.now() - started) / (seconds * 1000));
+      const eased = t * t * (3 - 2 * t);
+      const value = from + (to - from) * eased;
+      engine.setBpm(value);
+      setBpm(Math.round(value));
+      if (t >= 1) cancelTempoGlide();
+    }, 200);
   }
 
   function applyMask(next: Mask) {
@@ -497,17 +640,21 @@ export function App() {
         </div>
 
         <div className="rise rise-2 mt-2 grid gap-2" aria-label="Decks">
+          {/* Only the live deck reflects the cuts. The idle one is a preview of the
+              track as written, which is what you want to see before bringing it in. */}
           <DeckWave
             side="a"
             track={liveDeck === 'a' ? track : cued}
             step={liveDeck === 'a' ? songStep : -1}
             status={liveDeck === 'a' ? (playing ? 'Live' : 'Cue') : 'Idle'}
+            silenced={liveDeck === 'a' ? silenced : undefined}
           />
           <DeckWave
             side="b"
             track={liveDeck === 'b' ? track : cued}
             step={liveDeck === 'b' ? songStep : -1}
             status={liveDeck === 'b' ? (playing ? 'Live' : 'Cue') : 'Idle'}
+            silenced={liveDeck === 'b' ? silenced : undefined}
           />
         </div>
 
@@ -518,7 +665,7 @@ export function App() {
           <TrackGrid items={lofiTracks} current={track.id} onPick={selectTrack} />
         </div>
 
-        <div className="rise rise-3 mt-6 grid items-end gap-3 sm:grid-cols-[minmax(0,1fr)_auto]">
+        <div className="rise rise-3 mt-6 grid items-end gap-3 sm:grid-cols-[minmax(0,1fr)_auto_auto_auto]">
           <label className="block min-w-0">
             <span className="mb-1 block text-xs font-semibold tracking-widest text-muted">
               Next
@@ -543,13 +690,37 @@ export function App() {
             type="button"
             aria-pressed={Boolean(mixing)}
             className={cx(
-              'tap rounded-full border px-4 py-2 text-xs font-semibold',
-              mixing ? 'border-acid bg-acid text-acid-ink' : 'border-line bg-surface',
+              'mix-action tap',
+              mixing ? 'border-acid bg-acid text-acid-ink' : 'border-line bg-surface text-fg',
             )}
             onClick={autoMix}
           >
-            {mixing ? `Mixing · ${mixing}` : 'Auto mix'}
+            <span className="block">{mixing ? 'Mixing' : 'Auto mix'}</span>
+            <span className="mix-action-note">{mixing ? mixing : 'track'}</span>
           </button>
+          {(
+            [
+              ['swap', 'Continuous mix', 'stem swap'],
+              ['plain', 'Continuous mix', 'song after song'],
+            ] as const
+          ).map(([mode, label, note]) => (
+            <button
+              key={mode}
+              type="button"
+              aria-pressed={continuous === mode}
+              className={cx(
+                'mix-action tap',
+                continuous === mode
+                  ? 'border-acid bg-acid text-acid-ink'
+                  : 'border-line bg-surface text-fg',
+              )}
+              // Picking one turns the other off; pressing the lit one stops.
+              onClick={() => setContinuous((now) => (now === mode ? 'off' : mode))}
+            >
+              <span className="block">{label}</span>
+              <span className="mix-action-note">{note}</span>
+            </button>
+          ))}
         </div>
 
         <div className="rise rise-3 mt-6 grid grid-cols-3 gap-2" role="group" aria-label="Stem groups">
@@ -589,6 +760,19 @@ export function App() {
                       {meta.name}
                     </p>
                     <p className="hidden text-xs text-muted sm:block">{meta.hint}</p>
+                    <div className="meter" aria-hidden>
+                      <span ref={(el) => { meterRefs.current[index] = el; }} />
+                    </div>
+                  </div>
+                  {/* Solo ends the step row. The dots take the slack and the button is
+                      a fixed width, so it lands at the same right edge on every stem
+                      instead of drifting with the length of the name and hint. */}
+                  <div className="step-line">
+                    <div className="step-row" aria-hidden>
+                      {activity.map((on, i) => (
+                        <span key={i} className={cx('step', on && 'on', i === col && 'now')} />
+                      ))}
+                    </div>
                     <button
                       type="button"
                       className="solo shrink-0"
@@ -597,14 +781,6 @@ export function App() {
                     >
                       Solo
                     </button>
-                    <div className="meter" aria-hidden>
-                      <span ref={(el) => { meterRefs.current[index] = el; }} />
-                    </div>
-                  </div>
-                  <div className="step-row" aria-hidden>
-                    {activity.map((on, i) => (
-                      <span key={i} className={cx('step', on && 'on', i === col && 'now')} />
-                    ))}
                   </div>
                   <label className="mt-2 block">
                     <span className="sr-only">{meta.name} volume</span>
@@ -757,26 +933,32 @@ export function App() {
             </label>
           </div>
 
-          <p className="mt-3 text-xs font-semibold tracking-widest text-muted">Stereo</p>
-          <div className="mt-2 grid grid-cols-3 gap-1" role="group" aria-label="Left right stereo switch">
-            {STEREO_MODES.map(([id, label]) => (
-              <button
-                key={id}
-                type="button"
-                aria-pressed={stereo === id}
-                className={cx(
-                  'tap rounded-full border px-2 py-2 text-xs font-semibold',
-                  stereo === id ? 'border-acid bg-acid text-acid-ink' : 'border-line bg-surface',
-                )}
-                onClick={() => {
-                  setStereo(id);
-                  engine.setStereo(id === 'left' ? 0 : id === 'right' ? 2 : 1);
-                }}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
+          <label className="mt-3 block">
+            <span className="mb-1 flex items-center justify-between text-xs text-muted">
+              <span>Stereo</span>
+              <span className="tabular-nums text-fg">{stereoLabel(stereo)}</span>
+            </span>
+            <input
+              className="fader"
+              type="range"
+              min={0}
+              max={1}
+              step={0.01}
+              value={stereo}
+              aria-label="Stereo balance"
+              aria-valuetext={stereoLabel(stereo)}
+              onChange={(event) => {
+                const value = Number(event.target.value);
+                setStereo(value);
+                engine.setStereoBalance(value);
+              }}
+            />
+            <span className="fader-ends" aria-hidden="true">
+              <span>Left</span>
+              <span>Stereo</span>
+              <span>Right</span>
+            </span>
+          </label>
         </section>
 
         <section className="mt-3 grid gap-3 sm:grid-cols-3">
@@ -795,6 +977,7 @@ export function App() {
               aria-label="Tempo"
               onChange={(event) => {
                 const value = Number(event.target.value);
+                cancelTempoGlide();
                 setBpm(value);
                 engine.setBpm(value);
               }}
@@ -932,18 +1115,23 @@ function DeckWave({
   track,
   step,
   status,
+  silenced,
 }: {
   side: 'a' | 'b';
   track: TrackArrangement | null;
   step: number;
   status: 'Live' | 'Cue' | 'Idle';
+  /** Stems that are not sounding, left out of the drawing. */
+  silenced?: Record<StemId, boolean>;
 }) {
   // Both decks always draw. Before a track is cued there is nothing to show, so the
   // slot keeps its height with a placeholder rather than collapsing — a deck that
   // appears and disappears as tracks are cued makes the layout jump.
+  // Keyed on which stems are silent as well as the track, so cutting one redraws.
+  const silentKey = silenced ? STEM_ORDER.filter((id) => silenced[id]).join(',') : '';
   const path = useMemo(
-    () => (track ? waveBands(track) : null),
-    [track],
+    () => (track ? waveBands(track, silenced) : null),
+    [track, silentKey],
   );
   const head = step < 0 ? 0 : ((step % STEPS) / STEPS) * 100;
 
@@ -1006,7 +1194,15 @@ function DeckWave({
  * across their gate, which is what makes the shape read as a mix rather than a
  * grid of identical blocks.
  */
-function waveBands(track: TrackArrangement): { low: string; mid: string; high: string } {
+function waveBands(
+  track: TrackArrangement,
+  silenced?: Record<StemId, boolean>,
+): { low: string; mid: string; high: string } {
+  // A stem that is cut is left out of the drawing, so the waveform thins as stems are
+  // taken away and fills back in as they return. The whole app is about removing
+  // stems; a picture that stayed the same either way was describing the arrangement
+  // rather than what you are hearing.
+  const on = (id: StemId) => !silenced?.[id];
   const low = Array.from({ length: STEPS }, () => 0);
   const mid = Array.from({ length: STEPS }, () => 0);
   const high = Array.from({ length: STEPS }, () => 0);
@@ -1019,10 +1215,12 @@ function waveBands(track: TrackArrangement): { low: string; mid: string; high: s
     });
   };
 
-  poke(low, track.kick, 1);
-  poke(mid, track.clap, 0.55);
-  poke(high, track.hat, 0.42);
-  poke(high, track.hatOpen, 0.62);
+  if (on('kick')) poke(low, track.kick, 1);
+  if (on('clap')) poke(mid, track.clap, 0.55);
+  if (on('hats')) {
+    poke(high, track.hat, 0.42);
+    poke(high, track.hatOpen, 0.62);
+  }
 
   const sustain = (
     dest: number[],
@@ -1038,11 +1236,11 @@ function waveBands(track: TrackArrangement): { low: string; mid: string; high: s
     });
   };
 
-  sustain(low, track.bass, 0.82);
-  sustain(mid, track.stab, 0.5);
-  sustain(mid, track.lead, 0.46);
-  sustain(mid, track.pad, 0.34);
-  sustain(high, track.arp, 0.4);
+  if (on('bass')) sustain(low, track.bass, 0.82);
+  if (on('stab')) sustain(mid, track.stab, 0.5);
+  if (on('lead')) sustain(mid, track.lead, 0.46);
+  if (on('pad')) sustain(mid, track.pad, 0.34);
+  if (on('arp')) sustain(high, track.arp, 0.4);
 
   const blur = (values: number[]) =>
     values.map((_, index) => {

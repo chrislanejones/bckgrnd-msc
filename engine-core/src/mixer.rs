@@ -101,9 +101,13 @@ pub struct Master {
     pub sweep: StereoBiquad,
     pub delay: Delay,
     pub gain: f32,
-    /// Left/right routing matrix for the stereo switch (0 = mono-left, 1 = stereo,
-    /// 2 = mono-right).
-    pub mode: u8,
+    /// Where the output sits between the two channels, 0 = mono-left, 0.5 = stereo,
+    /// 1 = mono-right.
+    ///
+    /// Continuous rather than a three-way switch so the UI can offer a fader. The
+    /// three old positions are exactly its 0, 0.5 and 1, so `set_stereo_mode` still
+    /// means what it did.
+    pub balance: f32,
     pub scope: [u8; 256],
     sample_rate: f32,
     scope_t: f32,
@@ -168,7 +172,7 @@ impl Master {
             sweep,
             delay,
             gain: 0.78,
-            mode: 1,
+            balance: 0.5,
             scope: [128; 256],
             sample_rate,
             scope_t: 0.0,
@@ -361,10 +365,14 @@ impl Master {
         r *= self.gain;
 
 
-        let (mut out_l, mut out_r) = match self.mode {
-            0 => (l, l),
-            2 => (r, r),
-            _ => (l, r),
+        // Collapse toward one channel or the other. Below centre the right channel is
+        // pulled toward the left, above it the left is pulled toward the right, so the
+        // ends are mono and the middle is untouched stereo.
+        let b = self.balance.clamp(0.0, 1.0);
+        let (mut out_l, mut out_r) = if b < 0.5 {
+            (l, l + (r - l) * (b * 2.0))
+        } else {
+            (l + (r - l) * ((b - 0.5) * 2.0), r)
         };
         out_l *= self.filter_gain;
         out_r *= self.filter_gain;
@@ -729,10 +737,10 @@ use super::*;
     fn stereo_modes_collapse_channels() {
         let sr = 48_000.0;
         let mut m = Master::new(sr);
-        m.mode = 0;
+        m.balance = 0.0;
         let (l, r) = m.process(0.5, -0.5);
         assert!((l - r).abs() < 1e-6, "left mode not mono {l} {r}");
-        m.mode = 2;
+        m.balance = 1.0;
         let (l, r) = m.process(0.5, -0.5);
         assert!((l - r).abs() < 1e-6, "right mode not mono");
     }

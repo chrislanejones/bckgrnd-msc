@@ -470,14 +470,22 @@ impl Engine {
         let grid = (bars.max(1) as usize) * 16;
         let mut step = self.transport.step;
         let mut acc = self.transport.to_next.max(0.0);
+        // `acc` counts samples: `to_next` is decremented once per sample, and each
+        // step's duration is converted below. `min_ahead` is seconds, so it has to be
+        // converted too — comparing against it raw made the guard "at least 0.32
+        // samples ahead", which every candidate passes, so this returned whichever
+        // downbeat came next even if it was about to pass. The caller then scheduled a
+        // handover with no runway, and the fade began almost immediately instead of on
+        // the phrase it had picked.
+        let min_samples = (min_ahead.max(0.0) as f64) * self.sample_rate as f64;
         for _ in 0..STEPS + 32 {
-            if step.is_multiple_of(grid) && acc >= min_ahead as f64 {
+            if step.is_multiple_of(grid) && acc >= min_samples {
                 return acc;
             }
             acc += self.transport.step_seconds(step) as f64 * self.sample_rate as f64;
             step = if step + 1 >= STEPS { 0 } else { step + 1 };
         }
-        min_ahead as f64
+        min_samples
     }
 
     /// Filter position, 0 (dark) to 1 (open).
@@ -501,7 +509,18 @@ impl Engine {
     }
 
     pub fn set_stereo_mode(&mut self, mode: u8) {
-        self.master.mode = mode.min(2);
+        // The three switch positions are the ends and the centre of the balance.
+        self.master.balance = match mode.min(2) {
+            0 => 0.0,
+            2 => 1.0,
+            _ => 0.5,
+        };
+    }
+
+    /// Where the output sits between the channels: 0 mono-left, 0.5 stereo, 1
+    /// mono-right. The continuous form of [`Engine::set_stereo_mode`].
+    pub fn set_stereo_balance(&mut self, balance: f32) {
+        self.master.balance = balance.clamp(0.0, 1.0);
     }
 
     /// Render `out_l`/`out_r` in place. This is the audio callback's entry point and
@@ -833,6 +852,66 @@ mod tests {
         t
     }
 
+
+    /// The handover has to be scheduled the distance ahead it asks for.
+    ///
+    /// `samples_to_next_downbeat` accumulates samples but compared them to `min_ahead`,
+    /// which is seconds, so the lead-time guard was "at least 0.32 samples" and every
+    /// candidate passed. Asking for a downbeat at least a second away has to return one
+    /// at least a second away.
+    #[test]
+    fn the_downbeat_respects_its_minimum_lead_in_seconds() {
+        let sr = 48_000.0;
+        let mut e = Engine::new(sr);
+        e.load_track(track_with_kick());
+        e.play();
+        // Run a little way in, so the playhead is mid-bar rather than on the downbeat.
+        for _ in 0..40 {
+            let mut l = [0.0f32; 128];
+            let mut r = [0.0f32; 128];
+            e.process(&mut l, &mut r);
+        }
+
+        for min_ahead in [0.32f32, 1.0, 2.0] {
+            let samples = e.samples_to_next_downbeat(1, min_ahead);
+            assert!(
+                samples >= (min_ahead * sr) as f64,
+                "asked for a downbeat at least {min_ahead} s ahead, got {:.3} s",
+                samples / sr as f64
+            );
+        }
+    }
+
+    /// The balance fader's ends and centre are the old three-way switch.
+    #[test]
+    fn balance_endpoints_match_the_old_stereo_modes() {
+        // Mean |L - R| over a second of an out-of-phase tone. A sine, not a constant:
+        // the master opens with a 28 Hz highpass, which removes a steady level, so a
+        // DC input would read as near-silence at every setting.
+        let spread = |balance: f32| -> f32 {
+            let sr = 48_000.0;
+            let mut m = mixer::Master::new(sr);
+            m.balance = balance;
+            let mut total = 0.0f32;
+            let n = sr as usize;
+            for i in 0..n {
+                let v = 0.4 * (i as f32 / sr * 220.0 * std::f32::consts::TAU).sin();
+                let (l, r) = m.process(v, -v);
+                total += (l - r).abs();
+            }
+            total / n as f32
+        };
+
+        let (left, quarter, centre, right) = (spread(0.0), spread(0.25), spread(0.5), spread(1.0));
+        assert!(left < 1e-4, "left end should be mono, spread {left}");
+        assert!(right < 1e-4, "right end should be mono, spread {right}");
+        assert!(centre > 0.05, "centre should leave the channels apart, spread {centre}");
+        // And it opens smoothly rather than switching.
+        assert!(
+            left < quarter && quarter < centre,
+            "not monotonic: {left} {quarter} {centre}"
+        );
+    }
 
     #[test]
     fn silence_renders_nothing_but_stays_finite() {
