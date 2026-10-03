@@ -1,8 +1,8 @@
-# bckgrnd-msc desktop — handoff
+# bckgrnd-msc — handoff
 
-A port of the bckgrnd-msc stem-machine music app from Web Audio/TypeScript to **Rust (WASM) + Laravel + NativePHP**, plus a PHP-free static web build.
+A port of the bckgrnd-msc stem-machine music app from Web Audio/TypeScript to **Rust (WASM) + Laravel + NativePHP**, plus a PHP-free static web build. This app is the repository root.
 
-The reference implementation is the sibling directory `../original/` — a TanStack Start app still running the Web Audio engine, deployed at `bckgrndmsc.grok.me`. Treat it as the authority on sound and on musical content. It is not modified by anything here.
+The reference implementation lives in `old/` — a TanStack Start app still running the Web Audio engine, deployed at `bckgrndmsc.grok.me`. Treat it as the authority on sound and on musical content. Nothing here writes to it; it was renamed from `original/` and carries the same brand rename, but its behaviour is untouched.
 
 ---
 
@@ -156,7 +156,7 @@ These were real defects found by measurement, not taste. Each has a test.
 - **`native:build` / `native:install` are unverified.** No Electron toolchain in the Linux sandbox. The composer `build` script invokes them, so a full desktop build is untested end to end. Note that NativePHP's own shell hardcodes `npm ci` inside `vendor/nativephp/electron/resources/js/` — npm must be installed alongside pnpm. It does not touch the project lockfile.
 - **Reverb is not bit-accurate** with the original's convolution. See above.
 - **The scope samples one point per frame at 60 Hz**, so it aliases any musical pitch. The original uses an `AnalyserNode` over 1024 samples. Cosmetic only.
-- **`original/` is the reference**, not a sibling to keep in sync. It is a separate app and nothing here writes to it.
+- **`old/` is the reference**, not a subtree to keep in sync. It is a separate app that happens to live in this repo, and nothing here writes to it.
 
 ## Parity with the original
 
@@ -165,7 +165,7 @@ These were real defects found by measurement, not taste. Each has a test.
 `tools/reference.json` is a dump of the original's arranged output. Regenerate it from the original's TypeScript source — the point is that the reference comes from `music.ts` rather than from the PHP port, so the comparison is against something independent:
 
 ```bash
-node tools/dump-reference.mjs ../original/src/lib/music.ts tools/reference.json
+node tools/dump-reference.mjs old/src/lib/music.ts tools/reference.json
 php tools/compare-with-original.php tools/reference.json
 ```
 

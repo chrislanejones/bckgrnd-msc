@@ -1,7 +1,7 @@
 /**
  * Dump every arranged track from the ORIGINAL TypeScript library as JSON.
  *
- * `original/src/lib/music.ts` is self-contained — it imports nothing — so Node can
+ * `old/src/lib/music.ts` is self-contained — it imports nothing — so Node can
  * import it directly with type stripping. That gives a reference derived from the
  * original source rather than from the PHP port, which is the only version of this
  * check worth having.

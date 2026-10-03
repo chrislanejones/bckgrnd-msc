@@ -10,8 +10,9 @@
 /public/hot
 
 # Laravel
-/.env
-/.env.backup
+# Covers .env.static and friends too; a narrower `/.env` left .env.static
+# tracked, which is how it reached the first commit.
+/.env*
 /storage/*.key
 /storage/presets/*.json
 
