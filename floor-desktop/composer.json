@@ -1,0 +1,95 @@
+{
+    "name": "floor/desktop",
+    "type": "project",
+    "description": "FLOOR \u2014 a stem machine. Laravel + NativePHP shell with a Rust/WASM audio engine.",
+    "keywords": [
+        "laravel",
+        "nativephp",
+        "audio",
+        "daw",
+        "wasm"
+    ],
+    "license": "MIT",
+    "require": {
+        "php": "^8.3",
+        "laravel/framework": "^12.0",
+        "laravel/tinker": "^2.10",
+        "nativephp/electron": "^1.0",
+        "nativephp/laravel": "^1.3"
+    },
+    "require-dev": {
+        "fakerphp/faker": "^1.24",
+        "mockery/mockery": "^1.6",
+        "nunomaduro/collision": "^8.6",
+        "phpunit/phpunit": "^12.0"
+    },
+    "autoload": {
+        "psr-4": {
+            "App\\": "app/",
+            "Database\\Factories\\": "database/factories/",
+            "Database\\Seeders\\": "database/seeders/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Tests\\": "tests/"
+        }
+    },
+    "scripts": {
+        "post-autoload-dump": [
+            "@php artisan package:discover --ansi"
+        ],
+        "post-update-cmd": [
+            "@php artisan vendor:publish --tag=laravel-assets --ansi --force"
+        ],
+        "post-root-package-install": [
+            "@php -r \"file_exists('.env') || copy('.env.example', '.env');\""
+        ],
+        "post-create-project-cmd": [
+            "@php artisan key:generate --ansi"
+        ],
+        "build:engine": "wasm-pack build --target web --release --out-dir public/wasm --manifest-path engine-core/Cargo.toml",
+        "build:assets": "pnpm run build",
+        "build": [
+            "@build:engine",
+            "@build:assets",
+            "@php artisan native:install --installer=pnpm --no-interaction"
+        ],
+        "dev": [
+            "Composer\\Config::disableProcessTimeout",
+            "pnpm exec concurrently -k -c \"#93c5fd,#c4b5fd\" -n \"vite,artisan\" \"pnpm:dev\" \"php:serve\""
+        ],
+        "dev:desktop": [
+            "@php artisan native:dev --installer=pnpm"
+        ],
+        "test": [
+            "@test:php",
+            "@test:rust",
+            "@test:parity",
+            "@test:arrangement",
+            "@test:audio"
+        ],
+        "test:php": "@php vendor/bin/phpunit",
+        "test:rust": "cargo test --manifest-path engine-core/Cargo.toml",
+        "test:parity": "@php tools/compare-with-original.php tools/reference.json",
+        "test:audio": "pnpm run verify:audio",
+        "test:arrangement": "@php tools/check-arrangement.php",
+        "build:library": "@php tools/export-library.php public/library"
+    },
+    "extra": {
+        "laravel": {
+            "dont-discover": []
+        }
+    },
+    "config": {
+        "optimize-autoloader": true,
+        "preferred-install": "dist",
+        "sort-packages": true,
+        "allow-plugins": {
+            "pestphp/pest-plugin": true,
+            "php-http/discovery": true
+        }
+    },
+    "minimum-stability": "stable",
+    "prefer-stable": true
+}

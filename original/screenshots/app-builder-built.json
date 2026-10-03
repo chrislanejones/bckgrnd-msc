@@ -1,0 +1,38 @@
+{
+  "url": "http://127.0.0.1:8081/",
+  "viewports": {
+    "desktop": {
+      "width": 1280,
+      "height": 800,
+      "status": 200,
+      "title": "FLOOR",
+      "hasCanvas": false,
+      "bodyTextLen": 1092,
+      "bodyTextHash": "0056a8090e6a28d55b24e531527ea316d814ac223da23df7eb7abaf9184c713b",
+      "bodyTextPrefix": "STEM MACHINE FLOOR Cut any stem. The rest of the instrumental ke",
+      "horizontalOverflow": false,
+      "consoleErrors": [],
+      "pageErrors": [],
+      "screenshot": "/workspace/screenshots/app-builder-built.png"
+    },
+    "mobile": {
+      "width": 390,
+      "height": 844,
+      "status": 200,
+      "title": "FLOOR",
+      "hasCanvas": false,
+      "bodyTextLen": 1025,
+      "bodyTextHash": "f4c492a6d61cefc540cd645dda08b9c52d7611626e02c4ac701c07ef5e25c3a0",
+      "bodyTextPrefix": "STEM MACHINE FLOOR Cut any stem. The rest of the instrumental ke",
+      "horizontalOverflow": false,
+      "consoleErrors": [],
+      "pageErrors": [],
+      "screenshot": "/workspace/screenshots/app-builder-built-mobile.png"
+    }
+  },
+  "brandWarnings": [],
+  "authWarnings": [],
+  "verdictFile": "/workspace/screenshots/app-builder-built.json",
+  "divergesFromBaseline": false,
+  "baselineReasons": []
+}

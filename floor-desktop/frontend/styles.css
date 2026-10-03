@@ -1,0 +1,345 @@
+@import "tailwindcss";
+
+
+@theme {
+  --color-bg: #090a0c;
+  --color-surface: #14161b;
+  --color-raised: #1c2027;
+  --color-line: #2c313b;
+  --color-fg: #f3efe6;
+  --color-muted: #8e939c;
+  --color-acid: #c6f24d;
+  --color-acid-ink: #14180a;
+  --font-display: "Syne", "Avenir Next", "Segoe UI", ui-sans-serif, system-ui, sans-serif;
+  --font-sans: "Outfit", "Segoe UI", ui-sans-serif, system-ui, sans-serif;
+}
+
+html {
+  color-scheme: dark;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  margin: 0;
+  min-height: 100dvh;
+  background: var(--color-bg);
+  color: var(--color-fg);
+  font-family: var(--font-sans);
+  line-height: 1.5;
+}
+
+@layer base {
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
+    cursor: pointer;
+  }
+
+  button {
+    font-family: inherit;
+    touch-action: manipulation;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-acid);
+    outline-offset: 2px;
+  }
+}
+
+.scope {
+  display: block;
+  width: 100%;
+  height: 2.75rem;
+  border: 1px solid var(--color-line);
+  border-radius: 0.75rem;
+  background: var(--color-bg);
+}
+
+.scope-axis {
+  stroke: rgba(243, 239, 230, 0.12);
+  stroke-width: 1;
+}
+
+.scope-line {
+  stroke: var(--color-acid);
+  stroke-width: 1.6;
+  vector-effect: non-scaling-stroke;
+}
+
+.deck-wave {
+  border: 1px solid var(--color-line);
+  border-radius: 0.75rem;
+  background: var(--color-bg);
+}
+
+/* The live deck is tinted; the idle one stays plain. Keyed off `data-live` rather than
+   a class so the deck's state lives in one attribute with the waveform head. */
+.deck-wave[data-live='yes'] {
+  border-color: color-mix(in srgb, var(--color-acid) 50%, var(--color-line));
+}
+
+.text-deck-b {
+  color: #8eb7ff;
+}
+
+.wave-low {
+  fill: #6eb0ff;
+  opacity: 0.92;
+}
+
+.wave-mid {
+  fill: #c6f24d;
+  opacity: 0.72;
+}
+
+.wave-high {
+  fill: rgba(243, 239, 230, 0.88);
+}
+
+.wave-axis {
+  stroke: rgba(243, 239, 230, 0.2);
+  stroke-width: 0.6;
+  vector-effect: non-scaling-stroke;
+}
+
+.wave-grid {
+  stroke: rgba(243, 239, 230, 0.08);
+  stroke-width: 0.35;
+  vector-effect: non-scaling-stroke;
+}
+
+.wave-grid-phrase {
+  stroke: rgba(243, 239, 230, 0.2);
+  stroke-width: 0.55;
+  vector-effect: non-scaling-stroke;
+}
+
+.wave-shade {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  background: rgba(9, 10, 12, 0.58);
+  opacity: 0;
+  pointer-events: none;
+}
+
+.wave-head {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 1;
+  width: 2px;
+  background: #f7f4ec;
+  box-shadow: 0 0 8px rgba(247, 244, 236, 0.85);
+  opacity: 0;
+  pointer-events: none;
+}
+
+.next-song {
+  width: 100%;
+  border: 1px solid var(--color-line);
+  border-radius: 999px;
+  background: var(--color-surface);
+  color: var(--color-fg);
+  padding: 0.55rem 0.9rem;
+  font: inherit;
+  font-size: 0.875rem;
+}
+
+.next-song:disabled {
+  opacity: 0.6;
+}
+
+.stem {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.75rem;
+  align-items: center;
+  padding: 0.3rem 0;
+  border-bottom: 1px solid var(--color-line);
+}
+
+.stem.is-cut .min-w-0 {
+  opacity: 0.42;
+}
+
+.solo {
+  min-width: 2.75rem;
+  min-height: 2.25rem;
+  padding: 0 0.2rem;
+  border: 0;
+  background: transparent;
+  color: var(--color-muted);
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.solo[aria-pressed="true"] {
+  color: var(--color-acid);
+}
+
+.meter {
+  height: 0.35rem;
+  flex: 1;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--color-line);
+}
+
+.meter > span {
+  display: block;
+  width: 100%;
+  height: 100%;
+  transform: scaleX(0.035);
+  transform-origin: left center;
+  background: var(--color-acid);
+}
+
+.step-row {
+  display: grid;
+  grid-template-columns: repeat(16, minmax(0, 1fr));
+  gap: 0.2rem;
+  margin-top: 0.35rem;
+}
+
+.step {
+  height: 0.42rem;
+  border-radius: 999px;
+  background: var(--color-line);
+}
+
+.step.on {
+  background: var(--color-muted);
+}
+
+.step.now {
+  background: var(--color-acid);
+  transform: scaleY(1.35);
+}
+
+.btn-cut {
+  min-width: 4.5rem;
+  min-height: 2.75rem;
+  padding: 0 0.85rem;
+  border: 1px solid var(--color-line);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--color-fg);
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.btn-cut.is-cut {
+  border-color: var(--color-acid);
+  background: var(--color-acid);
+  color: var(--color-acid-ink);
+}
+
+.fader {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 2rem;
+  margin: 0;
+  background: transparent;
+}
+
+.fader::-webkit-slider-runnable-track {
+  height: 2px;
+  border-radius: 999px;
+  background: var(--color-line);
+}
+
+.fader::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 1rem;
+  height: 1rem;
+  margin-top: -7px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--color-fg);
+}
+
+.fader::-moz-range-track {
+  height: 2px;
+  border-radius: 999px;
+  background: var(--color-line);
+}
+
+.fader::-moz-range-thumb {
+  width: 1rem;
+  height: 1rem;
+  border: 0;
+  border-radius: 999px;
+  background: var(--color-fg);
+}
+
+.tap {
+  transition: scale 150ms ease-out;
+}
+
+.tap:active {
+  scale: 0.96;
+}
+
+.icon-swap {
+  grid-area: 1 / 1;
+  transition:
+    opacity 300ms cubic-bezier(0.2, 0, 0, 1),
+    scale 300ms cubic-bezier(0.2, 0, 0, 1),
+    filter 300ms cubic-bezier(0.2, 0, 0, 1);
+}
+
+.icon-swap[data-on="false"] {
+  opacity: 0;
+  scale: 0.25;
+  filter: blur(4px);
+}
+
+.icon-swap[data-on="true"] {
+  opacity: 1;
+  scale: 1;
+  filter: blur(0);
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.rise {
+  animation: rise 420ms cubic-bezier(0.2, 0, 0, 1) both;
+}
+
+.rise-2 { animation-delay: 70ms; }
+.rise-3 { animation-delay: 130ms; }
+.rise-4 { animation-delay: 180ms; }
+
+@media (prefers-reduced-motion: reduce) {
+  .rise,
+  .icon-swap,
+  .tap,
+  .step {
+    animation: none;
+    transition: none;
+    transform: none;
+    filter: none;
+  }
+
+  .icon-swap[data-on="false"] {
+    opacity: 0;
+  }
+}
