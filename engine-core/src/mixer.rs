@@ -4,7 +4,7 @@
 //! instantly at the fader without touching the voices, and so send levels stay
 //! independent of fader position.
 
-use crate::dsp::{soft_clip, Biquad, Compressor, Delay, Reverb, StereoBiquad};
+use crate::dsp::{soft_clip, Compressor, Delay, Reverb, StereoBiquad};
 use crate::track::{Stem, TrackKind};
 
 /// Stereo accumulators for one stem.
@@ -114,11 +114,15 @@ pub struct Master {
     hp: StereoBiquad,
     comp: Compressor,
     /// Pre-filter on the reverb send, so the room does not amplify infrasonic content.
-    verb_pre: Biquad,
+    /// Stereo: a lone `Biquad` run left-then-right shares one delay line between the
+    /// channels, which is the contamination `StereoBiquad` exists to prevent. This
+    /// filter and `echo_hp` were the two that the original conversion missed.
+    verb_pre: StereoBiquad,
     verb: Reverb,
     verb_wet: f32,
-    /// Highpass on the echo throw, keeping the delay out of the sub band.
-    echo_hp: Biquad,
+    /// Highpass on the echo throw, keeping the delay out of the sub band. Stereo for
+    /// the same reason as `verb_pre`.
+    echo_hp: StereoBiquad,
     dry: f32,
     wet: f32,
     /// Extra send into the delay when the echo throw is engaged. Zero when off, so
@@ -127,6 +131,8 @@ pub struct Master {
     echo_on: bool,
     /// Previous input to the saturator, for the 2x oversampled curve.
     shaper_prev: f32,
+    /// Per-stem sends accumulated for the current sample, drained by `process`.
+    send_acc: f32,
 }
 
 /// The reverb's wet level, and the highpasses either side of the send.
@@ -150,9 +156,9 @@ impl Master {
 
         let mut hp = StereoBiquad::new();
         hp.highpass(sample_rate, RUMBLE_HP_HZ, 0.7);
-        let mut verb_pre = Biquad::new();
+        let mut verb_pre = StereoBiquad::new();
         verb_pre.highpass(sample_rate, VERB_PRE_HZ, 0.7);
-        let mut echo_hp = Biquad::new();
+        let mut echo_hp = StereoBiquad::new();
         echo_hp.highpass(sample_rate, ECHO_HP_HZ, 0.7);
 
         Self {
@@ -182,6 +188,7 @@ impl Master {
             throw: 0.0,
             echo_on: false,
             shaper_prev: 0.0,
+            send_acc: 0.0,
         }
     }
 
@@ -199,17 +206,24 @@ impl Master {
         self.shaper_prev = 0.0;
     }
 
-    /// Write a stem's send into the delay line. Called once per sample per sending
-    /// stem; the wet signal is read back once per sample in [`Master::process`].
+    /// Accumulate a stem's send for this sample. The line itself is written exactly
+    /// once per sample, in [`Master::process`].
     ///
-    /// This is only the per-stem send. The echo throw is a separate input to the same
-    /// line and is written from the summed bus in [`Master::process`], where the sum
-    /// is available — scaling this by the throw instead would make the throw track
-    /// whichever stems happen to send, rather than the whole mix.
+    /// Accumulating rather than writing is load-bearing. [`Delay::write_input`]
+    /// advances the write pointer, so calling it per send ran the line at the number
+    /// of sends: six sending stems x two channels is twelve pointer advances per
+    /// audio sample, which put the dotted-eighth echo at 20 ms instead of 357 ms and
+    /// made the delay time change when the echo throw added a thirteenth write. It
+    /// also stepped the time and feedback glides twelve times per sample. The echo
+    /// was not an echo, it was a 20 ms metallic comb.
+    ///
+    /// Takes both channels so the two-call pattern that caused this cannot recur.
+    /// The line is mono, so the pair is averaged, matching the echo throw's own
+    /// `0.5 * (l + r)`.
     #[inline]
-    pub fn feed_send(&mut self, sample: f32, amount: f32) {
+    pub fn feed_send(&mut self, left: f32, right: f32, amount: f32) {
         if amount > 0.0 {
-            self.delay.write_input(sample * amount);
+            self.send_acc += 0.5 * (left + right) * amount;
         }
     }
 
@@ -303,20 +317,24 @@ impl Master {
         let q = if self.sweep_open > 0.97 { 0.45 } else { 0.85 };
         self.sweep.lowpass(self.sample_rate, freq, q);
 
-        // --- Echo throw, written before the tap so this sample's throw is heard. The
-        // line already holds the per-stem sends fed earlier in this block.
-        if self.throw > 0.0 {
-            let t_l = self.echo_hp.process(left) * self.throw;
-            let t_r = self.echo_hp.process(right) * self.throw;
-            self.delay.write_input(0.5 * (t_l + t_r));
-        }
+        // --- The delay line: exactly one write per sample, carrying the per-stem
+        // sends accumulated for this sample plus the echo throw off the summed bus.
+        // Read the tap before writing, so the line delays rather than feeding this
+        // sample straight back out.
+        let wet = self.delay.tap();
+        let throw = if self.throw > 0.0 {
+            let (t_l, t_r) = self.echo_hp.process(left, right);
+            0.5 * (t_l + t_r) * self.throw
+        } else {
+            0.0
+        };
+        self.delay.write_input(self.send_acc + throw);
+        self.send_acc = 0.0;
 
-        // --- Sends, all tapped off the summed buses, before any master processing.
-        let send_l = self.verb_pre.process(left);
-        let send_r = self.verb_pre.process(right);
+        // --- Reverb send, tapped off the summed buses before any master processing.
+        let (send_l, send_r) = self.verb_pre.process(left, right);
         let (verb_l, verb_r) = self.verb.process(send_l, send_r);
-        let wet_l = self.delay.tap();
-        let wet_r = self.delay.tap();
+        let (wet_l, wet_r) = (wet, wet);
 
         // --- Rumble filter, taking the sum and every wet return together.
         let (mut l, mut r) = self.hp.process(
@@ -376,6 +394,9 @@ impl Master {
 pub struct Ducker {
     /// Gain the ducked stems fall to at the moment of the hit.
     floor: f32,
+    /// Recovery length in beats, from the track flavour. Kept so the recovery time
+    /// can be *recomputed* at each tempo rather than derived from its own last value.
+    beats: f32,
     /// Seconds for the stems to recover back to unity.
     recovery: f32,
     stems: Vec<usize>,
@@ -385,22 +406,36 @@ pub struct Ducker {
 }
 
 impl Ducker {
+    /// Recovery time at a tempo. Matches the reference's
+    /// `min(0.48, (60 / bpm) * beats)` — the cap is the reference's, and it binds
+    /// below about 73 bpm for `deep`.
+    fn recovery_for(beats: f32, bpm: f32, sample_rate: f32) -> f32 {
+        let back = ((60.0 / bpm.max(40.0)) * beats).min(0.48);
+        back.max(1.0 / sample_rate.max(1.0))
+    }
+
     pub fn new(kind: TrackKind, bpm: f32, sample_rate: f32) -> Self {
         let (floor, beats) = Stem::duck_shape(kind);
-        let mut d = Self {
+        Self {
             floor,
-            recovery: (60.0 / bpm.max(40.0)) * beats,
+            beats,
+            recovery: Self::recovery_for(beats, bpm, sample_rate),
             stems: Stem::ducks_under(kind).iter().map(|s| s.index()).collect(),
             phase: 1.0,
             active: false,
-        };
-        d.recovery = d.recovery.max(1.0 / sample_rate.max(1.0));
-        d
+        }
     }
 
     /// Trigger a duck at the current tempo.
-    pub fn trigger(&mut self, bpm: f32) {
-        self.recovery = ((60.0 / bpm.max(40.0)) * self.recovery.max(0.001)).max(0.001);
+    ///
+    /// Recomputed from `beats`, not from the previous `recovery`. Multiplying the
+    /// stored value by `60 / bpm` again on every hit (as this did) decays it
+    /// geometrically: at 126 bpm the house pump went 0.262 s, 0.125, 0.059, ... and
+    /// was under a millisecond — inaudible — eight kicks in. The duck still reached
+    /// its floor, so no level test caught it; the four-on-the-floor breathing just
+    /// vanished a bar into every track.
+    pub fn trigger(&mut self, bpm: f32, sample_rate: f32) {
+        self.recovery = Self::recovery_for(self.beats, bpm, sample_rate);
         self.phase = 0.0;
         self.active = true;
     }
@@ -413,8 +448,11 @@ impl Ducker {
 
     /// Advance one sample and write the current duck gain into the affected channels.
     ///
-    /// Fast attack into the floor over the first 15% of the recovery, then a linear
-    /// return to unity — the fast/slow asymmetry that gives the house kick its pump.
+    /// The drop is instantaneous and the return to unity is linear across `recovery`,
+    /// matching the reference's `setValueAtTime(floor, t)` followed by
+    /// `linearRampToValueAtTime(1, t + back)`. An earlier version glided *into* the
+    /// floor over the first 15% of the recovery, which at 126 bpm is a 39 ms fade
+    /// where the kick wants a step, and squeezed the ramp back into the other 85%.
     pub fn apply(&mut self, channels: &mut [Channel; 8], sample_rate: f32) {
         for &i in &self.stems {
             if let Some(c) = channels.get_mut(i) {
@@ -429,12 +467,7 @@ impl Ducker {
             self.phase = 1.0;
             self.active = false;
         }
-        let g = if self.phase < 0.15 {
-            let attack = self.phase / 0.15;
-            1.0 + (self.floor - 1.0) * attack
-        } else {
-            self.floor + (1.0 - self.floor) * ((self.phase - 0.15) / 0.85)
-        };
+        let g = self.floor + (1.0 - self.floor) * self.phase;
         for &i in &self.stems {
             if let Some(c) = channels.get_mut(i) {
                 c.duck = g;
@@ -446,6 +479,118 @@ impl Ducker {
 #[cfg(test)]
 mod tests {
 use super::*;
+    /// The echo has to arrive where the tempo says it does.
+    ///
+    /// This is measured through the real call pattern — several stems feeding sends
+    /// before each `process` — because that pattern is what broke. A test that calls
+    /// `Delay::process` once per sample cannot see it: the fault was one pointer
+    /// advance per *send*, so the error scaled with how many stems were sending.
+    #[test]
+    fn the_echo_lands_on_the_dotted_eighth_whatever_is_sending() {
+        let sr = 48_000.0;
+        let bpm = 126.0;
+        // A dotted eighth at 126 bpm: (60 / 126) * 0.75.
+        let expected = (60.0 / bpm) * 0.75;
+
+        for sending_stems in [1usize, 6] {
+            let mut m = Master::new(sr);
+            m.set_delay_time(bpm, 1.0);
+            // Let the time glide settle off its 0.25 s default before measuring.
+            for _ in 0..(sr as usize) {
+                m.process(0.0, 0.0);
+            }
+
+            // A short burst through the sends, then silence, watching for the repeat.
+            let mut onset = None;
+            for i in 0..(sr as usize) {
+                let drive = if i < (sr * 0.01) as usize { 0.6 } else { 0.0 };
+                for _ in 0..sending_stems {
+                    m.feed_send(drive, drive, 0.3);
+                }
+                m.process(0.0, 0.0);
+                if onset.is_none() && i > (sr * 0.02) as usize && m.delay.tap().abs() > 0.02 {
+                    onset = Some(i as f32 / sr);
+                }
+            }
+
+            let onset = onset.expect("the delay never returned anything");
+            assert!(
+                (onset - expected).abs() < 0.02,
+                "{sending_stems} sending stem(s): echo arrived at {onset:.4} s, \
+                 expected {expected:.4} s"
+            );
+        }
+    }
+
+    /// Engaging the echo must not move the delay time.
+    #[test]
+    fn the_echo_throw_does_not_retune_the_delay() {
+        let sr = 48_000.0;
+        let onset = |echo: bool| -> f32 {
+            let mut m = Master::new(sr);
+            m.set_delay_time(126.0, 1.0);
+            m.set_echo(echo);
+            for _ in 0..(sr as usize) {
+                m.process(0.0, 0.0);
+            }
+            for i in 0..(sr as usize) {
+                let drive = if i < (sr * 0.01) as usize { 0.6 } else { 0.0 };
+                m.feed_send(drive, drive, 0.3);
+                m.process(drive, drive);
+                if i > (sr * 0.02) as usize && m.delay.tap().abs() > 0.02 {
+                    return i as f32 / sr;
+                }
+            }
+            f32::NAN
+        };
+        let (off, on) = (onset(false), onset(true));
+        assert!(
+            (off - on).abs() < 0.02,
+            "echo moved the delay time: {off:.4} s off vs {on:.4} s on"
+        );
+    }
+
+    /// The pump has to still be there after a few bars.
+    ///
+    /// `trigger` used to fold `60 / bpm` into the previous recovery value, so the
+    /// duck shortened geometrically and the breathing was gone within two bars while
+    /// still passing any test that only asked whether the gain reached its floor.
+    #[test]
+    fn the_duck_recovery_does_not_shrink_across_hits() {
+        let sr = 48_000.0;
+        let bpm = 126.0;
+        let mut d = Ducker::new(TrackKind::House, bpm, sr);
+        let mut chans: [Channel; 8] = std::array::from_fn(|_| Channel::default());
+
+        let mut lengths = Vec::new();
+        for _ in 0..16 {
+            d.trigger(bpm, sr);
+            // Count the samples until the duck has recovered to unity.
+            let mut n = 0usize;
+            loop {
+                d.apply(&mut chans, sr);
+                n += 1;
+                if !d.active || n > (sr as usize) {
+                    break;
+                }
+            }
+            lengths.push(n as f32 / sr);
+        }
+
+        let first = lengths[0];
+        let expected = ((60.0 / bpm) * 0.55f32).min(0.48);
+        assert!(
+            (first - expected).abs() < 0.005,
+            "first duck was {first:.4} s, expected {expected:.4} s"
+        );
+        for (i, l) in lengths.iter().enumerate() {
+            assert!(
+                (l - first).abs() < 0.005,
+                "duck {i} lasted {l:.4} s against the first at {first:.4} s: {lengths:?}"
+            );
+        }
+    }
+
     #[test]
     fn solo_isolates_the_soloed_stems() {
         let mut chans: [Channel; 8] = std::array::from_fn(|_| Channel::default());

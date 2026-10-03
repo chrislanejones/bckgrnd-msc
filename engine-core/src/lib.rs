@@ -555,10 +555,10 @@ impl Engine {
             let g = c.gain(any_solo);
             c.bus.left *= g;
             c.bus.right *= g;
-            // Sends tap post-fader so cutting a stem also cuts its echo.
+            // Sends tap post-fader so cutting a stem also cuts its echo. One call per
+            // stem: the line advances once per sample, inside `Master::process`.
             if c.send > 0.0 {
-                self.master.feed_send(c.bus.left, c.send);
-                self.master.feed_send(c.bus.right, c.send);
+                self.master.feed_send(c.bus.left, c.bus.right, c.send);
             }
             sum_l += c.bus.left;
             sum_r += c.bus.right;
@@ -579,7 +579,7 @@ impl Engine {
             if self.channels[Stem::Kick.index()]
                 .audible(Stem::ALL.iter().any(|s| self.channels[s.index()].solo))
             {
-                self.ducker.trigger(self.transport.bpm);
+                self.ducker.trigger(self.transport.bpm, self.sample_rate);
             }
         }
         if let Some(vel) = self.track.hit(Stem::Clap, at) {
@@ -620,8 +620,9 @@ impl Engine {
                 v,
             )));
             // House and deep bass get a second saw layer under the sine body, routed
-            // to the same stem so it rides the same fader.
-            if let Some(sub) = tone::bass_sub_layer(kind, &ev, freq) {
+            // to the same stem so it rides the same fader. `bass_sub_layer` checks the
+            // stem itself and returns None for the other tuned stems.
+            if let Some(sub) = tone::bass_sub_layer(stem, kind, &ev, freq) {
                 self.spawn(Voice::Tone(tone::ToneVoice::with_stem(
                     stem,
                     &ev,

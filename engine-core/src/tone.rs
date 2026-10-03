@@ -87,7 +87,7 @@ fn voicing_for(stem: Stem, kind: TrackKind, ev: &NoteEvent, freq: f32) -> Voicin
     match stem {
         Stem::Bass => bass_voicing(kind, ev, freq),
         Stem::Stab => stab_voicing(kind, ev),
-        Stem::Lead => lead_voicing(kind, freq),
+        Stem::Lead => lead_voicing(kind, ev, freq),
         Stem::Pad => pad_voicing(kind, ev),
         _ => arp_voicing(kind, ev),
     }
@@ -168,9 +168,25 @@ fn bass_voicing(kind: TrackKind, ev: &NoteEvent, freq: f32) -> Voicing {
     }
 }
 
-/// The house/deep bass has a second saw layer under the sine for harmonics. Modelled
-/// here as a second voice the caller layers, since the engine owns voice pooling.
-pub fn bass_sub_layer(kind: TrackKind, ev: &NoteEvent, freq: f32) -> Option<Voicing> {
+/// The house/deep **bass** has a second saw layer under the sine for harmonics.
+/// Modelled here as a second voice the caller layers, since the engine owns voice
+/// pooling.
+///
+/// Takes the stem rather than trusting the caller to check it. This is called from
+/// inside a `for stem in Stem::TUNED` loop, and without the guard it layered the saw
+/// onto the stab, lead, pad and arp as well — on the house pad that phantom voice is
+/// `vel * 0.28` against the pad's own `vel * 0.075`, arriving instantly against the
+/// pad's 0.4 s attack, which is a resonant transient roughly 300x the level of the
+/// note it was supposed to be reinforcing.
+pub fn bass_sub_layer(
+    stem: Stem,
+    kind: TrackKind,
+    ev: &NoteEvent,
+    freq: f32,
+) -> Option<Voicing> {
+    if stem != Stem::Bass {
+        return None;
+    }
     match kind {
         TrackKind::House | TrackKind::Deep => {
             let deep = kind == TrackKind::Deep;
@@ -272,12 +288,12 @@ fn stab_voicing(kind: TrackKind, ev: &NoteEvent) -> Voicing {
     }
 }
 
-fn lead_voicing(kind: TrackKind, freq: f32) -> Voicing {
+fn lead_voicing(kind: TrackKind, ev: &NoteEvent, freq: f32) -> Voicing {
     match kind {
         TrackKind::Lofi => Voicing {
             wave: Wave::Sine,
             detune: vec![0.0],
-            peak: 0.2,
+            peak: ev.vel * 0.2,
             attack: 0.04,
             decay: 0.2,
             sustain: 0.62,
@@ -294,7 +310,7 @@ fn lead_voicing(kind: TrackKind, freq: f32) -> Voicing {
         TrackKind::Deep => Voicing {
             wave: Wave::Triangle,
             detune: vec![0.0],
-            peak: 0.2,
+            peak: ev.vel * 0.2,
             attack: 0.06,
             decay: 0.22,
             sustain: 0.6,
@@ -311,7 +327,7 @@ fn lead_voicing(kind: TrackKind, freq: f32) -> Voicing {
         TrackKind::Acid => Voicing {
             wave: Wave::Saw,
             detune: vec![3.0],
-            peak: 0.12,
+            peak: ev.vel * 0.12,
             attack: 0.008,
             decay: 0.1,
             sustain: 0.16,
@@ -328,7 +344,7 @@ fn lead_voicing(kind: TrackKind, freq: f32) -> Voicing {
         TrackKind::House => Voicing {
             wave: Wave::Triangle,
             detune: vec![-5.0, 6.0],
-            peak: 0.16,
+            peak: ev.vel * 0.16,
             attack: 0.016,
             decay: 0.18,
             sustain: 0.38,
@@ -664,8 +680,57 @@ mod tests {
     #[test]
     fn house_bass_has_a_saw_layer_but_acid_does_not() {
         let ev = NoteEvent::new(vec![45.0], 1.0, 0.9, false);
-        assert!(bass_sub_layer(TrackKind::House, &ev, 110.0).is_some());
-        assert!(bass_sub_layer(TrackKind::Acid, &ev, 110.0).is_none());
+        assert!(bass_sub_layer(Stem::Bass, TrackKind::House, &ev, 110.0).is_some());
+        assert!(bass_sub_layer(Stem::Bass, TrackKind::Acid, &ev, 110.0).is_none());
+    }
+
+    /// The saw layer belongs to the bass and nothing else.
+    ///
+    /// It is called from inside a `for stem in Stem::TUNED` loop, and without the
+    /// guard every melodic stem got a `vel * 0.28` resonant saw bolted under it —
+    /// against the house pad's own `vel * 0.075` and 0.4 s attack, a transient some
+    /// 300x too loud arriving instantly. Nothing in the suite could see it, because
+    /// it is a voice that should not exist rather than a wrong value on one that should.
+    #[test]
+    fn only_the_bass_gets_the_saw_layer() {
+        let ev = NoteEvent::new(vec![57.0, 60.0, 64.0], 8.0, 0.5, false);
+        for kind in [TrackKind::House, TrackKind::Deep] {
+            assert!(
+                bass_sub_layer(Stem::Bass, kind, &ev, 110.0).is_some(),
+                "{kind:?}: the bass should still get its saw layer"
+            );
+            for stem in Stem::TUNED {
+                if stem == Stem::Bass {
+                    continue;
+                }
+                assert!(
+                    bass_sub_layer(stem, kind, &ev, 110.0).is_none(),
+                    "{kind:?}: {stem:?} must not get the bass's saw layer"
+                );
+            }
+        }
+    }
+
+    /// Velocity has to reach the lead, as it does every other tuned stem.
+    #[test]
+    fn the_lead_responds_to_velocity() {
+        for kind in [
+            TrackKind::Lofi,
+            TrackKind::Deep,
+            TrackKind::Acid,
+            TrackKind::House,
+        ] {
+            let soft = NoteEvent::new(vec![69.0], 2.0, 0.3, false);
+            let hard = NoteEvent::new(vec![69.0], 2.0, 0.9, false);
+            let a = voicing(Stem::Lead, kind, &soft, 440.0);
+            let b = voicing(Stem::Lead, kind, &hard, 440.0);
+            assert!(
+                b.peak > a.peak * 2.0,
+                "{kind:?}: lead peak ignored velocity ({} vs {})",
+                a.peak,
+                b.peak
+            );
+        }
     }
 
     #[test]

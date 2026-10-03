@@ -209,6 +209,21 @@ fn muting_a_stem_on_a_real_track_silences_it() {
         tail < 0.2,
         "the tail should be well under the direct sound, got {tail}"
     );
+
+    // Let the line finish ringing out before demanding silence.
+    //
+    // `basement` is 122 bpm, so the dotted eighth is ~0.37 s at feedback 0.3 into a
+    // 2.4 kHz damper; measured, the last of it drops under 1e-6 at 420 blocks
+    // (1.12 s). The budget below is roughly double that. It used to be 400 blocks,
+    // which passed only because the delay line was being advanced once per send
+    // rather than once per sample and so rang out about twelve times too quickly.
+    const SETTLE_BLOCKS: usize = 900;
+    for _ in 0..SETTLE_BLOCKS {
+        let mut left = [0.0f32; 128];
+        let mut right = [0.0f32; 128];
+        engine.process(&mut left, &mut right);
+    }
+
     // And it decays to nothing, rather than feeding back forever.
     for _ in 0..600 {
         let mut left = [0.0f32; 128];
