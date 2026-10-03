@@ -10,9 +10,10 @@
 /public/hot
 
 # Laravel
-# Covers .env.static and friends too; a narrower `/.env` left .env.static
-# tracked, which is how it reached the first commit.
-/.env*
+# Unanchored on purpose. The leading slash in `/.env*` only ever matched at the
+# repo root, so floor-desktop/.env stayed tracked and carried an APP_KEY into
+# the first commit.
+.env*
 /storage/*.key
 /storage/presets/*.json
 

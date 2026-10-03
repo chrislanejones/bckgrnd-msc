@@ -171,6 +171,33 @@ export function App() {
     };
   }, [library, loadArrangement]);
 
+  /**
+   * Keep the idle deck loaded with whatever is in Next, and keep its waveform drawn.
+   *
+   * Both decks show a track from the first paint: A is the one playing, B is the one
+   * an auto mix would bring in. Before this, `cued` was only set by an explicit cue,
+   * so deck B sat empty on startup even though Next already named a track and the Auto
+   * mix button would have used it.
+   */
+  useEffect(() => {
+    let cancelled = false;
+    if (!nextId || nextId === track?.id) return;
+    const deck = idleDeck();
+    loadArrangement(nextId)
+      .then((arranged) => {
+        if (!arranged || cancelled) return;
+        // The idle deck is preloaded and silent; it only becomes audible when a mix
+        // crossfades to it, which is what makes the handover seamless.
+        engine.loadTrack(deck, arranged);
+        setCued(arranged);
+      })
+      .catch((e: Error) => !cancelled && setError(e.message));
+    return () => {
+      cancelled = true;
+    };
+    // `liveDeck` decides which deck is idle, so a handover has to re-run this.
+  }, [nextId, track?.id, liveDeck, loadArrangement]);
+
   // Telemetry → meters and the playhead.
   useEffect(
     () =>
@@ -201,27 +228,39 @@ export function App() {
   const lofiTracks = useMemo(() => tracks.filter((t) => t.kind === 'lofi'), [tracks]);
 
   async function togglePlay() {
+    // Always act on the deck that is actually audible. After an auto mix that is deck
+    // B, and transport sent to deck A would stop and start a silent engine.
     if (playing) {
-      engine.stop('a');
+      engine.stop(liveDeck);
       setPlaying(false);
       return;
     }
     try {
       engine.clearError();
-      await engine.play('a');
+      await engine.play(liveDeck);
       setPlaying(true);
     } catch (e) {
       setError((e as Error).message);
     }
   }
 
+  /**
+   * Load a track onto the live deck and play it.
+   *
+   * Picking a track is a deliberate act, so it starts the transport. This used to stop
+   * the deck to load it and then leave it stopped, so the first track you clicked never
+   * played — you had to reach for the play button afterwards, and switching tracks
+   * mid-set silently killed the music. Nothing starts on page load; it takes this
+   * click, or the play button.
+   */
   function selectTrack(summary: TrackSummary) {
     void (async () => {
       try {
         const arranged = await loadArrangement(summary.id);
         if (!arranged) return;
-        engine.stop('a');
-        engine.loadTrack('a', arranged);
+        const deck = liveDeck;
+        engine.stop(deck);
+        engine.loadTrack(deck, arranged);
         engine.setMuted(0, false);
         setTrack(arranged);
         setBpm(arranged.bpm);
@@ -240,6 +279,10 @@ export function App() {
         setMask('full');
         setLoopBars(0);
         engine.setLoop(0);
+
+        engine.clearError();
+        await engine.play(deck);
+        setPlaying(true);
       } catch (e) {
         setError((e as Error).message);
       }
@@ -251,20 +294,13 @@ export function App() {
     return liveDeck === 'a' ? 'b' : 'a';
   }
 
+  /**
+   * Choosing what plays next. The deck itself is loaded by the effect below, which
+   * follows `nextId` wherever it is set from — this dropdown, or the handover at the
+   * end of a mix.
+   */
   function cueNext(id: string) {
     setNextId(id);
-    void (async () => {
-      try {
-        const arranged = await loadArrangement(id);
-        if (!arranged) return;
-        // The idle deck is preloaded and silent; it only becomes audible when a
-        // mix crossfades to it, which is what makes the handover seamless.
-        engine.loadTrack(idleDeck(), arranged);
-        setCued(arranged);
-      } catch (e) {
-        setError((e as Error).message);
-      }
-    })();
   }
 
   function autoMix() {
@@ -301,23 +337,12 @@ export function App() {
           setMuted(clear);
           setSolo(clear);
           setMask('full');
-          setNextId(tracks.find((t) => t.id !== arranged.id)?.id ?? arranged.id);
           // The deck that just went live holds `arranged` now, so it must stop being
           // described as "cued" or the panel will show the same track on both decks.
+          // Pointing Next at the following track re-cues the deck that just went idle,
+          // via the effect that follows `nextId`.
           setCued(null);
-
-          // Re-cue the deck that just went idle with whatever is next.
-          const following = tracks.find((t) => t.id !== arranged.id);
-          if (following) {
-            void loadArrangement(following.id).then((next) => {
-              if (!next) return;
-              // Spelled out rather than using `idleDeck()`: that reads `liveDeck` from
-              // this render's closure, which is still the *outgoing* deck by now, so it
-              // would hand the cue to the deck that just went live.
-              engine.loadTrack(incoming === 'a' ? 'b' : 'a', next);
-              setCued(next);
-            });
-          }
+          setNextId(tracks.find((t) => t.id !== arranged.id)?.id ?? arranged.id);
         });
       } catch (e) {
         setError((e as Error).message);
@@ -1026,7 +1051,25 @@ function waveBands(track: TrackArrangement): { low: string; mid: string; high: s
       return (values[index] ?? 0) * 0.5 + prev * 0.25 + next * 0.25;
     });
 
-  const sine = (envelope: number[], cycles: number, scale: number) => {
+  /**
+   * One band as a mirrored envelope.
+   *
+   * `ripple` puts a shallow oscillation on the edge at a musical rate, so the shape
+   * reads as a waveform rather than a smooth tube. It is deliberately shallow: an
+   * earlier version ran it at `0.32 + 0.68 * lobe`, which swung the edge nearly to
+   * zero between lobes and turned every band into a row of bubbles, with the rhythm of
+   * the sine rather than the rhythm of the track. At `0.86 + 0.14` the envelope is
+   * what you see and the ripple is only texture on it.
+   *
+   * `floor` is the thickness at silence. Small, so the sparse intro and the break
+   * actually read as quiet — the old constant 1.35 drew a solid band through both.
+   */
+  const band = (
+    envelope: number[],
+    ripple: number,
+    scale: number,
+    floor: number,
+  ) => {
     const count = 720;
     const top: string[] = [];
     const bottom: string[] = [];
@@ -1037,9 +1080,12 @@ function waveBands(track: TrackArrangement): { low: string; mid: string; high: s
       const i1 = Math.min(STEPS - 1, i0 + 1);
       const t = pos - i0;
       const ease = t * t * (3 - 2 * t);
-      const env = Math.min(1, (envelope[i0] ?? 0) * (1 - ease) + (envelope[i1] ?? 0) * ease);
-      const lobe = Math.abs(Math.sin(pos * cycles));
-      const amp = (1.35 + env * scale) * (0.32 + 0.68 * lobe);
+      const env = Math.min(
+        1.15,
+        (envelope[i0] ?? 0) * (1 - ease) + (envelope[i1] ?? 0) * ease,
+      );
+      const lobe = Math.abs(Math.sin(pos * ripple));
+      const amp = (floor + env * scale) * (0.86 + 0.14 * lobe);
       top.push(`${x.toFixed(2)},${(24 - amp).toFixed(2)}`);
       bottom.push(`${x.toFixed(2)},${(24 + amp).toFixed(2)}`);
     }
@@ -1047,9 +1093,16 @@ function waveBands(track: TrackArrangement): { low: string; mid: string; high: s
     return `M${top.join('L')}L${bottom.join('L')}Z`;
   };
 
+  // Nested, widest at the back: the low band is the body, the mid sits inside it and
+  // the high is a bright core. Each ripples twice as fast as the one under it, which
+  // is roughly how the content divides — kick on the beat, hats on the sixteenth.
+  // The scales are close together on purpose. Spread wider, the low band swallows the
+  // other two and the whole thing reads as one blue shape with a pale line through it;
+  // the point of splitting the bands is to see the hats and the melody against the
+  // kick, so each has to clear the one behind it.
   return {
-    low: sine(blur(low), Math.PI / 4, 18),
-    mid: sine(blur(mid), Math.PI / 2, 11),
-    high: sine(blur(high), Math.PI, 6.5),
+    low: band(blur(low), Math.PI / 2, 17, 0.9),
+    mid: band(blur(mid), Math.PI, 13.5, 0.65),
+    high: band(blur(high), Math.PI * 2, 9.5, 0.45),
   };
 }

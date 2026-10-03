@@ -4,7 +4,7 @@
 //! with its own envelope, then an amplitude envelope. Voicing per track flavour is
 //! selected by [`Voicing`] so the house/deep/acid/lo-fi characters stay distinct.
 
-use crate::dsp::{exp_between, midi_hz, Adsr, Biquad, Osc, Wave};
+use crate::dsp::{exp_between, midi_hz, Adsr, Osc, StereoBiquad, Wave};
 use crate::track::{NoteEvent, TrackKind};
 
 /// Per-stem voicing parameters.
@@ -476,7 +476,7 @@ pub struct ToneVoice {
     /// Which stem bus this voice feeds.
     stem: Stem,
     partials: Vec<Partial>,
-    filter: Biquad,
+    filter: StereoBiquad,
     env: Adsr,
     voicing: Voicing,
     /// Filter envelope position, in samples, and its stage durations.
@@ -554,7 +554,7 @@ impl ToneVoice {
                 }
             })
             .collect();
-        let mut filter = Biquad::new();
+        let mut filter = StereoBiquad::new();
         filter.lowpass(sample_rate, v.f_start.max(30.0), v.q);
         Self {
             stem,
@@ -582,25 +582,45 @@ impl ToneVoice {
     }
 
     /// Render one sample into `(left, right)`; `false` once the tail has finished.
+    ///
+    /// The signal path is `oscillators -> panners -> one filter -> envelope`, which is
+    /// the reference's graph: every oscillator (through its panner, when the voice is
+    /// wide) connects into a *single* `BiquadFilterNode`, so the filter sees the summed
+    /// stereo signal once per sample and Web Audio gives each of its channels its own
+    /// delay line.
+    ///
+    /// Running one mono biquad once per partial instead — as this did — breaks it twice
+    /// over. The filter's state advances once per partial rather than once per sample,
+    /// so its effective cutoff climbs with the size of the chord; and because every
+    /// partial is pushed through the same delay line in sequence, each one comes out
+    /// smeared with the others' history. Near-identical partials panned apart produce
+    /// no width at all, because the stereo difference is what the panning was for: the
+    /// pad and the stab, the two widest voicings in the engine, measured narrower than
+    /// the hats.
     pub fn process(&mut self) -> (f32, f32, bool) {
         if self.done {
             return (0.0, 0.0, true);
         }
         let env = self.env.process();
         self.advance_filter();
+
         let mut left = 0.0f32;
         let mut right = 0.0f32;
         for p in &mut self.partials {
-            let s = self.filter.process(p.osc.next()) * env;
+            let s = p.osc.next();
             // Equal-power pan, so widening a voice doesn't raise its peak level.
             let angle = (p.pan.clamp(-1.0, 1.0) + 1.0) * 0.25 * core::f32::consts::PI;
             left += s * angle.cos();
             right += s * angle.sin();
         }
+
+        // One filter pass over the summed pair, then the amplitude envelope — the
+        // reference wires `filter.connect(gain)`, not the other way round.
+        let (l, r) = self.filter.process(left, right);
         if self.env.is_done() {
             self.done = true;
         }
-        (left, right, self.done)
+        (l * env, r * env, self.done)
     }
 
     /// Drive the filter envelope: start → peak over `f_attack`, then peak → end
