@@ -1,4 +1,4 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { FloorDeck } from "@/components/floor-deck";
+import { BckgrndDeck } from "@/components/bckgrnd-deck";
 
-export const Route = createFileRoute("/")({ component: FloorDeck });
+export const Route = createFileRoute("/")({ component: BckgrndDeck });

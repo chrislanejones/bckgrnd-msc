@@ -1,6 +1,6 @@
-# FLOOR desktop — handoff
+# bckgrnd-msc desktop — handoff
 
-A port of the FLOOR stem-machine music app from Web Audio/TypeScript to **Rust (WASM) + Laravel + NativePHP**, plus a PHP-free static web build.
+A port of the bckgrnd-msc stem-machine music app from Web Audio/TypeScript to **Rust (WASM) + Laravel + NativePHP**, plus a PHP-free static web build.
 
 The reference implementation is the sibling directory `../original/` — a TanStack Start app still running the Web Audio engine, deployed at `bckgrndmsc.grok.me`. Treat it as the authority on sound and on musical content. It is not modified by anything here.
 
@@ -62,7 +62,7 @@ composer test
 
 `verify:audio` and `verify:static` tap the worklet with an AnalyserNode into a **zero-gain sink**. They prove correct samples leave the worklet; they never prove audio reaches a speaker. They also cannot see the audio thread's `console` — a throw inside `process()` is swallowed by the browser. Hence the explicit error channel (`EngineHost.onError` → UI) and `runSafely` in the worklet.
 
-`window.__FLOOR_DIAG__()` prints an audio diagnostic table: context state, sample rate, worklet availability, meters, last error.
+`window.__BCKGRND_DIAG__()` prints an audio diagnostic table: context state, sample rate, worklet availability, meters, last error.
 
 ---
 

@@ -1,6 +1,6 @@
-//! # floor-engine
+//! # bckgrnd-msc-engine
 //!
-//! The audio engine for the FLOOR stem machine, ported from a Web Audio node graph
+//! The audio engine for the bckgrnd-msc stem machine, ported from a Web Audio node graph
 //! to sample-accurate Rust that compiles to WebAssembly.
 //!
 //! ## What changed, and why it matters
@@ -47,7 +47,7 @@
 //! From Rust, drive it directly:
 //!
 //! ```
-//! use floor_engine::{Engine, Track};
+//! use bckgrnd_msc_engine::{Engine, Track};
 //!
 //! let mut engine = Engine::new(48_000.0);
 //! engine.load_track(Track::silence("demo"));

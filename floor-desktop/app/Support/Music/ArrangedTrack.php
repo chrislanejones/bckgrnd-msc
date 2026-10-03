@@ -7,7 +7,7 @@ namespace App\Support\Music;
 /**
  * The resolved 16-bar arrangement the engine plays.
  *
- * Serialises to exactly the JSON shape `floor_engine::Track` deserialises, so the
+ * Serialises to exactly the JSON shape `bckgrnd_msc_engine::Track` deserialises, so the
  * WASM side never has to know about song form or the library's note names.
  */
 final class ArrangedTrack implements \JsonSerializable

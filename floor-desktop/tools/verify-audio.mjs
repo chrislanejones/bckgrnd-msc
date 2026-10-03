@@ -92,7 +92,7 @@ try {
       const ctx = new AudioContext({ latencyHint: 'interactive' });
       await ctx.audioWorklet.addModule('/build/engine-worklet.js');
 
-      const node = new AudioWorkletNode(ctx, 'floor-engine', {
+      const node = new AudioWorkletNode(ctx, 'bckgrnd-msc-engine', {
         numberOfInputs: 0,
         numberOfOutputs: 1,
         outputChannelCount: [2],
@@ -132,7 +132,7 @@ try {
       node.connect(sink);
       sink.connect(ctx.destination);
 
-      const wasm = await (await fetch(`${base}/wasm/floor_engine_bg.wasm`)).arrayBuffer();
+      const wasm = await (await fetch(`${base}/wasm/bckgrnd_msc_engine_bg.wasm`)).arrayBuffer();
       const { track } = await (await fetch(`${base}/api/tracks/${trackId}`)).json();
 
       node.port.postMessage({ type: 'init', wasm, sampleRate: ctx.sampleRate }, [wasm]);

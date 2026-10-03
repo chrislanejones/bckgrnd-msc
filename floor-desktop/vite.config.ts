@@ -19,7 +19,7 @@ export default defineConfig({
   resolve: {
     alias: {
       // The wasm-bindgen glue, also bundled into the worklet.
-      '@wasm': resolve(import.meta.dirname, 'public/wasm/floor_engine.js'),
+      '@wasm': resolve(import.meta.dirname, 'public/wasm/bckgrnd_msc_engine.js'),
     },
   },
   build: {

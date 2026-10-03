@@ -27,3 +27,9 @@
 .idea
 .vscode
 *.swp
+# Laravel runtime caches and logs, all regenerated.
+/storage/framework/cache
+/storage/framework/sessions
+/storage/framework/testing
+/storage/framework/views
+/storage/logs

@@ -49,7 +49,7 @@ console.log('[static] wrote public/index.html');
 //    result is a shell that renders nothing.
 const missing = [];
 for (const asset of [
-  'public/wasm/floor_engine_bg.wasm',
+  'public/wasm/bckgrnd_msc_engine_bg.wasm',
   'public/build/assets/app.js',
   'public/build/engine-worklet.js',
 ]) {

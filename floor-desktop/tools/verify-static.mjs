@@ -72,7 +72,7 @@ try {
     stems: document.querySelectorAll('article.stem').length,
     tracks: document.querySelectorAll('.tap.rounded-xl').length,
   }));
-  check('static shell renders the app', ui.h1 === 'FLOOR' && ui.stems === 8,
+  check('static shell renders the app', ui.h1 === 'bckgrnd-msc' && ui.stems === 8,
     `h1 ${ui.h1}, ${ui.stems} stems, ${ui.tracks} tracks`);
   check('library loaded from JSON', ui.tracks === 12, `${ui.tracks} track buttons`);
 
@@ -85,7 +85,7 @@ try {
   const audio = await page.evaluate(async () => {
     const ctx = new AudioContext();
     await ctx.audioWorklet.addModule('/build/engine-worklet.js');
-    const node = new AudioWorkletNode(ctx, 'floor-engine', {
+    const node = new AudioWorkletNode(ctx, 'bckgrnd-msc-engine', {
       numberOfInputs: 0,
       numberOfOutputs: 1,
       outputChannelCount: [2],
@@ -112,7 +112,7 @@ try {
     node.connect(sink);
     sink.connect(ctx.destination);
 
-    const wasm = await (await fetch('/wasm/floor_engine_bg.wasm')).arrayBuffer();
+    const wasm = await (await fetch('/wasm/bckgrnd_msc_engine_bg.wasm')).arrayBuffer();
     const { track } = await (await fetch('/library/warehouse.json')).json();
     node.port.postMessage({ type: 'init', wasm, sampleRate: ctx.sampleRate }, [wasm]);
     node.port.postMessage({ type: 'track', deck: 'a', json: JSON.stringify(track) });

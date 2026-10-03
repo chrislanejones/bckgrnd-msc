@@ -389,7 +389,7 @@ export function App() {
     return (
       <main className="grid min-h-dvh place-items-center bg-bg p-6 text-fg">
         <div className="max-w-md text-center">
-          <h1 className="font-display text-2xl font-extrabold">FLOOR could not start</h1>
+          <h1 className="font-display text-2xl font-extrabold">bckgrnd-msc could not start</h1>
           <p className="mt-2 text-sm text-muted">{error}</p>
           <p className="mt-4 text-xs text-muted">
             The audio engine is a WebAssembly module; if this is a packaged build, check
@@ -415,7 +415,7 @@ export function App() {
           <div>
             <p className="text-xs font-semibold tracking-widest text-acid">STEM MACHINE</p>
             <h1 className="mt-1 font-display text-4xl font-extrabold leading-none sm:text-5xl">
-              FLOOR
+              bckgrnd-msc
             </h1>
             <p className="mt-2 max-w-md text-sm leading-snug text-pretty text-muted">
               Cut any stem. The rest of the instrumental keeps playing.

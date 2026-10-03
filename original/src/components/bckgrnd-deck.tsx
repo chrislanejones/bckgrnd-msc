@@ -12,7 +12,7 @@ import {
   Zap,
   type LucideIcon,
 } from "lucide-react";
-import { FloorEngine } from "@/lib/engine";
+import { BckgrndEngine } from "@/lib/engine";
 import {
   BARS,
   STEPS,
@@ -84,7 +84,7 @@ function applyStereo(matrix: StereoMatrix, mode: StereoMode, time: number) {
 }
 
 type Deck = {
-  engine: FloorEngine;
+  engine: BckgrndEngine;
   gain: GainNode;
 };
 
@@ -107,8 +107,8 @@ type MixJob = {
   kickInDone: boolean;
   kickOutAt: number;
   kickOutDone: boolean;
-  outgoing: FloorEngine;
-  incoming: FloorEngine;
+  outgoing: BckgrndEngine;
+  incoming: BckgrndEngine;
   outGain: GainNode;
   inGain: GainNode;
   incomingSide: Side;
@@ -302,8 +302,8 @@ function paintMutes(mask: Mask): Record<StemId, boolean> {
   return muted;
 }
 
-export function FloorDeck() {
-  const engineRef = useRef<FloorEngine | null>(null);
+export function BckgrndDeck() {
+  const engineRef = useRef<BckgrndEngine | null>(null);
   const meters = useRef<Array<HTMLSpanElement | null>>([]);
   const heads = useRef<{ a: HTMLSpanElement | null; b: HTMLSpanElement | null }>({ a: null, b: null });
   const shades = useRef<{ a: HTMLSpanElement | null; b: HTMLSpanElement | null }>({ a: null, b: null });
@@ -378,8 +378,8 @@ export function FloorDeck() {
     gainB.gain.value = 0;
     gainA.connect(bus);
     gainB.connect(bus);
-    const engineA = new FloorEngine(TRACKS[0], gainA);
-    const engineB = new FloorEngine(nextTrack(TRACKS[0].id), gainB);
+    const engineA = new BckgrndEngine(TRACKS[0], gainA);
+    const engineB = new BckgrndEngine(nextTrack(TRACKS[0].id), gainB);
     const rig: Rig = {
       ctx,
       busScope,
@@ -780,7 +780,7 @@ export function FloorDeck() {
         <header className="rise flex items-start justify-between gap-4">
           <div>
             <p className="text-xs font-semibold tracking-widest text-acid">STEM MACHINE</p>
-            <h1 className="mt-1 font-display text-4xl font-extrabold leading-none sm:text-5xl">FLOOR</h1>
+            <h1 className="mt-1 font-display text-4xl font-extrabold leading-none sm:text-5xl">bckgrnd-msc</h1>
             <p className="mt-2 max-w-md text-sm leading-snug text-pretty text-muted">
               Cut any stem. The rest of the instrumental keeps playing.
             </p>

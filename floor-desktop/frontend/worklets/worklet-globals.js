@@ -9,7 +9,7 @@
  *
  * The symptom is baffling if you go looking for it: the worklet module appears to
  * load fine, `addModule` resolves, and then constructing the node fails with
- * "the node name 'floor-engine' is not defined" — because the throw happened
+ * "the node name 'bckgrnd-msc-engine' is not defined" — because the throw happened
  * before `registerProcessor` ran, and the worklet console is not visible from the
  * page. Verified against Chrome: `TextDecoder` and `TextEncoder` both throw in a
  * worklet; `FinalizationRegistry`, `Symbol.dispose` and typed arrays are present.

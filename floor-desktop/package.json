@@ -1,8 +1,8 @@
 {
-  "name": "floor-desktop-frontend",
+  "name": "bckgrnd-msc",
   "private": true,
   "type": "module",
-  "description": "FLOOR \u2014 stem machine UI. Vite + React, rendering into the NativePHP webview.",
+  "description": "bckgrnd-msc \u2014 stem machine UI. Vite + React, rendering into the NativePHP webview.",
   "packageManager": "pnpm@10.26.0",
   "engines": {
     "node": ">=20"

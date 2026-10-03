@@ -1,7 +1,7 @@
 {
-    "name": "floor/desktop",
+    "name": "bckgrnd-msc/desktop",
     "type": "project",
-    "description": "FLOOR \u2014 a stem machine. Laravel + NativePHP shell with a Rust/WASM audio engine.",
+    "description": "bckgrnd-msc \u2014 a stem machine. Laravel + NativePHP shell with a Rust/WASM audio engine.",
     "keywords": [
         "laravel",
         "nativephp",

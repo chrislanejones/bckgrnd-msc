@@ -415,4 +415,4 @@ function ctxSr(): number {
   return typeof sampleRate === 'number' ? sampleRate : 48000;
 }
 
-registerProcessor('floor-engine', EngineProcessor);
+registerProcessor('bckgrnd-msc-engine', EngineProcessor);

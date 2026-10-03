@@ -1,5 +1,5 @@
 #!/bin/sh
-# Start FLOOR for local development.
+# Start bckgrnd-msc for local development.
 #
 # Brings up two servers, because the app has two shapes and you may want either:
 #
@@ -47,7 +47,7 @@ if [ ! -d node_modules ]; then
   pnpm install
 fi
 
-if [ ! -f public/wasm/floor_engine_bg.wasm ]; then
+if [ ! -f public/wasm/bckgrnd_msc_engine_bg.wasm ]; then
   echo "==> building the Rust engine (wasm-pack)"
   pnpm run build:engine
 fi

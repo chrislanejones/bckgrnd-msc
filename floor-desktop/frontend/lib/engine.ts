@@ -36,7 +36,7 @@ type WorkletMessage =
 type Listener = (telemetry: Telemetry) => void;
 type ErrorListener = (message: string) => void;
 
-const WASM_URL = '/wasm/floor_engine_bg.wasm';
+const WASM_URL = '/wasm/bckgrnd_msc_engine_bg.wasm';
 const WORKLET_URL = '/build/engine-worklet.js';
 
 export class EngineHost {
@@ -107,7 +107,7 @@ export class EngineHost {
     }
     const wasm = await response.arrayBuffer();
 
-    const node = new AudioWorkletNode(ctx, 'floor-engine', {
+    const node = new AudioWorkletNode(ctx, 'bckgrnd-msc-engine', {
       numberOfInputs: 0,
       numberOfOutputs: 1,
       outputChannelCount: [2],
@@ -287,7 +287,7 @@ export class EngineHost {
   /**
    * Collect the diagnostic report.
    *
-   * Exposed as `window.__FLOOR_DIAG__` by `main.tsx` so it can be run from DevTools
+   * Exposed as `window.__BCKGRND_DIAG__` by `main.tsx` so it can be run from DevTools
    * without a rebuild.
    */
   async diagnose(): Promise<Record<string, unknown>> {

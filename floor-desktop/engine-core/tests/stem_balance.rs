@@ -5,7 +5,7 @@
 //! stem too quiet to hear, too loud to sit with the others, or rolled off at the wrong
 //! end of the spectrum.
 
-use floor_engine::{Engine, NoteEvent, Stem, Track};
+use bckgrnd_msc_engine::{Engine, NoteEvent, Stem, Track};
 
 const STEMS: [(Stem, &str); 8] = [
     (Stem::Kick, "kick"),

@@ -58,7 +58,7 @@ function impulse(ctx: AudioContext): AudioBuffer {
   return buf;
 }
 
-export class FloorEngine {
+export class BckgrndEngine {
   readonly ctx: AudioContext;
   private readonly master: GainNode;
   private readonly delay: DelayNode;

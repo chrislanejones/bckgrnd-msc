@@ -49,7 +49,7 @@ mkdirSync(dirname(outfile), { recursive: true });
 // Mirror the `@wasm` alias from vite.config.ts, so both bundles resolve the
 // wasm-bindgen glue to the same place.
 options.alias = {
-  '@wasm': resolve(root, 'public/wasm/floor_engine.js'),
+  '@wasm': resolve(root, 'public/wasm/bckgrnd_msc_engine.js'),
 };
 
 /**
@@ -63,10 +63,10 @@ options.alias = {
  * turns a silent runtime failure into a build failure.
  */
 function assertEngineApiComplete() {
-  const dtsPath = resolve(root, 'public/wasm/floor_engine.d.ts');
+  const dtsPath = resolve(root, 'public/wasm/bckgrnd_msc_engine.d.ts');
   if (!existsSync(dtsPath)) {
     console.warn(
-      '[worklet] skipping API check: public/wasm/floor_engine.d.ts not found. ' +
+      '[worklet] skipping API check: public/wasm/bckgrnd_msc_engine.d.ts not found. ' +
         'Run `wasm-pack build --target web --release --out-dir ../public/wasm` first.',
     );
     return;

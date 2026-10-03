@@ -22,7 +22,7 @@ class PresetController
     /** Where preset files live. */
     private function disk(): string
     {
-        return config('floor.preset_disk');
+        return config('bckgrnd.preset_disk');
     }
 
     /**

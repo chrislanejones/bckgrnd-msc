@@ -9,7 +9,7 @@
 //!
 //! These tests pin the rates that actually turn up in the field.
 
-use floor_engine::{Engine, NoteEvent, Stem, Track, STEPS};
+use bckgrnd_msc_engine::{Engine, NoteEvent, Stem, Track, STEPS};
 
 fn loaded_track() -> Track {
     let mut t = Track::silence("rate");

@@ -24,7 +24,7 @@ return [
     |
     */
 
-    'preset_disk' => env('FLOOR_PRESET_DISK', 'local'),
+    'preset_disk' => env('BCKGRND_PRESET_DISK', 'local'),
 
     /*
     |--------------------------------------------------------------------------
@@ -37,9 +37,9 @@ return [
     */
 
     'engine' => [
-        'path' => env('FLOOR_ENGINE_PATH', '/wasm/floor_engine.js'),
-        'worklet' => env('FLOOR_WORKLET_PATH', '/wasm/engine-worklet.js'),
-        'sample_rate' => (int) env('FLOOR_SAMPLE_RATE', 0), // 0 = whatever the device gives us
+        'path' => env('BCKGRND_ENGINE_PATH', '/wasm/bckgrnd_msc_engine.js'),
+        'worklet' => env('BCKGRND_WORKLET_PATH', '/wasm/engine-worklet.js'),
+        'sample_rate' => (int) env('BCKGRND_SAMPLE_RATE', 0), // 0 = whatever the device gives us
     ],
 
     /*

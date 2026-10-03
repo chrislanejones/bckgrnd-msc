@@ -27,8 +27,8 @@ Route::delete('/presets/{id}', [\App\Http\Controllers\PresetController::class, '
 Route::get('/health', function (): \Illuminate\Http\JsonResponse {
     return response()->json([
         'ok' => true,
-        'engine' => 'floor-engine (wasm)',
+        'engine' => 'bckgrnd-msc-engine (wasm)',
         'tracks' => count(\App\Support\Music\Library::all()),
-        'presetDisk' => config('floor.preset_disk'),
+        'presetDisk' => config('bckgrnd.preset_disk'),
     ]);
 });

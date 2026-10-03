@@ -25,7 +25,7 @@
 
     "baseUrl": ".",
     "paths": {
-      "@wasm": ["./public/wasm/floor_engine.d.ts"]
+      "@wasm": ["./public/wasm/bckgrnd_msc_engine.d.ts"]
     }
   },
   "include": ["frontend/**/*.ts", "frontend/**/*.tsx", "frontend/**/*.d.ts"],

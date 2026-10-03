@@ -1,8 +1,8 @@
 [package]
-name = "floor-engine"
+name = "bckgrnd-msc-engine"
 version = "0.1.0"
 edition = "2021"
-description = "Real-time DSP engine for the FLOOR stem machine: sample-accurate sequencer, subtractive voices, per-stem ducking, tempo-synced delay."
+description = "Real-time DSP engine for the bckgrnd-msc stem machine: sample-accurate sequencer, subtractive voices, per-stem ducking, tempo-synced delay."
 license = "MIT"
 
 [lib]
