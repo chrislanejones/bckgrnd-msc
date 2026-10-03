@@ -110,59 +110,134 @@ impl Voice {
         }
     }
 
+    /// Which stem's channel this voice sums into, or `None` for one that bypasses the
+    /// channels entirely.
+    ///
+    /// The backspin take is full-mix audio that has already been through the stem
+    /// faders once, so it goes straight into the master sum, as the original's
+    /// `g.connect(this.master)` does. It used to be routed through the arp's channel
+    /// instead — the comment said "bypasses the stem faders" while the code handed it
+    /// to a fader, a mute, a solo and the kick's duck. On a track whose arp sits at
+    /// 0.14 the gesture was barely audible, and with the arp cut it was silent.
     #[inline]
-    fn stem(&self) -> usize {
+    fn stem(&self) -> Option<usize> {
         match self {
-            Voice::Kick(_) => Stem::Kick.index(),
-            Voice::Clap(_) => Stem::Clap.index(),
-            Voice::Hat(_) => Stem::Hats.index(),
-            Voice::Tone(v) => v.stem_index(),
-            // The reverse take is full-mix audio, so it bypasses the stem faders and
-            // is routed to the master like the original's direct-to-master spin.
-            Voice::Reverse(_) => Stem::Arp.index(),
+            Voice::Kick(_) => Some(Stem::Kick.index()),
+            Voice::Clap(_) => Some(Stem::Clap.index()),
+            Voice::Hat(_) => Some(Stem::Hats.index()),
+            Voice::Tone(v) => Some(v.stem_index()),
+            Voice::Reverse(_) => None,
         }
     }
 }
 
-/// Plays a captured buffer backwards with a rising playback rate, the backspin
-/// gesture. Replaces the original's `ScriptProcessorNode` tap and reverse playback.
+/// Gain floor for the backspin envelopes, matching the `0.0001` the original ramps
+/// its gains to and from.
+const SPIN_FLOOR: f32 = 0.0001;
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum SpinStage {
+    Attack,
+    Hold,
+    Release,
+    Done,
+}
+
+/// Plays a captured buffer at a swept rate: the backspin gesture.
+///
+/// The reversal is in how the buffer was captured, not in how it is read.
+/// [`Ring::take`] returns the recent past newest-sample-first, so reading it *forward*
+/// plays "now" first and walks back into the past, which is the backspin. The
+/// synthesised fallbacks are built the ordinary way round, oldest-first, and reading
+/// those forward plays the sweep as composed. One read direction is right for both.
+///
+/// Reading it backwards instead — from the end of the buffer to the start, as this
+/// did — plays the captured audio in its original order. Not a backspin at all: the
+/// last second and a bit of the track, again, at the wrong speed.
 struct ReverseVoice {
     left: Vec<f32>,
     right: Vec<f32>,
-    env: dsp::Adsr,
-    /// Read position, in samples, advancing backwards.
+    /// Read position in samples, advancing forward through the buffer.
     cursor: f32,
-    /// Playback rate, swept upward over the gesture.
+    /// Playback rate, swept up and then back down across the gesture.
     rate: f32,
     rate_from: f32,
+    rate_mid: f32,
     rate_to: f32,
-    sweep_samples: f32,
+    /// Sample counts for the two rate ramps.
+    ramp_up: f32,
+    ramp_down: f32,
+    /// Samples since the voice started, for the rate sweep.
     t: f32,
+    /// Envelope, kept here rather than in [`dsp::Adsr`] so the hold can be timed from
+    /// note-on. The shared envelope measures its hold from the end of the attack.
+    stage: SpinStage,
+    elapsed: f32,
+    peak: f32,
+    attack: f32,
+    /// Samples from note-on at which the release begins.
+    hold_until: f32,
+    release: f32,
     done: bool,
 }
 
+/// How a backspin voice is shaped. Times in seconds.
+struct SpinShape {
+    /// `from` to `mid` across `ramp_up`, then `mid` to `to` across `ramp_down`.
+    rate_from: f32,
+    rate_mid: f32,
+    rate_to: f32,
+    ramp_up: f32,
+    ramp_down: f32,
+    peak: f32,
+    attack: f32,
+    /// Measured from note-on, not from the end of the attack.
+    hold_until: f32,
+    release: f32,
+}
+
 impl ReverseVoice {
-    fn new(
-        left: Vec<f32>,
-        right: Vec<f32>,
-        rate_from: f32,
-        rate_to: f32,
-        dur: f32,
-        sr: f32,
-    ) -> Self {
-        let n = left.len();
+    fn new(left: Vec<f32>, right: Vec<f32>, shape: SpinShape, sr: f32) -> Self {
         Self {
-            cursor: (n - 1) as f32,
-            env: dsp::Adsr::new(0.92, 0.02, dur * 0.5, 1.0, dur * 0.5, 0.08, sr),
-            rate: rate_from,
-            rate_from,
-            rate_to,
-            sweep_samples: (0.42 * sr).max(1.0),
+            cursor: 0.0,
+            rate: shape.rate_from,
+            rate_from: shape.rate_from,
+            rate_mid: shape.rate_mid,
+            rate_to: shape.rate_to,
+            ramp_up: (shape.ramp_up * sr).max(1.0),
+            ramp_down: (shape.ramp_down * sr).max(1.0),
             t: 0.0,
+            stage: SpinStage::Attack,
+            elapsed: 0.0,
+            peak: shape.peak,
+            attack: (shape.attack * sr).max(1.0),
+            hold_until: (shape.hold_until * sr).max(1.0),
+            release: (shape.release * sr).max(1.0),
             left,
             right,
             done: false,
         }
+    }
+
+    /// Constant-rate playback of a buffer that already carries its own shape.
+    fn flat(left: Vec<f32>, right: Vec<f32>, dur: f32, sr: f32) -> Self {
+        Self::new(
+            left,
+            right,
+            SpinShape {
+                rate_from: 1.0,
+                rate_mid: 1.0,
+                rate_to: 1.0,
+                ramp_up: dur,
+                ramp_down: dur,
+                peak: 1.0,
+                // A couple of milliseconds either end, only to avoid a click.
+                attack: 0.002,
+                hold_until: (dur - 0.002).max(0.004),
+                release: 0.002,
+            },
+            sr,
+        )
     }
 
     fn sample_at(&self, cursor: f32) -> (f32, f32) {
@@ -186,24 +261,74 @@ impl ReverseVoice {
         if self.done {
             return (0.0, 0.0, true);
         }
-        // Sweep the playback rate up over the first 420 ms, which is the rising
-        // "wind back" sound.
+
+        // Wind up, then ease back toward normal speed: the reference ramps
+        // `playbackRate` 0.62 -> 2.8 by 0.42 s and then 2.8 -> 1.15 by 0.66 s. Only
+        // the first of those was here, so the gesture accelerated for 420 ms and then
+        // stayed at nearly 3x for the rest of its length instead of settling.
+        //
+        // `geom`, not `exp_between`: that helper floors both ends at 20, because it
+        // exists for filter frequencies and 20 Hz is the bottom of hearing. Applied to
+        // a playback *rate* it turned 0.62 and 2.8 into 20 and 20, so every backspin
+        // played at a flat twenty times speed and tore through 1.35 s of audio in 67
+        // ms. That was most of what made this sound wrong.
         self.t += 1.0;
-        if self.t < self.sweep_samples {
-            let p = self.t / self.sweep_samples;
-            self.rate = dsp::exp_between(self.rate_from, self.rate_to, p);
+        if self.t < self.ramp_up {
+            self.rate = dsp::geom(self.rate_from, self.rate_mid, self.t / self.ramp_up);
+        } else if self.t < self.ramp_up + self.ramp_down {
+            let p = (self.t - self.ramp_up) / self.ramp_down;
+            self.rate = dsp::geom(self.rate_mid, self.rate_to, p);
+        } else {
+            self.rate = self.rate_to;
         }
+
         let (l, r) = self.sample_at(self.cursor);
-        let g = self.env.process();
-        self.cursor -= self.rate;
-        if self.cursor <= 0.0 || self.env.is_done() {
+        let g = self.envelope();
+        self.cursor += self.rate;
+
+        let last = self.left.len().max(1) - 1;
+        if self.cursor >= last as f32 || self.stage == SpinStage::Done {
             self.done = true;
         }
         (l * g, r * g, self.done)
     }
 
+    /// Attack, flat hold, release — the shape the original automates onto the gain.
+    fn envelope(&mut self) -> f32 {
+        self.elapsed += 1.0;
+        match self.stage {
+            SpinStage::Attack => {
+                let v = dsp::geom(SPIN_FLOOR, self.peak, self.elapsed / self.attack);
+                if self.elapsed >= self.attack {
+                    self.stage = SpinStage::Hold;
+                }
+                v
+            }
+            SpinStage::Hold => {
+                // `elapsed` is still counted from note-on here, so the hold ends where
+                // it was asked to rather than an attack later.
+                if self.elapsed >= self.hold_until {
+                    self.stage = SpinStage::Release;
+                    self.elapsed = 0.0;
+                }
+                self.peak
+            }
+            SpinStage::Release => {
+                let v = dsp::geom(self.peak, SPIN_FLOOR, self.elapsed / self.release);
+                if self.elapsed >= self.release {
+                    self.stage = SpinStage::Done;
+                }
+                v
+            }
+            SpinStage::Done => 0.0,
+        }
+    }
+
     fn release_now(&mut self) {
-        self.env.release_now();
+        if self.stage != SpinStage::Done {
+            self.stage = SpinStage::Release;
+            self.elapsed = 0.0;
+        }
     }
 }
 
@@ -385,12 +510,23 @@ impl Engine {
         }
         match self.ring.take(1.35, self.sample_rate) {
             Some((l, r)) => {
+                // Rates and times straight from the original's automation on the
+                // reversed take: 0.62 -> 2.8 by 0.42 s, 2.8 -> 1.15 by 0.66 s, with
+                // the gain up in 20 ms, held to 0.48 s, and gone by 0.68 s.
                 self.spawn(Voice::Reverse(ReverseVoice::new(
                     l,
                     r,
-                    0.62,
-                    2.8,
-                    0.68,
+                    SpinShape {
+                        rate_from: 0.62,
+                        rate_mid: 2.8,
+                        rate_to: 1.15,
+                        ramp_up: 0.42,
+                        ramp_down: 0.24,
+                        peak: 1.0,
+                        attack: 0.02,
+                        hold_until: 0.48,
+                        release: 0.2,
+                    },
                     self.sample_rate,
                 )));
             }
@@ -401,26 +537,62 @@ impl Engine {
         self.spawn(self.spin_hiss());
     }
 
-    /// A noise sweep through a rising bandpass, standing in when there is no
-    /// recorded audio to reverse yet.
+    /// A noise sweep through a rising bandpass, under a short low thump, standing in
+    /// when there is no recorded audio to reverse yet.
+    ///
+    /// Composed here at real time and played at a constant rate. The breakpoints are
+    /// the original's, in seconds: the thump runs 92 -> 40 Hz over 0.18 s, and the
+    /// noise waits 0.06 s, sweeps 180 -> 4600 Hz by 0.5 s, then falls to 900 Hz by
+    /// 0.66 s. They used to be compared against `i / n`, a 0..1 fraction, so `0.06`
+    /// meant six percent of the gesture rather than sixty milliseconds — the sweep
+    /// spent its first 40 ms racing to 4600 Hz and the remaining 640 ms sliding down.
+    /// The thump was missing altogether.
     fn synthetic_spin(&self) -> ReverseVoice {
-        let n = (self.sample_rate * 0.68) as usize;
+        let sr = self.sample_rate;
+        let dur = 0.68_f32;
+        let n = (sr * dur) as usize;
         let mut bp = dsp::Biquad::new();
+        let mut thump = dsp::Osc::new(dsp::Wave::Sine, 92.0, sr);
         let mut left = Vec::with_capacity(n);
         let mut right = Vec::with_capacity(n);
+
         for i in 0..n {
-            let t = i as f32 / n as f32;
-            let f = if t < 0.06 {
-                dsp::exp_between(180.0, 4600.0, t / 0.06)
+            let t = i as f32 / sr;
+
+            // The low thump: 92 -> 40 Hz, up in 15 ms and gone by 0.2 s.
+            thump.set_frequency(dsp::exp_between(92.0, 40.0, (t / 0.18).min(1.0)), sr);
+            let thump_env = if t < 0.015 {
+                dsp::geom(SPIN_FLOOR, 0.4, t / 0.015)
+            } else if t < 0.2 {
+                dsp::geom(0.4, SPIN_FLOOR, (t - 0.015) / 0.185)
             } else {
-                dsp::exp_between(4600.0, 900.0, ((t - 0.06) / 0.94).min(1.0))
+                0.0
             };
-            bp.bandpass(self.sample_rate, f, 2.2);
-            let s = bp.process(dsp::noise()) * 0.28;
+            let low = thump.next() * thump_env;
+
+            // The platter noise, which does not start until 0.06 s.
+            let noise = if t < 0.06 {
+                0.0
+            } else {
+                let f = if t < 0.5 {
+                    dsp::exp_between(180.0, 4600.0, (t - 0.06) / 0.44)
+                } else {
+                    dsp::exp_between(4600.0, 900.0, ((t - 0.5) / 0.16).min(1.0))
+                };
+                bp.bandpass(sr, f, 2.2);
+                let env = if t < 0.14 {
+                    dsp::geom(SPIN_FLOOR, 0.28, (t - 0.06) / 0.08)
+                } else {
+                    dsp::geom(0.28, SPIN_FLOOR, ((t - 0.14) / 0.52).min(1.0))
+                };
+                bp.process(dsp::noise()) * env
+            };
+
+            let s = low + noise;
             left.push(s);
             right.push(s);
         }
-        ReverseVoice::new(left, right, 1.0, 1.0, 0.68, self.sample_rate)
+        ReverseVoice::flat(left, right, dur, sr)
     }
 
     /// High-passed noise swelling across the spin: the platter hiss.
@@ -435,12 +607,22 @@ impl Engine {
             left.push(s);
             right.push(s);
         }
+        // Flat noise, shaped by the voice: up over 50 ms, then away across the rest of
+        // the gesture, which is the original's automation on the hiss gain.
         Voice::Reverse(ReverseVoice::new(
             left,
             right,
-            1.0,
-            1.0,
-            0.68,
+            SpinShape {
+                rate_from: 1.0,
+                rate_mid: 1.0,
+                rate_to: 1.0,
+                ramp_up: 0.68,
+                ramp_down: 0.68,
+                peak: 1.0,
+                attack: 0.05,
+                hold_until: 0.05,
+                release: 0.61,
+            },
             self.sample_rate,
         ))
     }
@@ -553,13 +735,25 @@ impl Engine {
         for c in self.channels.iter_mut() {
             c.clear();
         }
+        // Voices with no stem bypass the channel strips and are held back to be added
+        // to the master sum directly, after the faders have been applied below.
+        let mut direct_l = 0.0f32;
+        let mut direct_r = 0.0f32;
         for slot in self.voices.iter_mut() {
             let Some(voice) = slot.as_mut() else { continue };
             let stem = voice.stem();
             let (l, r, done) = voice.process();
-            if let Some(c) = self.channels.get_mut(stem) {
-                c.bus.left += l;
-                c.bus.right += r;
+            match stem {
+                Some(index) => {
+                    if let Some(c) = self.channels.get_mut(index) {
+                        c.bus.left += l;
+                        c.bus.right += r;
+                    }
+                }
+                None => {
+                    direct_l += l;
+                    direct_r += r;
+                }
             }
             if done {
                 *slot = None;
@@ -582,7 +776,7 @@ impl Engine {
             sum_l += c.bus.left;
             sum_r += c.bus.right;
         }
-        self.master.process(sum_l, sum_r)
+        self.master.process(sum_l + direct_l, sum_r + direct_r)
     }
 
     /// Schedule every hit on `step` into the voice pool.
@@ -673,8 +867,12 @@ impl Engine {
         let mut best = f32::INFINITY;
         for (i, slot) in self.voices.iter().enumerate() {
             if let Some(v) = slot {
-                let stem = v.stem();
-                let lvl = self.channels[stem].level;
+                // A voice with no channel has no meter to read. Treated as loud, so a
+                // deliberate gesture is the last thing stolen under pressure.
+                let lvl = match v.stem() {
+                    Some(stem) => self.channels[stem].level,
+                    None => 1.0,
+                };
                 if lvl < best {
                     best = lvl;
                     quietest = i;
@@ -910,6 +1108,134 @@ mod tests {
         assert!(
             left < quarter && quarter < centre,
             "not monotonic: {left} {quarter} {centre}"
+        );
+    }
+
+    /// The backspin has to play the recent past *backwards*.
+    ///
+    /// `Ring::take` hands back the capture newest-sample-first, so a correct read runs
+    /// forward through it. Reading from the far end instead replays the audio in its
+    /// original order, which is not a backspin at all.
+    #[test]
+    fn the_backspin_plays_the_capture_backwards() {
+        let sr = 1_000.0;
+        let mut ring = Ring::new(sr);
+        // A chronological ramp: the oldest sample is small, the newest is large.
+        for i in 0..1_000 {
+            ring.push(i as f32, i as f32);
+        }
+        let (l, r) = ring.take(0.5, sr).expect("a take");
+        assert!(l[0] > l[l.len() - 1], "take should be newest-first");
+
+        let mut v = ReverseVoice::new(
+            l,
+            r,
+            SpinShape {
+                rate_from: 1.0,
+                rate_mid: 1.0,
+                rate_to: 1.0,
+                ramp_up: 1.0,
+                ramp_down: 1.0,
+                peak: 1.0,
+                attack: 0.001,
+                hold_until: 1.0,
+                release: 0.01,
+            },
+            sr,
+        );
+        let mut read = Vec::new();
+        for _ in 0..40 {
+            read.push(v.sample_at(v.cursor).0);
+            v.process();
+        }
+        // Descending: it starts at "now" and walks back into the past.
+        assert!(
+            read[0] > read[read.len() - 1],
+            "backspin played forwards: {} then {}",
+            read[0],
+            read[read.len() - 1]
+        );
+    }
+
+    /// The rate sweep has to be the rate it asks for.
+    ///
+    /// `exp_between` floors both ends at 20, because it is written for filter
+    /// frequencies. Used on a playback rate it turned 0.62 and 2.8 into 20 and 20, so
+    /// every backspin ran at twenty times speed.
+    #[test]
+    fn the_backspin_rate_sweeps_where_it_was_told_to() {
+        let sr = 48_000.0;
+        let buf = vec![0.0f32; (sr * 2.0) as usize];
+        let mut v = ReverseVoice::new(
+            buf.clone(),
+            buf,
+            SpinShape {
+                rate_from: 0.62,
+                rate_mid: 2.8,
+                rate_to: 1.15,
+                ramp_up: 0.42,
+                ramp_down: 0.24,
+                peak: 1.0,
+                attack: 0.02,
+                hold_until: 0.48,
+                release: 0.2,
+            },
+            sr,
+        );
+        assert!((v.rate - 0.62).abs() < 0.01, "starts at {}", v.rate);
+
+        let at = |v: &mut ReverseVoice, seconds: f32| {
+            let target = (seconds * sr) as usize;
+            while (v.t as usize) < target {
+                v.process();
+            }
+            v.rate
+        };
+        let peak = at(&mut v, 0.42);
+        assert!((peak - 2.8).abs() < 0.1, "peak rate {peak}, expected 2.8");
+        let settled = at(&mut v, 0.67);
+        assert!(
+            (settled - 1.15).abs() < 0.1,
+            "should ease back to 1.15, got {settled}"
+        );
+    }
+
+    /// The backspin bypasses the stem strips, so cutting a stem cannot silence it.
+    #[test]
+    fn the_backspin_is_not_routed_through_a_stem() {
+        let sr = 48_000.0;
+        let energy = |mute_all: bool| -> f32 {
+            let mut e = Engine::new(sr);
+            e.load_track(track_with_kick());
+            e.play();
+            // Give the ring something to capture.
+            for _ in 0..(sr as usize) / 128 {
+                let mut l = [0.0f32; 128];
+                let mut r = [0.0f32; 128];
+                e.process(&mut l, &mut r);
+            }
+            if mute_all {
+                for s in Stem::ALL {
+                    e.set_muted(s, true);
+                }
+            }
+            e.backspin();
+            let mut total = 0.0f32;
+            for _ in 0..(sr as usize) / 128 {
+                let mut l = [0.0f32; 128];
+                let mut r = [0.0f32; 128];
+                e.process(&mut l, &mut r);
+                for s in &l {
+                    total += s.abs();
+                }
+            }
+            total
+        };
+
+        let cut = energy(true);
+        assert!(
+            cut > 1.0,
+            "backspin was silenced by cutting the stems: {cut}"
         );
     }
 
@@ -1213,3 +1539,4 @@ mod tests {
         }
     }
 }
+
