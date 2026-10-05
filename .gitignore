@@ -37,3 +37,4 @@
 /storage/logs
 /dist
 .netlify
+/public/index.html
