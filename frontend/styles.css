@@ -253,15 +253,47 @@ body {
 
 .stem {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   gap: 0.75rem;
   align-items: center;
-  padding: 0.3rem 0;
+  padding: 0.45rem 0;
   border-bottom: 1px solid var(--color-line);
 }
 
-.stem.is-cut .min-w-0 {
+.stem.is-cut .min-w-0,
+.stem.is-cut .stem-spine {
   opacity: 0.42;
+}
+
+/* Each stem's spine, in the same language as the library's EDM / Lofi / Breaks:
+   an acid rule down the left, the icon upright at the top, the name reading
+   bottom to top beneath it. Stretched to the strip so every rule is one height. */
+.stem-spine {
+  align-self: stretch;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  width: 1.75rem;
+  padding-left: 0.4rem;
+  border-left: 2px solid color-mix(in srgb, var(--color-acid) 55%, var(--color-line));
+  color: var(--color-fg);
+}
+
+.stem-spine > svg {
+  color: var(--color-acid);
+}
+
+.stem-name {
+  writing-mode: vertical-rl;
+  rotate: 180deg;
+  font-size: 0.75rem;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  line-height: 1;
+  text-transform: uppercase;
+  white-space: nowrap;
 }
 
 /* A badge, in the same family as CUT but sized for the stem header row it sits in.
@@ -489,6 +521,27 @@ body {
 .step.now {
   background: var(--color-acid);
   transform: scaleY(1.35);
+}
+
+/* Solo and Cut, stacked in one column at the end of each stem, both badges in
+   the solo family. Taller than the header-row badge so they are easy to hit. */
+.stem-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.solo.stem-badge {
+  width: 4rem;
+  min-height: 2rem;
+  font-size: 0.6875rem;
+}
+
+/* A cut stem lights its Cut badge, including when another stem's solo cuts it. */
+.solo.stem-badge.is-cut {
+  border-color: var(--color-acid);
+  background: var(--color-acid);
+  color: var(--color-acid-ink);
 }
 
 .btn-cut {

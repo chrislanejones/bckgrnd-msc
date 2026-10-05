@@ -64,6 +64,21 @@ const STEM_ORDER: StemId[] = [
 ];
 
 const LOOP_BARS = [1, 2, 4, 8, 16] as const;
+
+/**
+ * Echo times, in beats. The dotted eighth is the classic dance-music delay and the
+ * engine's default; the others run from a tight sixteenth slap to a long dotted
+ * quarter. Shown as note values, the way a delay unit labels them.
+ */
+const ECHO_TIMES = [
+  { beats: 0.25, label: '1/16', name: 'sixteenth' },
+  { beats: 1 / 3, label: '1/8T', name: 'eighth triplet' },
+  { beats: 0.5, label: '1/8', name: 'eighth' },
+  { beats: 0.75, label: '1/8.', name: 'dotted eighth' },
+  { beats: 1, label: '1/4', name: 'quarter' },
+  { beats: 1.5, label: '1/4.', name: 'dotted quarter' },
+] as const;
+const ECHO_DEFAULT = 0.75;
 const PARTS = ['Intro', 'Groove', 'Break', 'Drop'];
 const STEPS = 256;
 
@@ -135,6 +150,8 @@ export function App() {
   const [solo, setSolo] = useState(emptyFlags);
   const [mask, setMask] = useState<Mask>('full');
   const [loopBars, setLoopBars] = useState<LoopBars>(0);
+  /** Echo time in beats, one of ECHO_TIMES; 0 when the echo is off. */
+  const [echoBeats, setEchoBeats] = useState<number>(ECHO_DEFAULT);
   const [bands, setBands] = useState({ low: 1, mid: 1, high: 1 });
   const [open, setOpen] = useState(1);
   const [echo, setEcho] = useState(false);
@@ -756,35 +773,32 @@ export function App() {
             const cut = muted[meta.id] || (anySolo && !solo[meta.id]);
             const activity = barActivity(track, meta.id, bar);
             return (
-              <article key={meta.id} className={cx('stem', cut && 'is-cut')}>
+              <article
+                key={meta.id}
+                className={cx('stem', cut && 'is-cut')}
+                aria-labelledby={`stem-${meta.id}`}
+              >
+                {/* The stem's spine, like the library sections: icon on top, name
+                    running up the rule. */}
+                <div className="stem-spine">
+                  <Icon className="size-4 shrink-0" strokeWidth={2.2} aria-hidden />
+                  <h3 id={`stem-${meta.id}`} className="stem-name">
+                    {meta.name}
+                  </h3>
+                </div>
                 <div className="min-w-0">
                   <div className="flex min-w-0 items-center gap-2">
-                    <Icon className="size-4 shrink-0 text-muted" strokeWidth={2.2} aria-hidden />
-                    <p className="shrink-0 font-display text-base font-bold tracking-wide">
-                      {meta.name}
-                    </p>
-                    <p className="hidden text-xs text-muted sm:block">{meta.hint}</p>
+                    <p className="hidden shrink-0 text-xs text-muted sm:block">{meta.hint}</p>
                     <div className="meter" aria-hidden>
                       <span ref={(el) => { meterRefs.current[index] = el; }} />
                     </div>
                   </div>
-                  {/* Solo ends the step row. The dots take the slack and the button is
-                      a fixed width, so it lands at the same right edge on every stem
-                      instead of drifting with the length of the name and hint. */}
                   <div className="step-line">
                     <div className="step-row" aria-hidden>
                       {activity.map((on, i) => (
                         <span key={i} className={cx('step', on && 'on', i === col && 'now')} />
                       ))}
                     </div>
-                    <button
-                      type="button"
-                      className="solo shrink-0"
-                      aria-pressed={solo[meta.id]}
-                      onClick={() => toggleSolo(meta.id)}
-                    >
-                      Solo
-                    </button>
                   </div>
                   <label className="mt-2 block">
                     <span className="sr-only">{meta.name} volume</span>
@@ -799,15 +813,28 @@ export function App() {
                     />
                   </label>
                 </div>
-                <button
-                  type="button"
-                  className={cx('btn-cut tap', cut && 'is-cut')}
-                  aria-pressed={muted[meta.id]}
-                  aria-keyshortcuts={meta.keys}
-                  onClick={() => toggleMute(meta.id)}
-                >
-                  {muted[meta.id] ? 'In' : 'Cut'}
-                </button>
+                {/* Solo over Cut, one badge column, the same width on every stem. */}
+                <div className="stem-actions">
+                  <button
+                    type="button"
+                    className="solo stem-badge tap"
+                    aria-pressed={solo[meta.id]}
+                    aria-label={`Solo ${meta.name}`}
+                    onClick={() => toggleSolo(meta.id)}
+                  >
+                    Solo
+                  </button>
+                  <button
+                    type="button"
+                    className={cx('solo stem-badge tap', cut && 'is-cut')}
+                    aria-pressed={muted[meta.id]}
+                    aria-label={`${muted[meta.id] ? 'Bring in' : 'Cut'} ${meta.name}`}
+                    aria-keyshortcuts={meta.keys}
+                    onClick={() => toggleMute(meta.id)}
+                  >
+                    {muted[meta.id] ? 'In' : 'Cut'}
+                  </button>
+                </div>
               </article>
             );
           })}
@@ -885,6 +912,30 @@ export function App() {
                 }}
               >
                 {bars}
+              </button>
+            ))}
+          </div>
+
+          <p className="mt-3 text-xs font-semibold tracking-widest text-muted">Echo time</p>
+          <div className="mt-2 grid grid-cols-6 gap-1" role="group" aria-label="Echo time">
+            {ECHO_TIMES.map((t) => (
+              <button
+                key={t.label}
+                type="button"
+                aria-pressed={echoBeats === t.beats}
+                aria-label={`Echo every ${t.name}`}
+                className={cx(
+                  'tap rounded-full border px-1 py-2 text-xs font-semibold tabular-nums',
+                  echoBeats === t.beats ? 'border-acid bg-acid text-acid-ink' : 'border-line bg-surface',
+                )}
+                onClick={() => {
+                  // Clicking the lit one turns the echo off, as Loop does.
+                  const next = echoBeats === t.beats ? 0 : t.beats;
+                  setEchoBeats(next);
+                  engine.setEchoTime(next);
+                }}
+              >
+                {t.label}
               </button>
             ))}
           </div>
