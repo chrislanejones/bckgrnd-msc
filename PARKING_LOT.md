@@ -81,3 +81,17 @@ the reference (instant drop, linear return).
   reads it from the project root.
 - The Laravel `APP_KEY` was committed in `01558c3` and is on both remotes. Rotate it with
   `php artisan key:generate`. Removing it from history needs a force-push.
+  - 10-05-2026: `verify:static` no longer depends on `.env.static`. `build:app:static`
+    now sets `VITE_STATIC=1` itself (`ba9ad0c`), and the check passes. The files in
+    `floor-desktop/` still want moving for the desktop build.
+
+## Found 10-05-2026
+
+- `start.sh` only builds outputs that are *missing*, not ones older than their source.
+  A changed `engine-core/src` keeps serving the old `.wasm` until someone runs
+  `pnpm run build:engine` by hand.
+- `verify:audio` failed once in about ten runs on "telemetry arrives at ~30 Hz" and
+  "playhead advances", then passed on rerun. It times a 1.2 s window, so it is
+  sensitive to load on the machine.
+- The top section of this file ("backspin fix, uncommitted") is stale: that fix landed
+  in `a5f064d`. Worth a pass by Dara.
