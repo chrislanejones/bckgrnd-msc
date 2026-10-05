@@ -44,9 +44,11 @@ Landed as transition sounds, lo-fi texture and percussion (hashes changed in the
 10-05 history scrub). The lo-fi texture was later **removed**: it read as rain.
 The original brief is kept below for reference.
 
-- Follow-up: the crackle filters ran on silence and produced subnormal floats, costing
-  150–250 ns per sample until they were reset after each click. Other filters in the
-  engine that ring down to silence may have the same cost. Worth a profiling pass.
+- ~~CPU check on other filters~~ — fixed 10-05-2026. The master chain (reverb combs
+  and allpasses, the echo lines, every biquad) sank into subnormal floats in silence and
+  got slower the longer it sat: 30 s after Stop, 681 → 12,426 ns/sample. A shared
+  `dsp::flush` now zeroes state below -400 dB; Stop stays flat at ~500. Leftover,
+  cosmetic: the stem meter level (`Channel::level`) can sit subnormal; costs nothing.
 - `verify:audio` can't jump the playhead, so the browser gate never reaches the
   Break/Drop transitions or most percussion. Only the Rust tests cover them.
 
@@ -93,7 +95,8 @@ not. Things to settle before or while building it:
 - **Touch.** The jog wheel and the waveform scratch are pointer gestures; check them on a
   real phone, including that the page doesn't scroll under a drag.
 - **CPU and battery.** Two engines render in one worklet at all times. Measure on a mid-range
-  phone; the filter CPU check (Silas, 10-05) is the first step.
+  phone. The filter CPU check is done (silence no longer gets slower); full-mix
+  cost on desktop is about 550–640 ns per sample per engine.
 - **Presets.** Saved presets are JSON on disk through Laravel. On mobile that disk is the
   app's own storage, so they could work there even though the Netlify build lacks them.
 - **Leftovers from the desktop setup.** `config/nativephp.php` still has the old app id
