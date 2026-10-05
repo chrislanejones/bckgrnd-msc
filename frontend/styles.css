@@ -341,23 +341,6 @@ body {
   scale: 0.96;
 }
 
-/* The backspin wheel: still when off, counter-rotating when engaged. The negative
-   sweep reads as a vinyl slowing backwards, matching the gesture's name. */
-.backspin-disc {
-  color: currentColor;
-  transform-origin: 50% 50%;
-}
-
-.backspin-disc[data-on='true'] {
-  animation: backspin-spin 0.9s linear infinite;
-}
-
-@keyframes backspin-spin {
-  to {
-    transform: rotate(-360deg);
-  }
-}
-
 .icon-swap {
   grid-area: 1 / 1;
   transition:
@@ -401,8 +384,7 @@ body {
   .rise,
   .icon-swap,
   .tap,
-  .step,
-  .backspin-disc {
+  .step {
     animation: none;
     transition: none;
     transform: none;

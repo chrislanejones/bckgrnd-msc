@@ -134,7 +134,6 @@ export function App() {
   const [bands, setBands] = useState({ low: 1, mid: 1, high: 1 });
   const [open, setOpen] = useState(1);
   const [echo, setEcho] = useState(false);
-  const [backspinOn, setBackspinOn] = useState(false);
   /** Output balance: 0 mono-left, 0.5 stereo, 1 mono-right. */
   const [stereo, setStereo] = useState(0.5);
   const [mixing, setMixing] = useState<string | null>(null);
@@ -832,14 +831,14 @@ export function App() {
             >
               Brake
             </button>
-            <BackspinWheel
-              on={backspinOn}
-              onToggle={() => {
-                const next = !backspinOn;
-                setBackspinOn(next);
-                if (next) engine.backspin();
-              }}
-            />
+            <button
+              type="button"
+              className="tap rounded-full border border-line bg-surface px-2 py-2 text-xs font-semibold"
+              aria-label="Backspin the platter"
+              onClick={() => engine.backspin()}
+            >
+              Backspin
+            </button>
             <button
               type="button"
               aria-pressed={echo}
@@ -1071,32 +1070,6 @@ function HoldButton({
       onLostPointerCapture={onUp}
     >
       {label}
-    </button>
-  );
-}
-
-function BackspinWheel({ on, onToggle }: { on: boolean; onToggle: () => void }) {
-  return (
-    <button
-      type="button"
-      aria-pressed={on}
-      aria-label="Toggle backspin"
-      onClick={onToggle}
-      className={cx(
-        'tap flex flex-col items-center gap-1 rounded-xl border px-1.5 py-1.5 text-[10px] font-semibold uppercase tracking-wider',
-        on ? 'border-acid bg-acid text-acid-ink' : 'border-line bg-surface text-muted',
-      )}
-    >
-      <svg className="backspin-disc" data-on={on ? 'true' : 'false'} width="30" height="30" viewBox="0 0 32 32" aria-hidden="true">
-        <circle cx="16" cy="16" r="14" fill="none" stroke="currentColor" strokeWidth="1.6" />
-        <circle cx="16" cy="16" r="9.5" fill="none" stroke="currentColor" strokeWidth="1" opacity="0.55" />
-        <circle cx="16" cy="16" r="3" fill="currentColor" opacity="0.9" />
-        <line x1="16" y1="2" x2="16" y2="9" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
-        <line x1="16" y1="23" x2="16" y2="30" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" opacity="0.4" />
-        <line x1="2" y1="16" x2="9" y2="16" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" opacity="0.4" />
-        <line x1="23" y1="16" x2="30" y2="16" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" opacity="0.4" />
-      </svg>
-      Backspin
     </button>
   );
 }
