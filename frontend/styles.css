@@ -125,6 +125,67 @@ body {
   pointer-events: none;
 }
 
+/* The song form drawn over the waveform: four [ ] brackets, one per four-bar part,
+   each named in small type along its bottom edge. The strip under the waveform
+   is the brackets' own, so the names never sit on the trace. */
+.wave-parts {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  position: absolute;
+  inset: 0 0 -0.95rem;
+  pointer-events: none;
+  z-index: 2;
+}
+
+.wave-part {
+  --tick: 0.4rem;
+  position: relative;
+  margin: 0 2px;
+  color: color-mix(in srgb, var(--color-muted) 70%, transparent);
+  background:
+    linear-gradient(currentColor, currentColor) left top / 1px 100% no-repeat,
+    linear-gradient(currentColor, currentColor) right top / 1px 100% no-repeat,
+    linear-gradient(currentColor, currentColor) left top / var(--tick) 1px no-repeat,
+    linear-gradient(currentColor, currentColor) left bottom / var(--tick) 1px no-repeat,
+    linear-gradient(currentColor, currentColor) right top / var(--tick) 1px no-repeat,
+    linear-gradient(currentColor, currentColor) right bottom / var(--tick) 1px no-repeat;
+}
+
+.wave-part.is-on {
+  color: var(--color-acid);
+}
+
+.wave-part-name {
+  position: absolute;
+  bottom: 0.1rem;
+  left: 0;
+  right: 0;
+  text-align: center;
+  font-size: 0.5625rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+/* The live deck's waveform is a platter: grab it and drag to scratch. */
+.wave-scrub {
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.wave-scrub.is-held {
+  cursor: grabbing;
+}
+
+.wave-scrub.is-held .wave-head {
+  width: 3px;
+  background: var(--color-acid);
+  box-shadow: 0 0 12px color-mix(in srgb, var(--color-acid) 85%, transparent);
+}
+
 .wave-head {
   position: absolute;
   top: 0;

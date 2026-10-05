@@ -631,23 +631,6 @@ export function App() {
           <span className="tabular-nums text-fg">{bpm} BPM</span>
         </p>
 
-        <div className="rise rise-2 mt-2 grid grid-cols-4 gap-1" aria-label="Song parts">
-          {PARTS.map((name, index) => {
-            const on = playing && Math.floor(bar / 4) === index;
-            return (
-              <p
-                key={name}
-                className={cx(
-                  'rounded-full border px-2 py-1 text-center text-xs font-semibold',
-                  on ? 'border-acid bg-acid text-acid-ink' : 'border-line bg-surface text-muted',
-                )}
-              >
-                {name}
-              </p>
-            );
-          })}
-        </div>
-
         <div className="rise rise-2 mt-2 grid gap-2" aria-label="Decks">
           {/* Only the live deck reflects the cuts. The idle one is a preview of the
               track as written, which is what you want to see before bringing it in. */}
@@ -657,6 +640,7 @@ export function App() {
             step={liveDeck === 'a' ? songStep : -1}
             status={liveDeck === 'a' ? (playing ? 'Live' : 'Cue') : 'Idle'}
             silenced={liveDeck === 'a' ? silenced : undefined}
+            bpm={bpm}
           />
           <DeckWave
             side="b"
@@ -664,6 +648,7 @@ export function App() {
             step={liveDeck === 'b' ? songStep : -1}
             status={liveDeck === 'b' ? (playing ? 'Live' : 'Cue') : 'Idle'}
             silenced={liveDeck === 'b' ? silenced : undefined}
+            bpm={bpm}
           />
         </div>
 
@@ -1391,6 +1376,118 @@ function TrackGrid({
   );
 }
 
+/** Pointer travel, in CSS pixels, below which a press counts as a tap rather than a drag. */
+const SCRUB_TAP_PX = 4;
+/** How long the hand can rest before the platter is treated as held still. */
+const SCRUB_REST_MS = 60;
+
+/**
+ * Dragging the waveform's playhead: a vinyl scratch over the live deck.
+ *
+ * Grabbing the waveform takes hold of the record where it is — the head does not
+ * jump to the pointer — and moving drags it. The drag's speed, measured against the
+ * deck's own speed at this tempo, is the playback rate the engine scratches at:
+ * backwards plays the recent past in reverse, forwards replays it, still is silence.
+ * Letting go drops the song in at the step under the head.
+ *
+ * A tap without a drag is a seek: the song jumps to the tapped bar.
+ *
+ * The playhead is drawn from the drag while it is held, because the engine's own
+ * step is frozen during a scratch.
+ */
+function useScrub(step: number, bpm: number, live: boolean) {
+  const [shown, setShown] = useState<number | null>(null);
+  const drag = useRef<{
+    x0: number;
+    lastX: number;
+    lastT: number;
+    width: number;
+    at: number;
+    moved: boolean;
+    tapStep: number;
+  } | null>(null);
+  const rest = useRef<number | undefined>(undefined);
+
+  useEffect(() => () => window.clearTimeout(rest.current), []);
+
+  // Losing the deck mid-drag (a mix handover, a stop) must not leave the engine
+  // scratching with nobody holding it.
+  useEffect(() => {
+    if (!live && drag.current) {
+      engine.scratchEnd(Math.round(drag.current.at));
+      drag.current = null;
+      setShown(null);
+    }
+  }, [live]);
+
+  const end = () => {
+    const d = drag.current;
+    if (!d) return;
+    window.clearTimeout(rest.current);
+    drag.current = null;
+    setShown(null);
+    if (d.moved) {
+      engine.scratchEnd(Math.round(d.at) % STEPS);
+    } else {
+      // A tap seeks, without the scratch sound in between.
+      engine.scratchStart();
+      engine.scratchEnd(d.tapStep);
+    }
+  };
+
+  const handlers = {
+    onPointerDown: (event: ReactPointerEvent<HTMLDivElement>) => {
+      if (step < 0) return;
+      try {
+        event.currentTarget.setPointerCapture(event.pointerId);
+      } catch {
+        /* pointer already released */
+      }
+      const box = event.currentTarget.getBoundingClientRect();
+      const fraction = Math.min(1, Math.max(0, (event.clientX - box.left) / box.width));
+      drag.current = {
+        x0: event.clientX,
+        lastX: event.clientX,
+        lastT: event.timeStamp,
+        width: box.width,
+        at: step % STEPS,
+        moved: false,
+        tapStep: Math.min(STEPS - 1, Math.floor(fraction * STEPS)),
+      };
+    },
+    onPointerMove: (event: ReactPointerEvent<HTMLDivElement>) => {
+      const d = drag.current;
+      if (!d) return;
+      if (!d.moved) {
+        if (Math.abs(event.clientX - d.x0) < SCRUB_TAP_PX) return;
+        d.moved = true;
+        d.lastX = event.clientX;
+        d.lastT = event.timeStamp;
+        engine.scratchStart();
+        return;
+      }
+      const dt = Math.max(1, event.timeStamp - d.lastT);
+      const dSteps = ((event.clientX - d.lastX) / d.width) * STEPS;
+      d.lastX = event.clientX;
+      d.lastT = event.timeStamp;
+      d.at = Math.min(STEPS - 1, Math.max(0, d.at + dSteps));
+      setShown(d.at);
+      // Sixteenth steps per millisecond at this tempo is rate 1.
+      const normal = (bpm * 4) / 60000;
+      engine.scratch(dSteps / dt / normal);
+      window.clearTimeout(rest.current);
+      rest.current = window.setTimeout(() => {
+        if (drag.current?.moved) engine.scratch(0);
+      }, SCRUB_REST_MS);
+    },
+    onPointerUp: end,
+    onPointerCancel: end,
+    onLostPointerCapture: end,
+  };
+
+  return { step: shown, held: shown !== null, handlers };
+}
+
 /**
  * The song waveform, drawn from the arrangement's own lanes rather than an
  * `AnalyserNode`: it shows what *will* play, including the bars that are still
@@ -1402,6 +1499,7 @@ function DeckWave({
   step,
   status,
   silenced,
+  bpm,
 }: {
   side: 'a' | 'b';
   track: TrackArrangement | null;
@@ -1409,6 +1507,8 @@ function DeckWave({
   status: 'Live' | 'Cue' | 'Idle';
   /** Stems that are not sounding, left out of the drawing. */
   silenced?: Record<StemId, boolean>;
+  /** Current tempo, so a drag's speed can be expressed as a playback rate. */
+  bpm: number;
 }) {
   // Both decks always draw. Before a track is cued there is nothing to show, so the
   // slot keeps its height with a placeholder rather than collapsing — a deck that
@@ -1419,10 +1519,13 @@ function DeckWave({
     () => (track ? waveBands(track, silenced) : null),
     [track, silentKey],
   );
-  const head = step < 0 ? 0 : ((step % STEPS) / STEPS) * 100;
+  const live = status === 'Live';
+  const scrub = useScrub(step, bpm, live);
+  const shown = scrub.step ?? step;
+  const head = shown < 0 ? 0 : ((shown % STEPS) / STEPS) * 100;
 
   return (
-    <div className="deck-wave" data-live={status === 'Live' ? 'yes' : 'no'}>
+    <div className="deck-wave" data-live={live ? 'yes' : 'no'}>
       <div className="flex items-baseline justify-between gap-2 px-2.5 pt-1.5">
         <p className="truncate text-xs font-semibold">
           <span className={side === 'a' ? 'text-acid' : 'text-deck-b'}>{side.toUpperCase()}</span>
@@ -1431,7 +1534,10 @@ function DeckWave({
         </p>
         <p className="shrink-0 text-xs text-muted">{status}</p>
       </div>
-      <div className="relative mx-2 mb-2 mt-1">
+      <div
+        className={cx('relative mx-2 mb-5 mt-1', live && 'wave-scrub', scrub.held && 'is-held')}
+        {...(live ? scrub.handlers : {})}
+      >
         <svg
           viewBox="0 0 256 48"
           className="block h-12 w-full"
@@ -1460,13 +1566,25 @@ function DeckWave({
             <line className="wave-grid" x1="0" y1="24" x2="256" y2="24" />
           )}
         </svg>
+        {/* The song form as [ ] brackets over the waveform, one per four-bar part,
+            named small along the bottom. The live part lights up. */}
+        <div className="wave-parts" aria-hidden="true">
+          {PARTS.map((name, index) => (
+            <span
+              key={name}
+              className={cx('wave-part', live && Math.floor(shown / 64) === index && 'is-on')}
+            >
+              <span className="wave-part-name">{name}</span>
+            </span>
+          ))}
+        </div>
         <span
           className="wave-shade"
-          style={{ left: `${head}%`, opacity: status === 'Live' ? 1 : 0 }}
+          style={{ left: `${head}%`, opacity: live ? 1 : 0 }}
         />
         <span
           className="wave-head"
-          style={{ left: `${head}%`, opacity: status === 'Live' ? 1 : 0 }}
+          style={{ left: `${head}%`, opacity: live ? 1 : 0 }}
         />
       </div>
     </div>

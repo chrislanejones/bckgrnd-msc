@@ -95,3 +95,23 @@ the reference (instant drop, linear return).
   sensitive to load on the machine.
 - The top section of this file ("backspin fix, uncommitted") is stale: that fix landed
   in `a5f064d`. Worth a pass by Dara.
+
+## Queued sound work (approved 10-05-2026, engine work for Silas)
+
+Run in this order, after the waveform scratch lands. None needs a 9th stem.
+
+1. **Transition FX.** A noise riser into the Drop, a crash on the Drop's downbeat, a
+   downsweep into the Break. Played outside the stems, the way backspin is, so the
+   `[ ]` song sections sound like sections. Effort: medium.
+2. **Lofi texture.** Vinyl crackle and tape hiss on the master, Lofi tracks only.
+   Effort: small.
+3. **Percussion in the hats stem.** Shakers, rimshots and congas as extra voices on
+   the existing hats stem, for the garage, breaks and lofi grooves. Effort: medium.
+
+## Found with the waveform scratch (10-05-2026)
+
+- Starting an auto mix while the live deck is held in a scratch isn't handled, and the
+  handover's downbeat math ignores the pause. The UI lets go of the scratch when its
+  deck stops being live, but the engine side is untested.
+- The scratch reader is a new engine primitive (`engine-core/src/scratch.rs`), and
+  the ladder filter from the sound pass is another. Both are worth an ADR from Dara.
