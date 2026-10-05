@@ -16,6 +16,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { PointerEvent as ReactPointerEvent } from 'react';
 import {
   Activity,
   AudioLines,
@@ -82,6 +83,9 @@ const CONTINUOUS_MIX_BAR = 12;
  */
 const TEMPO_GLIDE_SECONDS = 12;
 
+/** Master level a fresh session starts at, and what its reset badge returns to. */
+const MASTER_DEFAULT = 0.78;
+
 /** The order a stem-swapping continuous mix steps the groups through. */
 const CONTINUOUS_MASKS: Mask[] = ['full', 'nodrums', 'nomusic'];
 
@@ -125,7 +129,7 @@ export function App() {
   const [step, setStep] = useState(-1);
   const [bpm, setBpm] = useState(126);
   const [swing, setSwing] = useState(0.22);
-  const [master, setMaster] = useState(0.78);
+  const [master, setMaster] = useState(MASTER_DEFAULT);
   const [vols, setVols] = useState<Mix | null>(null);
   const [muted, setMuted] = useState(emptyFlags);
   const [solo, setSolo] = useState(emptyFlags);
@@ -661,7 +665,7 @@ export function App() {
         <div className="rise rise-3 mt-4">
           <p className="text-xs font-semibold tracking-widest text-muted">EDM</p>
           <TrackGrid items={edmTracks} current={track.id} onPick={selectTrack} />
-          <p className="mt-3 text-xs font-semibold tracking-widest text-muted">Lofi</p>
+          <p className="mt-2.5 text-xs font-semibold tracking-widest text-muted">Lofi</p>
           <TrackGrid items={lofiTracks} current={track.id} onPick={selectTrack} />
         </div>
 
@@ -681,7 +685,7 @@ export function App() {
                 .filter((item) => item.id !== track.id)
                 .map((item) => (
                   <option key={item.id} value={item.id}>
-                    {item.name} · {item.detail}
+                    {item.name} · {item.bpm} bpm
                   </option>
                 ))}
             </select>
@@ -810,52 +814,56 @@ export function App() {
         </section>
 
         <section className="rise rise-3 mt-3" aria-label="Deck">
-          <div className="grid grid-cols-3 gap-2 sm:grid-cols-6">
-            <HoldButton label="Bend −" onDown={() => engine.nudge(-1)} onUp={() => engine.nudge(0)} />
-            <button
-              type="button"
-              className="tap rounded-full border border-line bg-surface px-2 py-2 text-xs font-semibold"
-              aria-label="Cue to the start"
-              onClick={() => {
-                engine.cue();
-                void engine.play('a');
-              }}
-            >
-              Cue
-            </button>
-            <button
-              type="button"
-              className="tap rounded-full border border-line bg-surface px-2 py-2 text-xs font-semibold"
-              aria-label="Vinyl brake"
-              onClick={() => engine.brake()}
-            >
-              Brake
-            </button>
-            <button
-              type="button"
-              className="tap rounded-full border border-line bg-surface px-2 py-2 text-xs font-semibold"
-              aria-label="Backspin the platter"
-              onClick={() => engine.backspin()}
-            >
-              Backspin
-            </button>
-            <button
-              type="button"
-              aria-pressed={echo}
-              aria-label="Echo throw"
-              className={cx(
-                'tap rounded-full border px-2 py-2 text-xs font-semibold',
-                echo ? 'border-acid bg-acid text-acid-ink' : 'border-line bg-surface',
-              )}
-              onClick={() => {
-                const next = !echo;
-                setEcho(next);
-                engine.setEcho(next);
-              }}
-            >
-              Echo
-            </button>
-            <HoldButton label="Bend +" onDown={() => engine.nudge(1)} onUp={() => engine.nudge(0)} />
+          <div className="deck-row">
+            <div className="deck-col deck-col-left">
+              <button
+                type="button"
+                className="deck-pad tap"
+                aria-label="Cue to the start"
+                onClick={() => {
+                  engine.cue();
+                  void engine.play('a');
+                }}
+              >
+                Cue
+              </button>
+              <button
+                type="button"
+                className="deck-pad tap"
+                aria-label="Vinyl brake"
+                onClick={() => engine.brake()}
+              >
+                Brake
+              </button>
+              <button
+                type="button"
+                aria-pressed={echo}
+                aria-label="Echo throw"
+                className="deck-pad tap"
+                onClick={() => {
+                  const next = !echo;
+                  setEcho(next);
+                  engine.setEcho(next);
+                }}
+              >
+                Echo
+              </button>
+            </div>
+
+            <JogWheel spinning={playing} />
+
+            <div className="deck-col deck-col-right">
+              <HoldButton label="Bend +" onDown={() => engine.nudge(1)} onUp={() => engine.nudge(0)} />
+              <HoldButton label="Bend −" onDown={() => engine.nudge(-1)} onUp={() => engine.nudge(0)} />
+              <button
+                type="button"
+                className="deck-pad tap"
+                aria-label="Backspin the platter"
+                onClick={() => engine.backspin()}
+              >
+                Backspin
+              </button>
+            </div>
           </div>
 
           <p className="mt-3 text-xs font-semibold tracking-widest text-muted">Loop</p>
@@ -889,11 +897,17 @@ export function App() {
                 ['high', 'High'],
               ] as const
             ).map(([id, label]) => (
-              <label key={id} className="block">
-                <span className="mb-1 flex items-center justify-between text-xs text-muted">
-                  <span>{label}</span>
-                  <span className="tabular-nums text-fg">{Math.round(bands[id] * 100)}</span>
-                </span>
+              <div key={id}>
+                <FaderHead
+                  label={label}
+                  value={Math.round(bands[id] * 100)}
+                  atDefault={bands[id] === 1}
+                  onReset={() => {
+                    const next = { ...bands, [id]: 1 };
+                    setBands(next);
+                    engine.setBands(next.low, next.mid, next.high);
+                  }}
+                />
                 <input
                   className="fader"
                   type="range"
@@ -909,13 +923,18 @@ export function App() {
                     engine.setBands(next.low, next.mid, next.high);
                   }}
                 />
-              </label>
+              </div>
             ))}
-            <label className="block">
-              <span className="mb-1 flex items-center justify-between text-xs text-muted">
-                <span>Filter</span>
-                <span className="tabular-nums text-fg">{Math.round(open * 100)}</span>
-              </span>
+            <div>
+              <FaderHead
+                label="Filter"
+                value={Math.round(open * 100)}
+                atDefault={open === 1}
+                onReset={() => {
+                  setOpen(1);
+                  engine.setFilter(1);
+                }}
+              />
               <input
                 className="fader"
                 type="range"
@@ -930,7 +949,7 @@ export function App() {
                   engine.setFilter(value);
                 }}
               />
-            </label>
+            </div>
           </div>
 
           <label className="mt-3 block">
@@ -962,11 +981,18 @@ export function App() {
         </section>
 
         <section className="mt-3 grid gap-3 sm:grid-cols-3">
-          <label className="block">
-            <span className="mb-1 flex items-center justify-between text-xs text-muted">
-              <span>Tempo</span>
-              <span className="tabular-nums text-fg">{bpm}</span>
-            </span>
+          <div>
+            <FaderHead
+              label="Tempo"
+              value={bpm}
+              atDefault={!track || bpm === track.bpm}
+              onReset={() => {
+                if (!track) return;
+                cancelTempoGlide();
+                setBpm(track.bpm);
+                engine.setBpm(track.bpm);
+              }}
+            />
             <input
               className="fader"
               type="range"
@@ -982,12 +1008,18 @@ export function App() {
                 engine.setBpm(value);
               }}
             />
-          </label>
-          <label className="block">
-            <span className="mb-1 flex items-center justify-between text-xs text-muted">
-              <span>Swing</span>
-              <span className="tabular-nums text-fg">{Math.round(swing * 100)}</span>
-            </span>
+          </div>
+          <div>
+            <FaderHead
+              label="Swing"
+              value={Math.round(swing * 100)}
+              atDefault={!track || swing === track.swing}
+              onReset={() => {
+                if (!track) return;
+                setSwing(track.swing);
+                engine.setSwing(track.swing);
+              }}
+            />
             <input
               className="fader"
               type="range"
@@ -1002,12 +1034,17 @@ export function App() {
                 engine.setSwing(value);
               }}
             />
-          </label>
-          <label className="block">
-            <span className="mb-1 flex items-center justify-between text-xs text-muted">
-              <span>Master</span>
-              <span className="tabular-nums text-fg">{Math.round(master * 100)}</span>
-            </span>
+          </div>
+          <div>
+            <FaderHead
+              label="Master"
+              value={Math.round(master * 100)}
+              atDefault={master === MASTER_DEFAULT}
+              onReset={() => {
+                setMaster(MASTER_DEFAULT);
+                engine.setMaster(MASTER_DEFAULT);
+              }}
+            />
             <input
               className="fader"
               type="range"
@@ -1022,7 +1059,7 @@ export function App() {
                 engine.setMaster(value);
               }}
             />
-          </label>
+          </div>
         </section>
 
         <p className="mt-4 text-xs text-muted">
@@ -1033,6 +1070,234 @@ export function App() {
         </p>
       </div>
     </main>
+  );
+}
+
+/**
+ * A fader's header: its name, its value, and a reset badge in the solo family.
+ *
+ * The badge sits outside any <label>, so clicking it never also focuses the fader.
+ * It stays in the row when the fader is already home — disabled and dimmed — so the
+ * row doesn't jump as you move off the default and back.
+ */
+function FaderHead({
+  label,
+  value,
+  atDefault,
+  onReset,
+}: {
+  label: string;
+  value: number | string;
+  atDefault: boolean;
+  onReset: () => void;
+}) {
+  return (
+    <span className="mb-1 flex items-center justify-between gap-2 text-xs text-muted">
+      <span>{label}</span>
+      <span className="flex items-center gap-2">
+        <span className="tabular-nums text-fg">{value}</span>
+        <button
+          type="button"
+          className="solo reset"
+          disabled={atDefault}
+          aria-label={`Reset ${label.toLowerCase()}`}
+          onClick={onReset}
+        >
+          Reset
+        </button>
+      </span>
+    </span>
+  );
+}
+
+/** Degrees of backward wind, within one drag, that throw a backspin. */
+const JOG_BACKSPIN_DEG = 80;
+/** A backward flick faster than this (deg/ms) backspins on release regardless of distance. */
+const JOG_FLICK_SPEED = 0.6;
+/** How long the hand can rest without moving before a bend falls back to the touch drag. */
+const JOG_REST_MS = 90;
+/** Per-frame (60 Hz) decay of the disc's coast after release. */
+const JOG_FRICTION = 0.92;
+
+/**
+ * The jog wheel: a platter you put your hand on.
+ *
+ * Any touch does something. Putting a hand on the platter drags the tempo down, the
+ * way fingers on a spinning record slow it; moving forward bends it up, moving back
+ * bends it down, and a hand resting still drags again. Wind it back a quarter turn,
+ * or flick it back, and it throws a backspin. The wheel only decides the gesture —
+ * the audio is the engine's.
+ *
+ * Let go mid-spin and the disc coasts to a stop. That coast is visual only; the tempo
+ * returns to nominal the moment the hand leaves.
+ *
+ * While the deck plays the label turns at 33⅓ rpm, so the wheel reads as live. That
+ * idle spin is decoration and stops under reduced motion; the drag rotation is the
+ * control itself and doesn't.
+ */
+function JogWheel({ spinning }: { spinning: boolean }) {
+  const discRef = useRef<HTMLDivElement>(null);
+  const drag = useRef<{
+    lastAngle: number;
+    wound: number;
+    lastTime: number;
+    speed: number;
+    fired: boolean;
+    dir: -1 | 0 | 1;
+  } | null>(null);
+  const turn = useRef(0);
+  const rest = useRef<number | undefined>(undefined);
+  const coast = useRef<number | undefined>(undefined);
+  const [held, setHeld] = useState(false);
+
+  useEffect(
+    () => () => {
+      window.clearTimeout(rest.current);
+      if (coast.current !== undefined) cancelAnimationFrame(coast.current);
+    },
+    [],
+  );
+
+  const angleOf = (event: ReactPointerEvent<HTMLElement>) => {
+    const box = event.currentTarget.getBoundingClientRect();
+    const x = event.clientX - (box.left + box.width / 2);
+    const y = event.clientY - (box.top + box.height / 2);
+    return (Math.atan2(y, x) * 180) / Math.PI;
+  };
+
+  const paint = () => discRef.current?.style.setProperty('--turn', `${turn.current}deg`);
+
+  const bend = (dir: -1 | 0 | 1) => {
+    const d = drag.current;
+    if (!d || d.dir === dir) return;
+    d.dir = dir;
+    engine.nudge(dir);
+  };
+
+  const stopCoast = () => {
+    if (coast.current !== undefined) cancelAnimationFrame(coast.current);
+    coast.current = undefined;
+  };
+
+  /** Let the disc run on at the release speed (deg/ms), decaying per frame. */
+  const startCoast = (speed: number) => {
+    let v = speed;
+    let last = performance.now();
+    const step = (now: number) => {
+      const dt = Math.min(64, now - last);
+      last = now;
+      turn.current += v * dt;
+      paint();
+      // Friction per frame, scaled to the frame's length, so it settles the same at
+      // 60 Hz and 120 Hz.
+      v *= JOG_FRICTION ** (dt / 16.7);
+      coast.current = Math.abs(v) > 0.005 ? requestAnimationFrame(step) : undefined;
+    };
+    coast.current = requestAnimationFrame(step);
+  };
+
+  const release = () => {
+    const d = drag.current;
+    if (!d) return;
+    window.clearTimeout(rest.current);
+    if (!d.fired && d.speed < -JOG_FLICK_SPEED) engine.backspin();
+    engine.nudge(0);
+    if (Math.abs(d.speed) > 0.02) startCoast(d.speed);
+    drag.current = null;
+    setHeld(false);
+  };
+
+  return (
+    <div className="jog-wrap">
+      <div
+        role="button"
+        tabIndex={0}
+        aria-label="Jog wheel. Touch to drag the tempo, turn it to bend, wind it back to backspin. Arrow keys bend, space backspins."
+        className={cx('jog', held && 'is-held')}
+        onPointerDown={(event) => {
+          try {
+            event.currentTarget.setPointerCapture(event.pointerId);
+          } catch {
+            /* pointer already released */
+          }
+          stopCoast();
+          drag.current = {
+            lastAngle: angleOf(event),
+            wound: 0,
+            lastTime: event.timeStamp,
+            speed: 0,
+            fired: false,
+            dir: 0,
+          };
+          // A hand on the platter drags it, so even a tap is heard.
+          bend(-1);
+          setHeld(true);
+        }}
+        onPointerMove={(event) => {
+          const d = drag.current;
+          if (!d) return;
+          const angle = angleOf(event);
+          // Wrap into ±180 so crossing nine o'clock doesn't read as a whole turn.
+          let delta = angle - d.lastAngle;
+          if (delta > 180) delta -= 360;
+          if (delta < -180) delta += 360;
+          const dt = Math.max(1, event.timeStamp - d.lastTime);
+          d.lastAngle = angle;
+          d.lastTime = event.timeStamp;
+          // Smoothed, so one jittery sample can't fake a flick.
+          d.speed = 0.6 * (delta / dt) + 0.4 * d.speed;
+          turn.current += delta;
+          paint();
+
+          if (Math.abs(delta) < 0.05) return;
+          // Reversing direction starts a fresh wind, so a scrub back and forth never
+          // adds up to a backspin by accident.
+          d.wound = Math.sign(delta) === Math.sign(d.wound) ? d.wound + delta : delta;
+          bend(delta > 0 ? 1 : -1);
+          window.clearTimeout(rest.current);
+          rest.current = window.setTimeout(() => {
+            if (drag.current) drag.current.speed = 0;
+            bend(-1);
+          }, JOG_REST_MS);
+          if (!d.fired && d.wound < -JOG_BACKSPIN_DEG) {
+            d.fired = true;
+            engine.backspin();
+          }
+        }}
+        onPointerUp={release}
+        onPointerCancel={release}
+        onLostPointerCapture={release}
+        onKeyDown={(event) => {
+          if (event.key === ' ' || event.key === 'Enter') {
+            event.preventDefault();
+            if (event.repeat) return;
+            turn.current -= 180;
+            paint();
+            engine.backspin();
+          } else if (event.key === 'ArrowRight' || event.key === 'ArrowUp') {
+            event.preventDefault();
+            turn.current += 15;
+            paint();
+            engine.nudge(1);
+          } else if (event.key === 'ArrowLeft' || event.key === 'ArrowDown') {
+            event.preventDefault();
+            turn.current -= 15;
+            paint();
+            engine.nudge(-1);
+          }
+        }}
+        onKeyUp={(event) => {
+          if (event.key.startsWith('Arrow')) engine.nudge(0);
+        }}
+      >
+        <div ref={discRef} className="jog-disc">
+          <div className={cx('jog-label', spinning && !held && 'is-spinning')}>
+            <span className="jog-marker" />
+          </div>
+        </div>
+      </div>
+      <span className="jog-caption">Wind back to backspin</span>
+    </div>
   );
 }
 
@@ -1055,7 +1320,7 @@ function HoldButton({
   return (
     <button
       type="button"
-      className="tap rounded-full border border-line bg-surface px-2 py-2 text-xs font-semibold"
+      className="deck-pad tap"
       aria-label={`Nudge tempo ${label.slice(-1) === '+' ? 'up' : 'down'}`}
       onPointerDown={(event) => {
         try {
@@ -1085,20 +1350,18 @@ function TrackGrid({
 }) {
   if (items.length === 0) return null;
   return (
-    <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
+    <div className="track-grid mt-1.5">
       {items.map((item) => (
         <button
           key={item.id}
           type="button"
           aria-pressed={item.id === current}
-          className={cx(
-            'tap rounded-xl border px-2.5 py-2.5 text-left',
-            item.id === current ? 'border-acid bg-raised' : 'border-line bg-surface',
-          )}
+          aria-label={`${item.name}, ${item.bpm} bpm`}
+          className="track-badge tap"
           onClick={() => onPick(item)}
         >
-          <span className="block truncate font-display text-sm font-bold">{item.name}</span>
-          <span className="mt-1 block text-xs text-muted">{item.detail}</span>
+          <span className="truncate">{item.name}</span>
+          <span className="track-bpm">{item.bpm}</span>
         </button>
       ))}
     </div>
