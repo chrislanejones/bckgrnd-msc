@@ -29,6 +29,9 @@ pub struct Transport {
     /// Render rate, so gesture ramps and step lengths are sample-accurate at any
     /// device rate rather than assuming 48 kHz.
     pub sample_rate: f32,
+    /// Paused under a scratch: no steps fire and the clock does not move, but the
+    /// transport still counts as playing and `visual_step` holds where it was.
+    pub held: bool,
 }
 
 const BRAKE_SECONDS: f32 = 0.85;
@@ -49,6 +52,7 @@ impl Transport {
             loop_start: 0,
             visual_step: -1,
             sample_rate,
+            held: false,
         }
     }
 
@@ -111,7 +115,7 @@ impl Transport {
 
     /// Slow the tempo to a stop over `BRAKE_SECONDS`, the vinyl brake gesture.
     pub fn brake(&mut self) {
-        if self.playing && self.brake_from == 0.0 && self.spin_from == 0.0 {
+        if self.playing && !self.held && self.brake_from == 0.0 && self.spin_from == 0.0 {
             self.brake_from = 1.0;
         }
     }
@@ -121,7 +125,7 @@ impl Transport {
     /// Returns `true` when the gesture begins, so the engine can capture its reverse
     /// take and stop scheduling new notes for the duration.
     pub fn backspin(&mut self) -> bool {
-        if !self.playing || self.brake_from > 0.0 || self.spin_from > 0.0 {
+        if !self.playing || self.held || self.brake_from > 0.0 || self.spin_from > 0.0 {
             return false;
         }
         self.spin_from = 1.0;
@@ -140,7 +144,23 @@ impl Transport {
         };
     }
 
+    /// Pause for a scratch. Any brake or spin in flight is dropped: the hand on the
+    /// platter wins.
+    pub fn hold(&mut self) {
+        self.held = true;
+        self.brake_from = 0.0;
+        self.spin_from = 0.0;
+        self.rate = 1.0;
+    }
+
+    /// Let go after a scratch, back at normal speed.
+    pub fn unhold(&mut self) {
+        self.held = false;
+        self.rate = 1.0;
+    }
+
     pub fn start(&mut self) {
+        self.held = false;
         self.playing = true;
         self.brake_from = 0.0;
         self.spin_from = 0.0;
@@ -151,6 +171,7 @@ impl Transport {
     }
 
     pub fn stop(&mut self) {
+        self.held = false;
         self.playing = false;
         self.brake_from = 0.0;
         self.spin_from = 0.0;
@@ -191,7 +212,7 @@ impl Transport {
     /// Consume one sample of clock time. Returns the step that should fire at this
     /// sample, if any, having advanced the clock past it.
     pub fn tick(&mut self) -> Option<usize> {
-        if !self.playing {
+        if !self.playing || self.held {
             return None;
         }
         if self.to_next > 0.0 {

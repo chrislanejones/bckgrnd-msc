@@ -64,6 +64,7 @@
 mod drums;
 mod dsp;
 mod mixer;
+mod scratch;
 mod tone;
 mod track;
 mod transport;
@@ -337,21 +338,29 @@ impl ReverseVoice {
 /// dense arrangement degrades by stealing the quietest voice rather than allocating.
 const MAX_VOICES: usize = 48;
 
-/// Ring buffer holding the last two seconds of output for the backspin gesture,
-/// replacing the original's `ScriptProcessorNode` tap.
+/// Seconds of output the ring keeps. The backspin takes 1.35 s of it; the scratch
+/// gesture can reach back across nearly all of it.
+const RING_SECONDS: f32 = 4.0;
+
+/// Ring buffer holding the last four seconds of output, for the backspin and scratch
+/// gestures, replacing the original's `ScriptProcessorNode` tap.
 struct Ring {
     left: Vec<f32>,
     right: Vec<f32>,
     write: usize,
+    /// Samples written since the last clear, saturating at the ring's length, so a
+    /// scratch knows how far back real output goes.
+    filled: usize,
 }
 
 impl Ring {
     fn new(sample_rate: f32) -> Self {
-        let n = (sample_rate * 2.0) as usize;
+        let n = ((sample_rate * RING_SECONDS) as usize).max(2);
         Self {
             left: vec![0.0; n],
             right: vec![0.0; n],
             write: 0,
+            filled: 0,
         }
     }
 
@@ -360,12 +369,16 @@ impl Ring {
         self.left[self.write] = l;
         self.right[self.write] = r;
         self.write = (self.write + 1) % self.left.len();
+        if self.filled < self.left.len() {
+            self.filled += 1;
+        }
     }
 
     fn clear(&mut self) {
         self.left.iter_mut().for_each(|v| *v = 0.0);
         self.right.iter_mut().for_each(|v| *v = 0.0);
         self.write = 0;
+        self.filled = 0;
     }
 
     /// Copy the most recent `seconds` of output, newest first.
@@ -407,6 +420,15 @@ pub struct Engine {
     ducker: Ducker,
     voices: Vec<Option<Voice>>,
     ring: Ring,
+    /// The scratch gesture's reader over the frozen ring.
+    scratch: scratch::Scratch,
+    /// Whether the transport was running when the scratch began, so letting go
+    /// resumes it or leaves it stopped.
+    scratch_resume: bool,
+    /// Gain on the sequenced music, faded out under a scratch and back after it.
+    music: f32,
+    music_target: f32,
+    music_step: f32,
     /// Level per stem for the UI meters, post-fader.
     levels: Vec<f32>,
     echo_on: bool,
@@ -439,6 +461,11 @@ impl Engine {
             ducker: Ducker::new(track.kind, 126.0, sr),
             voices: (0..MAX_VOICES).map(|_| None).collect(),
             ring: Ring::new(sr),
+            scratch: scratch::Scratch::new(sr),
+            scratch_resume: false,
+            music: 1.0,
+            music_target: 1.0,
+            music_step: 1.0 / (scratch::FADE_SECONDS * sr).max(1.0),
             levels: vec![0.0; 8],
             echo_on: false,
             output_gain: 1.0,
@@ -448,10 +475,12 @@ impl Engine {
     }
 
     pub fn play(&mut self) {
+        self.let_go_of_the_platter();
         self.transport.start();
     }
 
     pub fn stop(&mut self) {
+        self.let_go_of_the_platter();
         self.transport.stop();
         for v in self.voices.iter_mut().flatten() {
             v.release();
@@ -503,12 +532,77 @@ impl Engine {
         self.transport.brake();
     }
 
+    /// Grab the platter: freeze the recent output for scratching and pause the
+    /// transport where it is.
+    ///
+    /// No steps fire until [`Engine::scratch_end`]; the sequenced voices fade out over
+    /// 15 ms and are then dropped, so the output is the scratch reader alone, summed
+    /// into the master like the backspin take. The reader starts at "now", standing
+    /// still, and can reach back across the ring (just under four seconds once that
+    /// much has played).
+    ///
+    /// Calling this while already scratching is a no-op: the cursor stays where the
+    /// hand left it. Calling it during the release fade of a scratch recaptures.
+    pub fn scratch_start(&mut self) {
+        if self.scratch.held() {
+            return;
+        }
+        self.scratch
+            .capture(self.ring.left.len(), self.ring.write, self.ring.filled);
+        self.scratch_resume = self.transport.playing;
+        self.transport.hold();
+        self.music_target = 0.0;
+    }
+
+    /// Signed platter speed for a scratch: 1 forward at normal speed, -1 backward, 0
+    /// held still. Clamped to +/-4; anything not finite reads as 0. The actual speed
+    /// glides toward this with about 20 ms of inertia. Ignored when not scratching.
+    pub fn scratch_rate(&mut self, rate: f32) {
+        if self.scratch.held() {
+            self.scratch.set_target(rate);
+        }
+    }
+
+    /// Let go of the platter and drop the needle at `step` (0..256, the space of
+    /// [`Engine::jump`] and `visual_step`).
+    ///
+    /// The reader fades out over 15 ms while the transport resumes at normal speed,
+    /// firing `step` on the next sample if it was playing when the scratch began.
+    /// With a loop set, a step outside it is folded into the loop at the same
+    /// position in the bar grid. Without a scratch in progress this is a plain jump.
+    pub fn scratch_end(&mut self, step: u32) {
+        let mut at = (step as usize).min(STEPS - 1);
+        let t = &self.transport;
+        if t.loop_steps > 0 && !(t.loop_start..t.loop_start + t.loop_steps).contains(&at) {
+            at = t.loop_start + at % t.loop_steps;
+        }
+        if !self.scratch.held() {
+            self.transport.jump(at);
+            return;
+        }
+        let resume = self.scratch_resume;
+        self.let_go_of_the_platter();
+        self.transport.jump(at);
+        if resume {
+            self.transport.to_next = 0.0;
+        }
+    }
+
+    /// End a scratch, if there is one, without moving the playhead.
+    fn let_go_of_the_platter(&mut self) {
+        if self.scratch.held() {
+            self.scratch.release();
+            self.transport.unhold();
+            self.music_target = 1.0;
+        }
+    }
+
     /// Capture the last ~1.35 s of output and play it backwards with a rising rate.
     ///
     /// This replaces the original's `ScriptProcessorNode` tap. If nothing worth
     /// reversing has played yet, a synthetic sweep stands in, as the original did.
     pub fn backspin(&mut self) {
-        if !self.transport.backspin() {
+        if self.scratch.held() || !self.transport.backspin() {
             return;
         }
         match self.ring.take(1.35, self.sample_rate) {
@@ -725,7 +819,10 @@ impl Engine {
             let (l, r) = self.render_sample();
             out_l[i] = l * self.output_gain;
             out_r[i] = r * self.output_gain;
-            self.ring.push(out_l[i], out_r[i]);
+            // Frozen under a scratch, so the reader's window stays put.
+            if !self.scratch.held() {
+                self.ring.push(out_l[i], out_r[i]);
+            }
         }
         for (i, c) in self.channels.iter_mut().enumerate() {
             c.meter();
@@ -764,11 +861,34 @@ impl Engine {
         }
         self.ducker.apply(&mut self.channels, self.sample_rate);
 
+        // The music fade under a scratch. Once it is all the way down the voices are
+        // dropped rather than left running unheard.
+        if self.music != self.music_target {
+            self.music = if self.music < self.music_target {
+                (self.music + self.music_step).min(self.music_target)
+            } else {
+                (self.music - self.music_step).max(self.music_target)
+            };
+            if self.music <= 0.0 {
+                self.voices.iter_mut().for_each(|v| *v = None);
+                for c in self.channels.iter_mut() {
+                    c.duck = 1.0;
+                }
+            }
+        }
+        direct_l *= self.music;
+        direct_r *= self.music;
+        if self.scratch.active() {
+            let (l, r) = self.scratch.process(&self.ring.left, &self.ring.right);
+            direct_l += l;
+            direct_r += r;
+        }
+
         let any_solo = Stem::ALL.iter().any(|s| self.channels[s.index()].solo);
         let mut sum_l = 0.0f32;
         let mut sum_r = 0.0f32;
         for c in self.channels.iter_mut() {
-            let g = c.gain(any_solo);
+            let g = c.gain(any_solo) * self.music;
             c.bus.left *= g;
             c.bus.right *= g;
             // Sends tap post-fader so cutting a stem also cuts its echo. One call per
@@ -1492,6 +1612,190 @@ mod tests {
             after <= before + 1,
             "backspin spawned voices {before} -> {after}"
         );
+    }
+
+    /// Render `blocks` 128-sample blocks, returning the summed |L| + |R| and
+    /// asserting every sample is finite.
+    fn run(e: &mut Engine, blocks: usize) -> f32 {
+        let mut total = 0.0f32;
+        for _ in 0..blocks {
+            let mut l = [0.0f32; 128];
+            let mut r = [0.0f32; 128];
+            e.process(&mut l, &mut r);
+            for (a, b) in l.iter().zip(r.iter()) {
+                assert!(a.is_finite() && b.is_finite(), "non-finite output");
+                total += a.abs() + b.abs();
+            }
+        }
+        total
+    }
+
+    fn live_voices(e: &Engine) -> usize {
+        e.voices.iter().filter(|v| v.is_some()).count()
+    }
+
+    #[test]
+    fn a_scratch_pauses_the_transport_and_resumes_at_the_requested_step() {
+        let mut e = Engine::new(48_000.0);
+        e.load_track(track_with_kick());
+        e.play();
+        run(&mut e, 400);
+        e.scratch_start();
+        let step = e.transport.step;
+        let shown = e.visual_step();
+        assert!(shown >= 0);
+
+        // A second of dragging back and forth: the clock does not move.
+        for rate in [-1.0, 0.0, 1.0, -2.0, 0.5] {
+            e.scratch_rate(rate);
+            run(&mut e, 75);
+            assert_eq!(e.transport.step, step, "transport advanced under a scratch");
+            assert_eq!(e.visual_step(), shown, "playhead moved under a scratch");
+            assert!(e.is_playing());
+        }
+
+        e.scratch_end(64);
+        run(&mut e, 1);
+        assert_eq!(e.visual_step(), 64, "should land on the requested step");
+        // And it keeps going from there at normal speed.
+        run(&mut e, 400);
+        assert!(e.visual_step() > 64, "transport did not resume");
+        assert_eq!(e.transport.rate, 1.0);
+    }
+
+    #[test]
+    fn a_scratch_spawns_no_voices_and_drops_the_old_ones() {
+        let mut e = Engine::new(48_000.0);
+        e.load_track(track_with_kick());
+        e.play();
+        run(&mut e, 400);
+        assert!(live_voices(&e) > 0);
+        e.scratch_start();
+        e.scratch_rate(-1.0);
+        // Past the 15 ms fade, the sequenced voices are gone.
+        run(&mut e, 8);
+        assert_eq!(live_voices(&e), 0, "voices survived the music fade");
+        for rate in [-1.0, 1.0, -4.0, 4.0, 0.0] {
+            e.scratch_rate(rate);
+            run(&mut e, 100);
+            assert_eq!(live_voices(&e), 0, "a voice was spawned under a scratch");
+        }
+        // Gestures that would spawn voices are refused while the platter is held.
+        e.backspin();
+        run(&mut e, 10);
+        assert_eq!(live_voices(&e), 0, "backspin spawned under a scratch");
+    }
+
+    #[test]
+    fn dragging_back_plays_the_recent_past() {
+        let mut e = Engine::new(48_000.0);
+        e.load_track(track_with_kick());
+        e.play();
+        run(&mut e, 750);
+        e.scratch_start();
+        // Held still: the music fades and nothing replaces it.
+        run(&mut e, 400);
+        let held = run(&mut e, 40);
+        e.scratch_rate(-1.0);
+        let dragged = run(&mut e, 300);
+        assert!(
+            dragged > 50.0 * held.max(1e-3),
+            "dragging back made no sound: held {held}, dragged {dragged}"
+        );
+    }
+
+    #[test]
+    fn the_edges_hold_at_full_throw() {
+        let mut e = Engine::new(48_000.0);
+        e.load_track(track_with_kick());
+        e.play();
+        run(&mut e, 2_000);
+        e.scratch_start();
+        let last = (e.scratch.len() - 1) as f32;
+        assert!(
+            e.scratch.len() as f32 > 3.9 * 48_000.0,
+            "window {}",
+            e.scratch.len()
+        );
+        for rate in [-4.0, 4.0, -4.0, f32::NAN, f32::INFINITY, -1e9] {
+            e.scratch_rate(rate);
+            for _ in 0..600 {
+                run(&mut e, 1);
+                let p = e.scratch.pos();
+                assert!((0.0..=last).contains(&p), "cursor left the window: {p}");
+            }
+        }
+        e.scratch_end(0);
+        run(&mut e, 100);
+    }
+
+    #[test]
+    fn scratch_calls_without_a_scratch_are_safe() {
+        let mut e = Engine::new(48_000.0);
+        e.load_track(track_with_kick());
+        // Before anything has played, and stopped.
+        e.scratch_rate(-1.0);
+        e.scratch_end(64);
+        run(&mut e, 10);
+        e.scratch_start();
+        e.scratch_rate(f32::NAN);
+        run(&mut e, 10);
+        e.scratch_end(999);
+        run(&mut e, 10);
+        assert!(!e.is_playing(), "a scratch started the transport");
+
+        // While playing: a bare scratch_end is just a jump.
+        e.play();
+        run(&mut e, 100);
+        e.scratch_rate(3.0);
+        e.scratch_end(64);
+        assert_eq!(e.transport.step, 64);
+        assert!(!e.transport.held);
+        run(&mut e, 10);
+        assert!(e.is_playing());
+    }
+
+    #[test]
+    fn a_second_grab_keeps_the_cursor_where_it_was() {
+        let mut e = Engine::new(48_000.0);
+        e.load_track(track_with_kick());
+        e.play();
+        run(&mut e, 400);
+        e.scratch_start();
+        e.scratch_rate(-1.0);
+        run(&mut e, 100);
+        let p = e.scratch.pos();
+        e.scratch_start();
+        assert_eq!(e.scratch.pos(), p, "a repeat grab recaptured");
+    }
+
+    #[test]
+    fn letting_go_inside_a_loop_stays_inside_it() {
+        let mut e = Engine::new(48_000.0);
+        e.load_track(track_with_kick());
+        e.play();
+        e.set_loop(1);
+        run(&mut e, 100);
+        e.scratch_start();
+        run(&mut e, 10);
+        e.scratch_end(70);
+        run(&mut e, 1);
+        assert_eq!(e.visual_step(), 6, "70 folds to 6 in a one-bar loop at 0");
+    }
+
+    #[test]
+    fn stop_during_a_scratch_lets_go() {
+        let mut e = Engine::new(48_000.0);
+        e.load_track(track_with_kick());
+        e.play();
+        run(&mut e, 400);
+        e.scratch_start();
+        e.scratch_rate(-1.0);
+        run(&mut e, 50);
+        e.stop();
+        assert!(!e.scratch.held() && !e.transport.held);
+        run(&mut e, 20);
+        assert!(!e.scratch.active(), "the reader outlived its fade");
     }
 
     #[test]

@@ -383,6 +383,27 @@ export class EngineHost {
     this.post({ type: 'backspin' });
   }
 
+  /**
+   * Grab the platter: freeze the last ~4 s of output and pause the transport.
+   * The music fades out over 15 ms; until `scratch()` moves it, the deck is silent.
+   */
+  scratchStart(): void {
+    this.post({ type: 'scratchStart' });
+  }
+
+  /**
+   * Platter speed while scratching: 1 forward at normal speed, -1 backward, 0 held.
+   * Clamped to +/-4 in the engine, which glides toward it over ~20 ms.
+   */
+  scratch(rate: number): void {
+    this.post({ type: 'scratch', rate });
+  }
+
+  /** Let go and resume playback from `step` (0..255, the song-step space of the playhead). */
+  scratchEnd(step: number): void {
+    this.post({ type: 'scratchEnd', step });
+  }
+
   nudge(dir: -1 | 0 | 1): void {
     this.post({ type: 'nudge', dir });
   }

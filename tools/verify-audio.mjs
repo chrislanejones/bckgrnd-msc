@@ -88,6 +88,9 @@ try {
       trackId = 'warehouse',
       ms = 1200,
       commands = [],
+      // Messages posted at `at` ms after play, and named spans whose peak is wanted.
+      timeline = [],
+      windows = [],
     } = {}) {
       const ctx = new AudioContext({ latencyHint: 'interactive' });
       await ctx.audioWorklet.addModule('/build/engine-worklet.js');
@@ -102,6 +105,8 @@ try {
       // Accumulate across the whole window rather than keeping the last snapshot:
       // a single sample cannot show that the playhead *advances* or that meters
       // *move*, and it lands wherever the window happened to end.
+      const stepLog = [];
+      let t0 = performance.now();
       const seen = { steps: new Set(), maxLevels: new Array(8).fill(0), sawPlaying: false, frames: 0 };
       node.port.onmessage = (e) => {
         if (e.data.type === 'error') {
@@ -112,6 +117,7 @@ try {
         const f = e.data.frame;
         seen.frames += 1;
         seen.steps.add(f[8]);
+        if (timeline.length) stepLog.push([performance.now() - t0, f[8]]);
         seen.sawPlaying ||= f[9] === 1;
         for (let i = 0; i < 8; i += 1) seen.maxLevels[i] = Math.max(seen.maxLevels[i], f[i]);
       };
@@ -141,6 +147,11 @@ try {
         node.port.postMessage(command);
       }
       node.port.postMessage({ type: 'transport', deck: 'a', action: 'play' });
+      t0 = performance.now();
+      for (const { at, message } of timeline) {
+        setTimeout(() => node.port.postMessage(message), at);
+      }
+      const windowPeak = Object.fromEntries(windows.map((w) => [w.name, 0]));
 
       const bufL = new Float32Array(analyserL.fftSize);
       const bufR = new Float32Array(analyserR.fftSize);
@@ -162,6 +173,13 @@ try {
           if (Math.abs(l) > peakL) peakL = Math.abs(l);
           if (Math.abs(r) > peakR) peakR = Math.abs(r);
         }
+        const now = performance.now() - t0;
+        for (const w of windows) {
+          if (now < w.from || now > w.to) continue;
+          for (let i = 0; i < bufL.length; i += 1) {
+            windowPeak[w.name] = Math.max(windowPeak[w.name], Math.abs(bufL[i]), Math.abs(bufR[i]));
+          }
+        }
         await new Promise((r) => setTimeout(r, 16));
       }
 
@@ -171,6 +189,8 @@ try {
         peakR,
         nonFinite,
         errors,
+        windowPeak,
+        stepLog,
         sampleRate: ctx.sampleRate,
         telemetry: {
           frames: seen.frames,
@@ -233,6 +253,17 @@ try {
       ],
     });
 
+    // 6. Scratch: grab at 1.5 s, drag back at normal speed, let go at step 64.
+    out.scratch = await measure({
+      ms: 2800,
+      timeline: [
+        { at: 1500, message: { type: 'scratchStart' } },
+        { at: 1550, message: { type: 'scratch', rate: -1 } },
+        { at: 2100, message: { type: 'scratchEnd', step: 64 } },
+      ],
+      windows: [{ name: 'drag', from: 1650, to: 2050 }],
+    });
+
     return out;
   }, baseUrl);
 
@@ -288,6 +319,19 @@ try {
     result.tempo.peak > 0.01 && result.tempo.errors.length === 0,
     `peak ${result.tempo.peak.toFixed(4)}${result.tempo.errors.length ? ` errors: ${result.tempo.errors.join('; ')}` : ''}`,
   );
+
+  {
+    const r = result.scratch;
+    // The first playhead reports a beat or so after letting go, allowing for
+    // message and telemetry latency.
+    const after = r.stepLog.filter(([t]) => t > 2250).map(([, step]) => step);
+    const first = after.length ? after[0] : -1;
+    check(
+      'scratch drags audible signal and resumes near step 64',
+      r.windowPeak.drag > 0.01 && first >= 64 && first <= 72 && r.errors.length === 0,
+      `drag peak ${r.windowPeak.drag.toFixed(4)}, first step after release ${first}${r.errors.length ? ` errors: ${r.errors.join('; ')}` : ''}`,
+    );
+  }
 
   check('no page errors', pageErrors.length === 0, pageErrors.join('; '));
 } finally {

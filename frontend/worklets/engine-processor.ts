@@ -40,6 +40,9 @@ type Inbound =
   | { type: 'cue' }
   | { type: 'brake' }
   | { type: 'backspin' }
+  | { type: 'scratchStart' }
+  | { type: 'scratch'; rate: number }
+  | { type: 'scratchEnd'; step: number }
   | { type: 'nudge'; dir: -1 | 0 | 1 }
   | { type: 'mix'; deck: DeckId; bpm: number; swing: number; json: string }
   | { type: 'promote'; deck: DeckId };
@@ -219,6 +222,19 @@ class EngineProcessor extends AudioWorkletProcessor {
 
       case 'backspin':
         this.engines[this.live]?.backspin();
+        return;
+
+      // Scratch, like the other deck gestures, is the live deck's alone.
+      case 'scratchStart':
+        this.engines[this.live]?.scratch_start();
+        return;
+
+      case 'scratch':
+        this.engines[this.live]?.scratch_rate(message.rate);
+        return;
+
+      case 'scratchEnd':
+        this.engines[this.live]?.scratch_end(Math.max(0, Math.floor(message.step) || 0));
         return;
 
       case 'nudge':
