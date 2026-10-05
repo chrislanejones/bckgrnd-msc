@@ -72,11 +72,8 @@ Run in this order, after the waveform scratch lands. None needs a 9th stem.
 
 ## Found in the README audit (10-05-2026)
 
-- **Tempo fader stops at 150 bpm** (`app.tsx`, min 70 / max 150), but Lowtide and
-  Slipstream run at 172 and 174. On those tracks the fader can't show or reach the
-  track's own tempo.
-- **Cue always plays deck A** (`engine.play('a')`, hardcoded). After a mix deck B is
-  live, so Cue may start the idle deck. Untested.
+- ~~Tempo fader stops at 150 bpm~~ — fixed 10-05-2026, the fader is 60–180.
+- ~~Cue always plays deck A~~ — fixed 10-05-2026, Cue plays the live deck.
 - `HANDOFF.md` is partly stale ("12 tracks", layout missing `scratch.rs`,
   `transition.rs`, the Breaks section; British spellings on lines 5 and 119). Worth a
   targeted update rather than archiving.

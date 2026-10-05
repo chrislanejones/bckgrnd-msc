@@ -848,8 +848,10 @@ export function App() {
                 className="deck-pad tap"
                 aria-label="Cue to the start"
                 onClick={() => {
+                  // cue() rewinds the live deck; start that same deck. This used to
+                  // start deck A, which after a mix is the idle one.
                   engine.cue();
-                  void engine.play('a');
+                  void engine.play(liveDeck);
                 }}
               >
                 Cue
@@ -1052,8 +1054,10 @@ export function App() {
             <input
               className="fader"
               type="range"
-              min={70}
-              max={150}
+              // Wide enough for every track's own tempo: the slowest is 74 and the
+              // drum & bass tracks run at 172 and 174. The engine accepts 40–200.
+              min={60}
+              max={180}
               step={1}
               value={bpm}
               aria-label="Tempo"
