@@ -534,6 +534,10 @@ final class Library
                 ['F4', 'A4', 'C5', 'E5'],
                 ['E4', 'G#4', 'B4', 'D5'],
             ], 4, 0.32),
+            perc: [
+                'shaker' => Phrase::drums(array_fill(0, 4, '..x...x...x...x.'), 0.3, 0.36),
+                'rim' => Phrase::drums(['................', '................', '................', '...........x....'], 0.4, 0.4),
+            ],
         );
 
         $tracks[] = self::lofiTrack(
@@ -576,6 +580,10 @@ final class Library
                 ['C4', 'E4', 'G4', 'B4'],
                 ['A3', 'C4', 'E4', 'G4'],
             ], 4, 0.28),
+            perc: [
+                'rim' => Phrase::drums(['................', '....x.......x...', '................', '...............x'], 0.36, 0.42),
+                'congaLo' => Phrase::drums(array_fill(0, 4, '..........x.....'), 0.32, 0.32),
+            ],
         );
 
         $tracks[] = self::lofiTrack(
@@ -615,6 +623,13 @@ final class Library
                 ['C4', 'E4', 'G4', 'B4'],
                 ['A3', 'C4', 'E4', 'G4'],
             ], 4, 0.3),
+            perc: [
+                'shaker' => Phrase::drums(array_fill(0, 4, '.x.x.x.x.x.x.x.x'), 0.16, 0.22),
+                'congaHi' => Phrase::drums([
+                    '..x..x....x..x..', '..x..x....x.....', '..x..x....x..x..', '..x..x....x.x.x.',
+                ], 0.36, 0.46),
+                'congaLo' => Phrase::drums(array_fill(0, 4, '......x.......x.'), 0.4, 0.46),
+            ],
         );
 
         $tracks[] = self::lofiTrack(
@@ -655,6 +670,10 @@ final class Library
                 ['D4', 'F4', 'A4', 'C5'],
                 ['G3', 'B3', 'D4', 'F4'],
             ], 4, 0.28),
+            perc: [
+                'shaker' => Phrase::drums(array_fill(0, 4, 'x.x.x.x.x.x.x.x.'), 0.18, 0.26),
+                'rim' => Phrase::drums(['................', '...x.......x....', '................', '...x.......x....'], 0.34, 0.34),
+            ],
         );
 
         $tracks[] = self::lofiTrack(
@@ -694,6 +713,10 @@ final class Library
                 ['G4', 'B4', 'D5', 'F#5'],
                 ['D4', 'F#4', 'A4', 'C#5'],
             ], 4, 0.3),
+            perc: [
+                'shaker' => Phrase::drums(array_fill(0, 4, '..x...x...x...x.'), 0.2, 0.26),
+                'rim' => Phrase::drums(array_fill(0, 4, '.......x......x.'), 0.3, 0.3),
+            ],
         );
 
         // Kettle: jazz changes in B-flat, ii-V-I-vi with ninths on every chord, so no
@@ -740,6 +763,10 @@ final class Library
                 [3, 0, $gm9, 16, 0.48],
             ]),
             arp: Phrase::arpCycle([$cm9Hi, $f9Hi, $bbMaj9Hi, $gm9Hi], 4, 0.22),
+            perc: [
+                'shaker' => Phrase::drums(array_fill(0, 4, 'X.xxX.xxX.xxX.xx'), 0.14, 0.24),
+                'rim' => Phrase::drums(['............x...', '............x...', '............x...', '........x...x...'], 0.36, 0.4),
+            ],
         );
 
         // -------------------------------------------------------------------
@@ -797,6 +824,12 @@ final class Library
                 ['Eb4', 'G4', 'Bb4', 'D5'],
                 ['C4', 'Eb4', 'G4', 'Bb4'],
             ], 3, 0.24),
+            perc: [
+                'shaker' => Phrase::drums(array_fill(0, 4, '.x.x.x.x.x.x.x.x'), 0.2, 0.3),
+                'rim' => Phrase::drums([
+                    '......x.......x.', '...x..x.......x.', '......x.......x.', '...x..x....x..x.',
+                ], 0.4, 0.55),
+            ],
         );
 
         $tracks[] = new Track(
@@ -836,6 +869,12 @@ final class Library
                 [3, 0, ['F3', 'A3', 'C4', 'Eb4'], 16, 0.34],
             ]),
             arp: Phrase::arpCycle([$gm, ['Eb4', 'G4', 'Bb4'], ['Bb3', 'D4', 'F4'], $fCh], 2, 0.2),
+            perc: [
+                'shaker' => Phrase::drums(array_fill(0, 4, '.xXx.xXx.xXx.xXx'), 0.14, 0.26),
+                'rim' => Phrase::drums([
+                    '..x.....x..x....', '..x.....x.......', '..x.....x..x....', '..x.....x..x..x.',
+                ], 0.32, 0.45),
+            ],
         );
 
         $tracks[] = new Track(
@@ -877,6 +916,13 @@ final class Library
                 [3, 0, $cMaj7, 16, 0.32],
             ]),
             arp: Phrase::arpCycle([$dm, $bb, $fCh, $cCh], 4, 0.26),
+            perc: [
+                'shaker' => Phrase::drums(array_fill(0, 4, '.x.x.x.x.x.x.x.x'), 0.18, 0.26),
+                'congaHi' => Phrase::drums([
+                    '..x...x.....x...', '..x...x.....x.x.', '..x...x.....x...', '..x...x..x..x.x.',
+                ], 0.32, 0.42),
+                'congaLo' => Phrase::drums(array_fill(0, 4, '........x.....x.'), 0.34, 0.4),
+            ],
         );
 
         $tracks[] = new Track(
@@ -920,6 +966,13 @@ final class Library
                 [3, 0, $dMaj7, 16, 0.26],
             ]),
             arp: Phrase::arpCycle([$em, $em, $cCh, $dMaj], 3, 0.22),
+            perc: [
+                'rim' => Phrase::drums([
+                    '...x.......x....', '...x.......x....', '...x.......x....', '...x...x...x..x.',
+                ], 0.36, 0.5),
+                'congaHi' => Phrase::drums(array_fill(0, 4, '..x...x.....x.x.'), 0.38, 0.5),
+                'congaLo' => Phrase::drums(array_fill(0, 4, '.......x......x.'), 0.42, 0.52),
+            ],
         );
 
         $tracks[] = new Track(
@@ -1140,6 +1193,7 @@ final class Library
         array $lead,
         array $pad,
         array $arp,
+        array $perc = [],
     ): Track {
         return new Track(
             id: $id,
@@ -1158,6 +1212,7 @@ final class Library
             lead: $lead,
             pad: $pad,
             arp: $arp,
+            perc: $perc,
         );
     }
 }

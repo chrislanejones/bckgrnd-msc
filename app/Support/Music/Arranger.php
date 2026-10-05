@@ -16,6 +16,10 @@ namespace App\Support\Music;
  * | Break   | a two-hit fill, everything else dropped | full, or kept for acid | full | full |
  * | Drop    | full, with the last kick of the bar reinforced | full | full | full |
  *
+ * Hand percussion (on the hats stem) follows the same arc: the shaker slips in for
+ * the intro's last two bars, rims and congas wait for the groove, the break keeps
+ * the shaker and congas under its open hats, and the drop has everything.
+ *
  * Doing this on the server keeps song form in one place: the same arrangement is
  * what the API serves, what a preset saves, and what the engine renders.
  */
@@ -99,6 +103,17 @@ final class Arranger
             'arp' => Phrase::copyNotes($t->arp),
         ];
 
+        // --- Hand percussion: sparse in the intro, out of the way in the break.
+        $perc = [];
+        foreach ($t->perc as $instrument => $lane) {
+            $inIntro = $instrument === 'shaker' ? Phrase::muteHits($lane, [2, 3]) : $quiet;
+            $inBreak = $instrument === 'rim' ? $quiet : $lane;
+            $joined = Phrase::join($inIntro, $lane, $inBreak, $lane);
+            if (max($joined) > 0.0) {
+                $perc[$instrument] = $joined;
+            }
+        }
+
         return new ArrangedTrack(
             id: $t->id,
             name: $t->name,
@@ -118,6 +133,7 @@ final class Arranger
             arp: Phrase::join($intro['arp'], $groove['arp'], $break['arp'], $drop['arp']),
             section: $t->section,
             style: $t->style,
+            perc: $perc,
         );
     }
 }

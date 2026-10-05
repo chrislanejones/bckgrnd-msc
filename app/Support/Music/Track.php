@@ -23,6 +23,9 @@ final class Track
      * @param  array<int, NoteEvent|null>  $pad
      * @param  array<int, NoteEvent|null>  $arp
      * @param  array<string, float>  $mix  fader position per stem
+     * @param  array<string, array<int, float>>  $perc  hand percussion on the hats stem,
+     *                                                  one 64-step lane per instrument
+     *                                                  in `Track::PERC`; any may be absent
      */
     public function __construct(
         public readonly string $id,
@@ -43,7 +46,37 @@ final class Track
         public readonly array $arp,
         public readonly string $section = '',
         public readonly string $style = '',
-    ) {}
+        public readonly array $perc = [],
+    ) {
+        foreach ($perc as $instrument => $lane) {
+            if (! in_array($instrument, self::PERC, true)) {
+                throw new \InvalidArgumentException("unknown percussion: {$instrument}");
+            }
+            if (count($lane) !== Phrase::GROOVE_STEPS) {
+                throw new \InvalidArgumentException("{$instrument} lane must be ".Phrase::GROOVE_STEPS.' steps');
+            }
+        }
+    }
+
+    /**
+     * The hand percussion the engine plays on the hats stem: a shaker, an 808-style
+     * rimshot, and a high and a low conga. Each is a velocity lane like the hats.
+     */
+    public const PERC = ['shaker', 'rim', 'congaHi', 'congaLo'];
+
+    /**
+     * Whether any percussion lane hits on a step.
+     */
+    public function percAt(int $at): bool
+    {
+        foreach ($this->perc as $lane) {
+            if (($lane[$at] ?? 0.0) > 0.0) {
+                return true;
+            }
+        }
+
+        return false;
+    }
 
     /**
      * This track, filed under a library section ("EDM") and a sub-genre within it
@@ -57,7 +90,7 @@ final class Track
             bpm: $this->bpm, swing: $this->swing, mix: $this->mix,
             kick: $this->kick, clap: $this->clap, hat: $this->hat, hatOpen: $this->hatOpen,
             bass: $this->bass, stab: $this->stab, lead: $this->lead, pad: $this->pad,
-            arp: $this->arp, section: $section, style: $style,
+            arp: $this->arp, section: $section, style: $style, perc: $this->perc,
         );
     }
 
@@ -74,6 +107,14 @@ final class Track
      */
     public function stemIsActive(string $stem): bool
     {
+        if ($stem === 'hats') {
+            foreach ($this->perc as $lane) {
+                if (max($lane) > 0.0) {
+                    return true;
+                }
+            }
+        }
+
         $lane = match ($stem) {
             'kick' => $this->kick,
             'clap' => $this->clap,
@@ -114,7 +155,8 @@ final class Track
             $out[$i] = match ($stem) {
                 'kick' => ($this->kick[$at] ?? 0.0) > 0.0,
                 'clap' => ($this->clap[$at] ?? 0.0) > 0.0,
-                'hats' => ($this->hat[$at] ?? 0.0) > 0.0 || ($this->hatOpen[$at] ?? 0.0) > 0.0,
+                'hats' => ($this->hat[$at] ?? 0.0) > 0.0 || ($this->hatOpen[$at] ?? 0.0) > 0.0
+                    || $this->percAt($at),
                 'bass', 'stab', 'lead', 'pad', 'arp' => ($this->{$stem}[$at] ?? null) !== null,
                 default => false,
             };

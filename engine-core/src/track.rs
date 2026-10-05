@@ -211,6 +211,48 @@ impl NoteEvent {
 /// One step of a drum lane. Zero means silent; anything else is a velocity.
 pub type Hit = f32;
 
+/// Hand percussion played on the hats stem: one velocity lane per instrument, like
+/// the hats themselves.
+///
+/// JSON: `"perc": {"shaker": [..], "rim": [..], "congaHi": [..], "congaLo": [..]}`.
+/// Every key is optional and so is `perc` itself, so arrangements from before the
+/// percussion existed load unchanged and silent. A short lane is silent past its end.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct Perc {
+    pub shaker: Vec<Hit>,
+    pub rim: Vec<Hit>,
+    pub conga_hi: Vec<Hit>,
+    pub conga_lo: Vec<Hit>,
+}
+
+impl Perc {
+    fn lane(&self, kind: crate::drums::PercKind) -> &[Hit] {
+        use crate::drums::PercKind;
+        match kind {
+            PercKind::Shaker => &self.shaker,
+            PercKind::Rim => &self.rim,
+            PercKind::CongaHi => &self.conga_hi,
+            PercKind::CongaLo => &self.conga_lo,
+        }
+    }
+
+    /// Velocity of an instrument at a step, if it plays there.
+    pub fn hit(&self, kind: crate::drums::PercKind, step: usize) -> Option<Hit> {
+        self.lane(kind)
+            .get(step)
+            .copied()
+            .filter(|v| *v > 0.0 && v.is_finite())
+    }
+
+    /// Whether any instrument plays at all.
+    pub fn any(&self) -> bool {
+        crate::drums::PercKind::ALL
+            .iter()
+            .any(|k| self.lane(*k).iter().any(|v| *v > 0.0))
+    }
+}
+
 /// The resolved arrangement the engine plays: 256 steps (16 bars of 16ths), nine
 /// lanes. Produced by the Laravel backend so song form and library content live in
 /// one place rather than being duplicated in the UI bundle.
@@ -233,6 +275,9 @@ pub struct Track {
     pub lead: Vec<Option<NoteEvent>>,
     pub pad: Vec<Option<NoteEvent>>,
     pub arp: Vec<Option<NoteEvent>>,
+    /// Shaker, rim and congas, on the hats stem. Absent in older JSON.
+    #[serde(default)]
+    pub perc: Perc,
 }
 
 pub const STEPS: usize = 256;
@@ -256,6 +301,7 @@ impl Track {
             lead: vec![None; STEPS],
             pad: vec![None; STEPS],
             arp: vec![None; STEPS],
+            perc: Perc::default(),
         }
     }
 
@@ -301,7 +347,9 @@ impl Track {
             Stem::Kick => self.kick.iter().any(|v| *v > 0.0),
             Stem::Clap => self.clap.iter().any(|v| *v > 0.0),
             Stem::Hats => {
-                self.hat.iter().any(|v| *v > 0.0) || self.hat_open.iter().any(|v| *v > 0.0)
+                self.hat.iter().any(|v| *v > 0.0)
+                    || self.hat_open.iter().any(|v| *v > 0.0)
+                    || self.perc.any()
             }
             _ => {
                 let lane = match stem {
@@ -479,5 +527,40 @@ mod tests {
         let back: Mix = serde_json::from_str(&json).unwrap();
         assert_eq!(mix, back);
         assert!(json.contains("\"kick\""), "keys should be stem names");
+    }
+
+    #[test]
+    fn a_track_without_percussion_still_loads() {
+        let mut json: serde_json::Value = serde_json::to_value(Track::silence("old")).unwrap();
+        json.as_object_mut().unwrap().remove("perc");
+        let t: Track = serde_json::from_value(json).expect("JSON from before perc existed");
+        assert!(!t.perc.any());
+        assert!(!t.stem_active(Stem::Hats));
+    }
+
+    #[test]
+    fn percussion_lanes_load_by_name_and_default_when_missing() {
+        let mut json: serde_json::Value = serde_json::to_value(Track::silence("new")).unwrap();
+        let mut shaker = vec![0.0f32; STEPS];
+        shaker[3] = 0.4;
+        json["perc"] = serde_json::json!({ "shaker": shaker, "congaLo": [0.0, 0.7] });
+        let t: Track = serde_json::from_value(json).unwrap();
+        use crate::drums::PercKind;
+        assert_eq!(t.perc.hit(PercKind::Shaker, 3), Some(0.4));
+        assert_eq!(t.perc.hit(PercKind::Shaker, 4), None);
+        // A short lane is silent past its end rather than out of bounds.
+        assert_eq!(t.perc.hit(PercKind::CongaLo, 1), Some(0.7));
+        assert_eq!(t.perc.hit(PercKind::CongaLo, 200), None);
+        // Absent instruments are empty.
+        assert_eq!(t.perc.hit(PercKind::Rim, 3), None);
+        assert!(
+            t.stem_active(Stem::Hats),
+            "percussion makes the hats stem active"
+        );
+        // An empty object, as the backend sends for tracks with no percussion.
+        let mut json: serde_json::Value = serde_json::to_value(Track::silence("e")).unwrap();
+        json["perc"] = serde_json::json!({});
+        let t: Track = serde_json::from_value(json).unwrap();
+        assert!(!t.perc.any());
     }
 }

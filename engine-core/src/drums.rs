@@ -1,4 +1,4 @@
-//! Drum voices: kick, clap, hats.
+//! Drum voices: kick, clap, hats, and the hand percussion on the hats stem.
 //!
 //! Each voice is a small fixed graph of oscillators, noise and filters, rendered
 //! one sample at a time and reaped when its envelope reaches the floor.
@@ -384,6 +384,205 @@ impl DrumVoice for HatVoice {
     }
 }
 
+/// The hand percussion that plays on the hats stem.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum PercKind {
+    Shaker,
+    Rim,
+    CongaHi,
+    CongaLo,
+}
+
+impl PercKind {
+    pub const ALL: [PercKind; 4] = [
+        PercKind::Shaker,
+        PercKind::Rim,
+        PercKind::CongaHi,
+        PercKind::CongaLo,
+    ];
+}
+
+/// Shaker, rimshot or conga: a small voice on the hats stem, under the hats.
+///
+/// - **Shaker**: band-passed noise with a soft 12 ms attack and a 60 ms decay, the
+///   swish of beads rather than the tick of a hat.
+/// - **Rim**: the 808 rimshot, two damped resonances at 1.7 kHz and 480 Hz with a
+///   noise click, driven into a soft clip and high-passed, gone in about 30 ms.
+/// - **Conga**: a sine dropping a third into its pitch over 20 ms (360 Hz high, 240
+///   Hz low), with a short slap of band-passed noise on top.
+///
+/// Each sits at its own fixed place in the stereo field, so the percussion spreads
+/// around the centered hats instead of piling onto them. Lo-fi tunes them lower and
+/// darker.
+pub struct PercVoice {
+    kind: PercKind,
+    env: Adsr,
+    osc: [Osc; 2],
+    /// Pitch for the conga's drop: start, rest, samples to fall, samples gone.
+    pitch_from: f32,
+    pitch_to: f32,
+    pitch_len: f32,
+    t: f32,
+    noise_bp: Biquad,
+    out_hp: Biquad,
+    /// Samples of noise click/slap left, and its level.
+    click_left: f32,
+    click_amp: f32,
+    pan_l: f32,
+    pan_r: f32,
+    sample_rate: f32,
+    done: bool,
+}
+
+/// Per-instrument output trims, so each sits 2-4 dB under a closed hat at full
+/// velocity (RMS over 0.3 s, as the hats are measured): about -37 dB for the shaker
+/// and -36 dB for the rim and congas on house, against the closed hat's -33. The
+/// congas' sine bodies carry far more energy than a hat's top end, hence their
+/// deep trims. Pinned by `the_percussion_sits_under_the_hats`.
+const SHAKER_TRIM: f32 = 0.51;
+const RIM_TRIM: f32 = 0.61;
+const CONGA_HI_TRIM: f32 = 0.3;
+const CONGA_LO_TRIM: f32 = 0.22;
+
+impl PercVoice {
+    pub fn new(kind: PercKind, vel: f32, sample_rate: f32, track: crate::track::TrackKind) -> Self {
+        let sr = sample_rate;
+        let lofi = track == crate::track::TrackKind::Lofi;
+        // Acid's closed hats are the tightest and quietest of the four flavors, so the
+        // percussion comes down with them to stay underneath.
+        let vel = if track == crate::track::TrackKind::Acid {
+            vel * 0.8
+        } else {
+            vel
+        };
+        let mut noise_bp = Biquad::new();
+        let mut out_hp = Biquad::new();
+        let (env, osc, pitch_from, pitch_to, click, click_amp, pan) = match kind {
+            PercKind::Shaker => {
+                noise_bp.bandpass(sr, if lofi { 5_000.0 } else { 7_000.0 }, 1.0);
+                out_hp.highpass(sr, if lofi { 2_500.0 } else { 3_500.0 }, FRAC_1_SQRT_2);
+                (
+                    Adsr::new(0.5 * vel * SHAKER_TRIM, 0.012, 0.06, 0.0, 0.0, 0.02, sr),
+                    [Osc::new(Wave::Sine, 0.0, sr), Osc::new(Wave::Sine, 0.0, sr)],
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.68,
+                )
+            }
+            PercKind::Rim => {
+                let (hi, lo) = if lofi {
+                    (1_400.0, 420.0)
+                } else {
+                    (1_700.0, 480.0)
+                };
+                noise_bp.bandpass(sr, 3_000.0, 0.8);
+                out_hp.highpass(sr, 300.0, FRAC_1_SQRT_2);
+                (
+                    Adsr::new(0.55 * vel * RIM_TRIM, 0.001, 0.028, 0.0, 0.0, 0.012, sr),
+                    [Osc::new(Wave::Sine, hi, sr), Osc::new(Wave::Sine, lo, sr)],
+                    hi,
+                    hi,
+                    0.004,
+                    0.5 * RIM_TRIM,
+                    0.36,
+                )
+            }
+            PercKind::CongaHi | PercKind::CongaLo => {
+                let hi = kind == PercKind::CongaHi;
+                let f = match (hi, lofi) {
+                    (true, false) => 360.0,
+                    (true, true) => 330.0,
+                    (false, false) => 240.0,
+                    (false, true) => 215.0,
+                };
+                noise_bp.bandpass(sr, 2_000.0, 1.2);
+                out_hp.highpass(sr, 90.0, FRAC_1_SQRT_2);
+                (
+                    Adsr::new(
+                        0.5 * vel * if hi { CONGA_HI_TRIM } else { CONGA_LO_TRIM },
+                        0.002,
+                        if hi { 0.16 } else { 0.22 },
+                        0.0,
+                        0.0,
+                        0.02,
+                        sr,
+                    ),
+                    [
+                        Osc::new(Wave::Sine, f * 1.26, sr),
+                        Osc::new(Wave::Sine, 0.0, sr),
+                    ],
+                    f * 1.26,
+                    f,
+                    0.006,
+                    0.35 * if hi { CONGA_HI_TRIM } else { CONGA_LO_TRIM },
+                    if hi { 0.62 } else { 0.42 },
+                )
+            }
+        };
+        // Equal-power pan.
+        let a = pan * core::f32::consts::FRAC_PI_2;
+        Self {
+            kind,
+            env,
+            osc,
+            pitch_from,
+            pitch_to,
+            pitch_len: (0.02 * sr).max(1.0),
+            t: 0.0,
+            noise_bp,
+            out_hp,
+            click_left: click * sr,
+            click_amp: click_amp * vel,
+            pan_l: a.cos(),
+            pan_r: a.sin(),
+            sample_rate: sr,
+            done: false,
+        }
+    }
+}
+
+impl DrumVoice for PercVoice {
+    fn process(&mut self) -> (f32, f32, bool) {
+        if self.done {
+            return (0.0, 0.0, true);
+        }
+        let env = self.env.process();
+        let body = match self.kind {
+            PercKind::Shaker => self.noise_bp.process(noise()) * 2.0,
+            PercKind::Rim => {
+                let tone = 0.6 * self.osc[0].next() + 0.4 * self.osc[1].next();
+                // The 808's rim is overdriven, which is where its knock comes from.
+                (tone * 2.2).tanh()
+            }
+            PercKind::CongaHi | PercKind::CongaLo => {
+                if self.t < self.pitch_len {
+                    let f = exp_between(self.pitch_from, self.pitch_to, self.t / self.pitch_len);
+                    self.osc[0].set_frequency(f, self.sample_rate);
+                }
+                self.osc[0].next()
+            }
+        };
+        self.t += 1.0;
+        let mut click = 0.0;
+        if self.click_left > 0.0 {
+            self.click_left -= 1.0;
+            click = self.noise_bp.process(noise()) * self.click_amp;
+        }
+        let out = self.out_hp.process(body * env + click);
+        if self.env.is_done() && self.click_left <= 0.0 {
+            self.done = true;
+        }
+        (out * self.pan_l, out * self.pan_r, self.done)
+    }
+
+    fn release_now(&mut self) {
+        self.env.release_now();
+        self.click_left = 0.0;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -523,6 +722,55 @@ mod tests {
     fn noise_is_in_range() {
         for _ in 0..1000 {
             assert!((-1.0..1.0).contains(&noise()));
+        }
+    }
+
+    /// Mean RMS of a percussion hit over 0.3 s, in dB, both channels, across hits.
+    fn perc_rms_db(perc: PercKind, kind: crate::track::TrackKind, hits: usize) -> f32 {
+        let sr = 48_000.0;
+        let win = (0.3 * sr) as usize;
+        let mut ss = 0.0f64;
+        for _ in 0..hits {
+            let mut v = PercVoice::new(perc, 1.0, sr, kind);
+            for _ in 0..win {
+                let (l, r, _) = v.process();
+                assert!(l.is_finite() && r.is_finite());
+                ss += (0.5 * (l * l + r * r)) as f64;
+            }
+        }
+        (10.0 * (ss / (hits * win) as f64).log10()) as f32
+    }
+
+    /// Every percussion voice sits under the closed hat of the same flavor, so the
+    /// shaker, rim and congas season the hats stem rather than leading it.
+    #[test]
+    fn the_percussion_sits_under_the_hats() {
+        use crate::track::TrackKind;
+        for kind in [
+            TrackKind::House,
+            TrackKind::Deep,
+            TrackKind::Acid,
+            TrackKind::Lofi,
+        ] {
+            let hat = hat_rms_db(kind, false, 20);
+            for p in PercKind::ALL {
+                let db = perc_rms_db(p, kind, 20);
+                println!("PERC {kind:?} {p:?} {db:.2} dB, closed hat {hat:.2}");
+                assert!(
+                    db <= hat - 1.5 && db >= hat - 9.0,
+                    "{kind:?} {p:?}: {db:.2} dB against the closed hat's {hat:.2}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn every_percussion_voice_finishes() {
+        for p in PercKind::ALL {
+            let mut v = PercVoice::new(p, 1.0, 48_000.0, crate::track::TrackKind::House);
+            let finished = (0..48_000).any(|_| v.process().2);
+            assert!(finished, "{p:?} never finished");
+            assert_eq!(v.process(), (0.0, 0.0, true));
         }
     }
 }

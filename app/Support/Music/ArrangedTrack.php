@@ -23,6 +23,8 @@ final class ArrangedTrack implements \JsonSerializable
      * @param  array<int, NoteEvent|null>  $lead
      * @param  array<int, NoteEvent|null>  $pad
      * @param  array<int, NoteEvent|null>  $arp
+     * @param  array<string, array<int, float>>  $perc  256-step lanes keyed by
+     *                                                  instrument; silent ones omitted
      */
     public function __construct(
         public readonly string $id,
@@ -43,6 +45,7 @@ final class ArrangedTrack implements \JsonSerializable
         public readonly array $arp,
         public readonly string $section = '',
         public readonly string $style = '',
+        public readonly array $perc = [],
     ) {}
 
     public function jsonSerialize(): array
@@ -66,7 +69,26 @@ final class ArrangedTrack implements \JsonSerializable
             'lead' => $this->lead,
             'pad' => $this->pad,
             'arp' => $this->arp,
+            // Hand percussion on the hats stem, as an object of velocity lanes keyed
+            // by instrument (`shaker`, `rim`, `congaHi`, `congaLo`). Only lanes with
+            // hits are sent, and the engine reads a missing key, or a missing `perc`,
+            // as silence, so arrangements from before it existed still load.
+            'perc' => (object) $this->perc,
         ];
+    }
+
+    /**
+     * Whether any percussion lane hits on a step.
+     */
+    public function percAt(int $at): bool
+    {
+        foreach ($this->perc as $lane) {
+            if (($lane[$at] ?? 0.0) > 0.0) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     public function toJson(): string
@@ -89,7 +111,8 @@ final class ArrangedTrack implements \JsonSerializable
             $out[$i] = match ($stem) {
                 'kick' => ($this->kick[$at] ?? 0.0) > 0.0,
                 'clap' => ($this->clap[$at] ?? 0.0) > 0.0,
-                'hats' => ($this->hat[$at] ?? 0.0) > 0.0 || ($this->hatOpen[$at] ?? 0.0) > 0.0,
+                'hats' => ($this->hat[$at] ?? 0.0) > 0.0 || ($this->hatOpen[$at] ?? 0.0) > 0.0
+                    || $this->percAt($at),
                 'bass', 'stab', 'lead', 'pad', 'arp' => ($this->{$stem}[$at] ?? null) !== null,
                 default => false,
             };

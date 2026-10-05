@@ -74,8 +74,9 @@ mod transport;
 use core::f32::consts::FRAC_1_SQRT_2;
 use drums::DrumVoice as _;
 
+pub use drums::PercKind;
 pub use mixer::{Bus, Channel, Ducker, Master};
-pub use track::{NoteEvent, Stem, Track, TrackKind, STEPS};
+pub use track::{NoteEvent, Perc, Stem, Track, TrackKind, STEPS};
 pub use transport::Transport;
 
 #[cfg(target_arch = "wasm32")]
@@ -86,6 +87,7 @@ enum Voice {
     Kick(drums::KickVoice),
     Clap(drums::ClapVoice),
     Hat(drums::HatVoice),
+    Perc(drums::PercVoice),
     Tone(tone::ToneVoice),
     Reverse(ReverseVoice),
 }
@@ -97,6 +99,7 @@ impl Voice {
             Voice::Kick(v) => v.process(),
             Voice::Clap(v) => v.process(),
             Voice::Hat(v) => v.process(),
+            Voice::Perc(v) => v.process(),
             Voice::Tone(v) => v.process(),
             Voice::Reverse(v) => v.process(),
         }
@@ -108,6 +111,7 @@ impl Voice {
             Voice::Kick(v) => v.release_now(),
             Voice::Clap(v) => v.release_now(),
             Voice::Hat(v) => v.release_now(),
+            Voice::Perc(v) => v.release_now(),
             Voice::Tone(v) => v.release_now(),
             Voice::Reverse(v) => v.release_now(),
         }
@@ -127,7 +131,8 @@ impl Voice {
         match self {
             Voice::Kick(_) => Some(Stem::Kick.index()),
             Voice::Clap(_) => Some(Stem::Clap.index()),
-            Voice::Hat(_) => Some(Stem::Hats.index()),
+            // The hand percussion rides the hats' fader, cut and solo.
+            Voice::Hat(_) | Voice::Perc(_) => Some(Stem::Hats.index()),
             Voice::Tone(v) => Some(v.stem_index()),
             Voice::Reverse(_) => None,
         }
@@ -970,6 +975,16 @@ impl Engine {
                 open,
                 kind,
             )));
+        }
+        for perc in drums::PercKind::ALL {
+            if let Some(vel) = self.track.perc.hit(perc, at) {
+                self.spawn(Voice::Perc(drums::PercVoice::new(
+                    perc,
+                    vel,
+                    self.sample_rate,
+                    kind,
+                )));
+            }
         }
         for stem in Stem::TUNED {
             let Some(ev) = self.track.note(stem, at).cloned() else {
@@ -2180,5 +2195,67 @@ mod tests {
         assert!(e.texture.audible());
         e.load_track(Track::silence("club"));
         assert!(!e.texture.audible());
+    }
+
+    /// A track whose only content is percussion, on every instrument.
+    fn percussion_only() -> Track {
+        let mut t = Track::silence("perc");
+        let lane = |every: usize, at: usize| -> Vec<f32> {
+            (0..STEPS)
+                .map(|s| if s % every == at { 0.8 } else { 0.0 })
+                .collect()
+        };
+        t.perc.shaker = lane(2, 1);
+        t.perc.rim = lane(8, 3);
+        t.perc.conga_hi = lane(8, 6);
+        t.perc.conga_lo = lane(16, 10);
+        t
+    }
+
+    #[test]
+    fn percussion_plays_on_the_hats_stem() {
+        let energy = |setup: fn(&mut Engine)| -> f32 {
+            let mut e = Engine::new(48_000.0);
+            e.load_track(percussion_only());
+            setup(&mut e);
+            e.play();
+            run(&mut e, 400)
+        };
+        let open = energy(|_| {});
+        assert!(open > 1.0, "percussion made no sound: {open}");
+        let cut = energy(|e| e.set_muted(Stem::Hats, true));
+        assert_eq!(cut, 0.0, "cutting the hats left the percussion playing");
+        let faded = energy(|e| e.set_volume(Stem::Hats, 0.0));
+        assert_eq!(faded, 0.0, "the hats fader does not reach the percussion");
+        let other_solo = energy(|e| e.set_solo(Stem::Clap, true));
+        assert_eq!(other_solo, 0.0, "soloing another stem left the percussion");
+        let solo = energy(|e| e.set_solo(Stem::Hats, true));
+        assert!(solo > 1.0, "soloing the hats silenced the percussion");
+        // And it shows on the hats meter.
+        let mut e = Engine::new(48_000.0);
+        e.load_track(percussion_only());
+        e.play();
+        let mut seen = 0.0f32;
+        for _ in 0..200 {
+            run(&mut e, 1);
+            seen = seen.max(e.levels()[Stem::Hats.index()]);
+        }
+        assert!(seen > 0.0, "the hats meter did not move");
+    }
+
+    #[test]
+    fn a_percussion_pattern_keeps_the_voice_pool_bounded() {
+        let mut t = percussion_only();
+        t.perc.shaker = vec![1.0; STEPS];
+        t.perc.rim = vec![1.0; STEPS];
+        t.perc.conga_hi = vec![1.0; STEPS];
+        t.perc.conga_lo = vec![1.0; STEPS];
+        let mut e = Engine::new(48_000.0);
+        e.load_track(t);
+        e.play();
+        for _ in 0..300 {
+            run(&mut e, 1);
+            assert!(live_voices(&e) <= MAX_VOICES);
+        }
     }
 }
