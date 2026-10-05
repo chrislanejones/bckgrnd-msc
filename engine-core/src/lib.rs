@@ -67,6 +67,7 @@ mod mixer;
 mod scratch;
 mod tone;
 mod track;
+mod transition;
 mod transport;
 
 use core::f32::consts::FRAC_1_SQRT_2;
@@ -437,6 +438,8 @@ pub struct Engine {
     /// The kick sub's pitch for the loaded track, worked out once at load so the
     /// audio path only reads it.
     kick_root_hz: f32,
+    /// Riser, crash and downsweep at the song's seams, summed into the master.
+    transitions: transition::Transitions,
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen)]
@@ -470,6 +473,7 @@ impl Engine {
             echo_on: false,
             output_gain: 1.0,
             kick_root_hz: track.kick_root_hz(),
+            transitions: transition::Transitions::new(track.kind, sr),
             track,
         }
     }
@@ -477,6 +481,7 @@ impl Engine {
     pub fn play(&mut self) {
         self.let_go_of_the_platter();
         self.transport.start();
+        self.transitions.reset();
     }
 
     pub fn stop(&mut self) {
@@ -485,6 +490,7 @@ impl Engine {
         for v in self.voices.iter_mut().flatten() {
             v.release();
         }
+        self.transitions.release();
         for c in self.channels.iter_mut() {
             c.duck = 1.0;
         }
@@ -530,6 +536,11 @@ impl Engine {
 
     pub fn brake(&mut self) {
         self.transport.brake();
+        // A riser on a clock grinding to a halt sounds broken, so the transition
+        // sounds get out of the way of the gesture.
+        if self.transport.braking() {
+            self.transitions.release();
+        }
     }
 
     /// Grab the platter: freeze the recent output for scratching and pause the
@@ -605,6 +616,7 @@ impl Engine {
         if self.scratch.held() || !self.transport.backspin() {
             return;
         }
+        self.transitions.release();
         match self.ring.take(1.35, self.sample_rate) {
             Some((l, r)) => {
                 // Rates and times straight from the original's automation on the
@@ -815,6 +827,13 @@ impl Engine {
                 if !self.transport.in_backspin() {
                     self.trigger(step);
                 }
+                // The transition sounds fire only on ordinary playback. A step the
+                // spin or the brake raced through breaks the chain of crossings.
+                if self.transport.in_backspin() || self.transport.braking() {
+                    self.transitions.forget();
+                } else {
+                    self.transitions.on_step(step, &self.transport);
+                }
             }
             let (l, r) = self.render_sample();
             out_l[i] = l * self.output_gain;
@@ -837,8 +856,7 @@ impl Engine {
         }
         // Voices with no stem bypass the channel strips and are held back to be added
         // to the master sum directly, after the faders have been applied below.
-        let mut direct_l = 0.0f32;
-        let mut direct_r = 0.0f32;
+        let (mut direct_l, mut direct_r) = self.transitions.process(&self.transport);
         for slot in self.voices.iter_mut() {
             let Some(voice) = slot.as_mut() else { continue };
             let stem = voice.stem();
@@ -871,6 +889,7 @@ impl Engine {
             };
             if self.music <= 0.0 {
                 self.voices.iter_mut().for_each(|v| *v = None);
+                self.transitions.reset();
                 for c in self.channels.iter_mut() {
                     c.duck = 1.0;
                 }
@@ -1037,6 +1056,7 @@ impl Engine {
         self.transport.swing = self.track.swing;
         self.master.set_delay_time(self.transport.bpm, 1.0);
         self.ducker = Ducker::new(self.track.kind, self.transport.bpm, self.sample_rate);
+        self.transitions.set_kind(self.track.kind);
         self.ring.clear();
     }
     pub fn track(&self) -> &Track {
@@ -1913,5 +1933,152 @@ mod tests {
             assert!(l.iter().all(|v| v.abs() < 1e-6), "no output after stop");
             assert!(r.iter().all(|v| v.abs() < 1e-6), "no output after stop");
         }
+    }
+
+    /// Max RMS over 20 ms windows, and the peak, of `blocks` blocks of output.
+    fn loudness(e: &mut Engine, blocks: usize) -> (f32, f32) {
+        let win = 8; // 8 x 128 samples, about 21 ms
+        let (mut best, mut peak) = (0.0f32, 0.0f32);
+        let mut acc = 0.0f32;
+        for b in 0..blocks {
+            let mut l = [0.0f32; 128];
+            let mut r = [0.0f32; 128];
+            e.process(&mut l, &mut r);
+            for (a, c) in l.iter().zip(r.iter()) {
+                assert!(a.is_finite() && c.is_finite());
+                acc += 0.5 * (a * a + c * c);
+                peak = peak.max(a.abs()).max(c.abs());
+            }
+            if b % win == win - 1 {
+                best = best.max((acc / (win * 128) as f32).sqrt());
+                acc = 0.0;
+            }
+        }
+        (best, peak)
+    }
+
+    /// Blocks covering `steps` steps at `bpm`.
+    fn blocks_for(steps: usize, bpm: f32) -> usize {
+        (steps as f32 * 15.0 / bpm * 48_000.0 / 128.0) as usize + 2
+    }
+
+    /// A clap on two and four at a modest fader: the reference for how loud the
+    /// transition sounds may be.
+    fn clap_reference(kind: TrackKind) -> (f32, f32) {
+        let mut t = Track::silence("clap");
+        t.kind = kind;
+        for s in 0..STEPS {
+            t.clap[s] = if s % 8 == 4 { 0.85 } else { 0.0 };
+        }
+        t.mix.0[Stem::Clap.index()] = 0.44;
+        let mut e = Engine::new(48_000.0);
+        e.load_track(t);
+        e.play();
+        loudness(&mut e, blocks_for(64, 126.0))
+    }
+
+    /// The transitions alone, from the Break through into the Drop, with every stem
+    /// cut: they bypass the strips, like the backspin.
+    fn transitions_only(kind: TrackKind) -> (f32, f32) {
+        let mut t = Track::silence("fx");
+        t.kind = kind;
+        t.bpm = 126.0;
+        let mut e = Engine::new(48_000.0);
+        e.load_track(t);
+        for s in Stem::ALL {
+            e.set_muted(s, true);
+        }
+        e.play();
+        e.jump(120);
+        loudness(&mut e, blocks_for(100, 126.0))
+    }
+
+    /// The transitions are noticeable but no louder than a modest clap, with every
+    /// stem cut, which they ignore.
+    #[test]
+    fn transitions_bypass_the_stems_and_sit_under_the_clap() {
+        for kind in [
+            TrackKind::House,
+            TrackKind::Deep,
+            TrackKind::Acid,
+            TrackKind::Lofi,
+        ] {
+            let (clap, clap_peak) = clap_reference(kind);
+            let (fx, fx_peak) = transitions_only(kind);
+            assert!(
+                fx <= clap && fx_peak <= clap_peak,
+                "{kind:?}: transitions {fx:.4} rms / {fx_peak:.4} peak over the clap's {clap:.4} / {clap_peak:.4}"
+            );
+            let floor = if kind == TrackKind::Lofi { 0.3 } else { 0.6 };
+            assert!(
+                fx > clap * floor,
+                "{kind:?}: transitions too quiet to notice, {fx:.4} vs clap {clap:.4}"
+            );
+        }
+    }
+
+    /// Run until the transport has fired `step`.
+    fn run_to_step(e: &mut Engine, step: i32) {
+        for _ in 0..20_000 {
+            run(e, 1);
+            if e.visual_step() == step {
+                return;
+            }
+        }
+        panic!("never reached step {step}");
+    }
+
+    #[test]
+    fn no_transition_fires_under_a_scratch() {
+        let mut e = Engine::new(48_000.0);
+        e.load_track(track_with_kick());
+        e.play();
+        e.jump(186);
+        run_to_step(&mut e, 188);
+        e.scratch_start();
+        // Held for longer than it would take to reach the Drop.
+        run(&mut e, 600);
+        assert!(
+            !e.transitions.active(),
+            "a transition sounded under a scratch"
+        );
+        // And letting go back at the Drop is a jump, not a crossing.
+        e.scratch_end(192);
+        run(&mut e, 2);
+        assert!(!e.transitions.active(), "the release crashed");
+    }
+
+    #[test]
+    fn the_brake_and_backspin_silence_the_riser() {
+        for gesture in [Engine::brake as fn(&mut Engine), Engine::backspin] {
+            let mut e = Engine::new(48_000.0);
+            e.load_track(track_with_kick());
+            e.play();
+            e.jump(158);
+            run_to_step(&mut e, 170);
+            assert!(e.transitions.active(), "no riser to cut");
+            gesture(&mut e);
+            run(&mut e, 60);
+            assert!(!e.transitions.active(), "riser outlived the gesture");
+            // The spin races the clock past the Drop; nothing fires on the way.
+            run(&mut e, 400);
+            assert!(
+                !e.transitions.active(),
+                "a transition fired under the gesture"
+            );
+        }
+    }
+
+    #[test]
+    fn transitions_are_silent_when_stopped() {
+        let mut e = Engine::new(48_000.0);
+        e.load_track(track_with_kick());
+        e.play();
+        e.jump(186);
+        run_to_step(&mut e, 193);
+        assert!(e.transitions.active(), "no crash");
+        e.stop();
+        run(&mut e, 400);
+        assert!(!e.transitions.active());
     }
 }

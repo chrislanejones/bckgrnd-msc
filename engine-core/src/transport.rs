@@ -15,6 +15,9 @@ pub struct Transport {
     /// Countdown of samples remaining before `step` fires. Fractional so swing
     /// lands between samples instead of rounding.
     pub to_next: f64,
+    /// Length in samples of the step that fired last, as it was worked out when it
+    /// fired, so `to_next / step_len` is how much of it is left.
+    pub step_len: f64,
     /// Samples remaining in a tempo nudge ramp, for brake/spin gestures.
     pub rate: f32,
     brake_from: f32,
@@ -43,6 +46,7 @@ impl Transport {
             playing: false,
             step: 0,
             to_next: 0.0,
+            step_len: 0.0,
             rate: 1.0,
             brake_from: 0.0,
             spin_from: 0.0,
@@ -209,6 +213,10 @@ impl Transport {
         self.spin_from > 0.0
     }
 
+    pub fn braking(&self) -> bool {
+        self.brake_from > 0.0
+    }
+
     /// Consume one sample of clock time. Returns the step that should fire at this
     /// sample, if any, having advanced the clock past it.
     pub fn tick(&mut self) -> Option<usize> {
@@ -222,7 +230,8 @@ impl Transport {
         let fired = self.step;
         self.visual_step = fired as i32;
         let dur = self.step_seconds(fired) as f64 * self.sample_rate as f64;
-        self.to_next = dur.max(1.0) - 1.0;
+        self.step_len = dur.max(1.0);
+        self.to_next = self.step_len - 1.0;
         self.step = self.advance_step();
         Some(fired)
     }

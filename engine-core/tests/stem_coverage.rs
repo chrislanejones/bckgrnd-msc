@@ -116,7 +116,11 @@ fn each_stem_has_its_own_fader() {
     let blocks = (48_000.0 * 16.0 * 4.0 * (60.0 / track.bpm.max(40.0))) as usize / 128;
 
     for (stem, name) in STEMS {
-        let render = |gain: f32| -> f32 {
+        // `upto` is the last step measured. The transition sounds at the Break and the
+        // Drop are summed into the master outside every stem, the way the backspin
+        // is, so a stem's own fader is checked against silence only before step 128,
+        // where none of them sound. Every stem has entered by then.
+        let render = |gain: f32, upto: i32| -> f32 {
             let mut e = Engine::new(48_000.0);
             e.load_track(track.clone());
             for other in STEMS {
@@ -129,6 +133,9 @@ fn each_stem_has_its_own_fader() {
                 let mut l = [0.0f32; 128];
                 let mut r = [0.0f32; 128];
                 e.process(&mut l, &mut r);
+                if e.visual_step() > upto {
+                    break;
+                }
                 for v in l.iter() {
                     peak = peak.max(v.abs());
                 }
@@ -136,8 +143,8 @@ fn each_stem_has_its_own_fader() {
             peak
         };
 
-        let up = render(1.0);
-        let down = render(0.0);
+        let up = render(1.0, 255);
+        let down = render(0.0, 127);
 
         assert!(
             up > 0.02,
