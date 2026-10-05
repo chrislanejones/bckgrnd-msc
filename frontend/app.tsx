@@ -952,11 +952,16 @@ export function App() {
             </div>
           </div>
 
-          <label className="mt-3 block">
-            <span className="mb-1 flex items-center justify-between text-xs text-muted">
-              <span>Stereo</span>
-              <span className="tabular-nums text-fg">{stereoLabel(stereo)}</span>
-            </span>
+          <div className="mt-3">
+            <FaderHead
+              label="Stereo"
+              value={stereoLabel(stereo)}
+              atDefault={stereo === 0.5}
+              onReset={() => {
+                setStereo(0.5);
+                engine.setStereoBalance(0.5);
+              }}
+            />
             <input
               className="fader"
               type="range"
@@ -977,7 +982,7 @@ export function App() {
               <span>Stereo</span>
               <span>Right</span>
             </span>
-          </label>
+          </div>
         </section>
 
         <section className="mt-3 grid gap-3 sm:grid-cols-3">
