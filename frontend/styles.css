@@ -341,107 +341,22 @@ body {
   scale: 0.96;
 }
 
-/* The jog wheel.
-   A platter you grab and turn, sized to a hand rather than a fingertip. `--spin` is
-   written by the component on every pointer move, so the rotation is driven by the
-   gesture instead of a looping animation — the disc stops where you let go. */
-.jog-wrap {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 0.35rem;
-  flex-shrink: 0;
+/* The backspin wheel: still when off, counter-rotating when engaged. The negative
+   sweep reads as a vinyl slowing backwards, matching the gesture's name. */
+.backspin-disc {
+  color: currentColor;
+  transform-origin: 50% 50%;
 }
 
-.jog {
-  --spin: 0deg;
-  position: relative;
-  width: 7.5rem;
-  height: 7.5rem;
-  border-radius: 999px;
-  border: 1px solid var(--color-line);
-  background: radial-gradient(circle at 50% 38%, #23272f, #101216 72%);
-  box-shadow:
-    inset 0 1px 0 rgba(243, 239, 230, 0.09),
-    inset 0 0 1.5rem rgba(0, 0, 0, 0.7);
-  cursor: grab;
-  touch-action: none;
-  /* The wheel owns its gesture; a drag that started here should not scroll the page. */
-  user-select: none;
-  -webkit-user-select: none;
+.backspin-disc[data-on='true'] {
+  animation: backspin-spin 0.9s linear infinite;
 }
 
-.jog:active {
-  cursor: grabbing;
+@keyframes backspin-spin {
+  to {
+    transform: rotate(-360deg);
+  }
 }
-
-/* The platter. Rotated by the gesture, so the grooves sweep under a fixed light. */
-.jog-disc {
-  position: absolute;
-  inset: 0.4rem;
-  border-radius: 999px;
-  transform: rotate(var(--spin));
-  /* Kept off the compositor's transition path: the JS sets --spin every pointer move,
-     and a CSS transition on top of that would lag the finger. */
-  transition: none;
-  background:
-    repeating-radial-gradient(
-      circle at 50% 50%,
-      rgba(243, 239, 230, 0.05) 0 1px,
-      transparent 1px 4px
-    ),
-    radial-gradient(circle at 50% 34%, #2b303a, #16181d 70%);
-  box-shadow: inset 0 0 1.25rem rgba(0, 0, 0, 0.55);
-}
-
-/* Two accent arcs, 180 degrees apart, so the direction of travel is legible even when
-   the platter is spinning fast enough to blur the grooves. */
-.jog-groove {
-  position: absolute;
-  inset: 1.15rem;
-  border-radius: 999px;
-  border: 1px solid color-mix(in srgb, var(--color-acid) 34%, transparent);
-}
-
-.jog-groove-2 {
-  inset: 2.1rem;
-  border-style: dashed;
-  opacity: 0.5;
-}
-
-.jog-label {
-  position: absolute;
-  left: 50%;
-  top: 50%;
-  width: 2.9rem;
-  height: 2.9rem;
-  transform: translate(-50%, -50%);
-  border-radius: 999px;
-  background: var(--color-acid);
-  color: var(--color-acid-ink);
-  box-shadow: 0 0 1rem color-mix(in srgb, var(--color-acid) 28%, transparent);
-}
-
-.jog-spindle {
-  position: absolute;
-  left: 50%;
-  top: 50%;
-  width: 0.4rem;
-  height: 0.4rem;
-  transform: translate(-50%, -50%);
-  border-radius: 999px;
-  background: var(--color-acid-ink);
-}
-
-.jog-hint {
-  font-size: 0.625rem;
-  font-weight: 700;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  color: var(--color-muted);
-}
-
-
 
 .icon-swap {
   grid-area: 1 / 1;
@@ -486,7 +401,8 @@ body {
   .rise,
   .icon-swap,
   .tap,
-  .step {
+  .step,
+  .backspin-disc {
     animation: none;
     transition: none;
     transform: none;

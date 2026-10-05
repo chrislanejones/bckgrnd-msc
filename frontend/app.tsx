@@ -134,6 +134,7 @@ export function App() {
   const [bands, setBands] = useState({ low: 1, mid: 1, high: 1 });
   const [open, setOpen] = useState(1);
   const [echo, setEcho] = useState(false);
+  const [backspinOn, setBackspinOn] = useState(false);
   /** Output balance: 0 mono-left, 0.5 stereo, 1 mono-right. */
   const [stereo, setStereo] = useState(0.5);
   const [mixing, setMixing] = useState<string | null>(null);
@@ -831,7 +832,14 @@ export function App() {
             >
               Brake
             </button>
-            <JogWheel onBackspin={() => engine.backspin()} />
+            <BackspinWheel
+              on={backspinOn}
+              onToggle={() => {
+                const next = !backspinOn;
+                setBackspinOn(next);
+                if (next) engine.backspin();
+              }}
+            />
             <button
               type="button"
               aria-pressed={echo}
@@ -1067,149 +1075,29 @@ function HoldButton({
   );
 }
 
-/**
- * A jog wheel. Drag it round to spin the platter; wind it backwards and the engine
- * gets a backspin.
- *
- * The wheel itself only reports the gesture. It tracks the pointer's angle around the
- * hub, converts that to a rotation, and applies momentum on release, which is what
- * makes it read as a platter rather than a button. The backspin itself is the engine's
- * job — the UI fires it once per backward flick and otherwise keeps out of the way.
- *
- * Keyboard and assistive tech get the same gesture as a button, because a rotary
- * control they cannot operate is worse than a plain button: space, arrow keys and Enter
- * all spin the wheel, and each spin fires the same `onBackspin`.
- */
-function JogWheel({ onBackspin }: { onBackspin: () => void }) {
-  const wheel = useRef<HTMLDivElement>(null);
-  const frame = useRef(0);
-  const angle = useRef(0);
-  const lastPointerAngle = useRef<number | null>(null);
-  const velocity = useRef(0);
-  const dragging = useRef(false);
-
-  const spinBy = useCallback(
-    (degrees: number) => {
-      angle.current += degrees;
-      velocity.current = degrees * 0.35;
-      if (wheel.current) wheel.current.style.setProperty('--spin', `${angle.current}deg`);
-      onBackspin();
-    },
-    [onBackspin],
-  );
-
-  /**
-   * Coast the wheel, decaying toward rest.
-   *
-   * Friction is applied per frame rather than per millisecond, which is what makes the
-   * wheel feel the same on a 60 Hz and a 120 Hz display. `frame` holds the animation
-   * handle so a drag mid-coast can cancel it instead of fighting it.
-   */
-  const coast = useCallback(() => {
-    cancelAnimationFrame(frame.current);
-    const decay = () => {
-      velocity.current *= 0.94;
-      if (Math.abs(velocity.current) < 0.05) {
-        velocity.current = 0;
-        wheel.current?.style.setProperty('--spin', `${angle.current}deg`);
-        return;
-      }
-      angle.current += velocity.current;
-      wheel.current?.style.setProperty('--spin', `${angle.current}deg`);
-      frame.current = requestAnimationFrame(decay);
-    };
-    frame.current = requestAnimationFrame(decay);
-  }, []);
-
-  useEffect(() => () => cancelAnimationFrame(frame.current), []);
-
-  /** Pointer angle about the hub, in degrees, so drag maps to rotation. */
-  const angleOf = (event: React.PointerEvent<HTMLDivElement>) => {
-    const box = event.currentTarget.getBoundingClientRect();
-    const x = event.clientX - (box.left + box.width / 2);
-    const y = event.clientY - (box.top + box.height / 2);
-    return (Math.atan2(y, x) * 180) / Math.PI;
-  };
-
+function BackspinWheel({ on, onToggle }: { on: boolean; onToggle: () => void }) {
   return (
-    <div className="mt-3 flex flex-col items-center gap-2 sm:flex-row sm:items-center sm:gap-4">
-      <div className="jog-wrap">
-        <div
-          ref={wheel}
-          className="jog"
-          role="button"
-          tabIndex={0}
-          aria-label="Jog wheel. Drag around to spin the platter, wind it backwards for a backspin. Arrow keys spin, space bar backspins."
-          onPointerDown={(event) => {
-            cancelAnimationFrame(frame.current);
-            velocity.current = 0;
-            dragging.current = true;
-            lastPointerAngle.current = angleOf(event);
-            event.currentTarget.setPointerCapture(event.pointerId);
-          }}
-          onPointerMove={(event) => {
-            if (!dragging.current || lastPointerAngle.current === null) return;
-            const next = angleOf(event);
-            let delta = next - lastPointerAngle.current;
-            // Crossing ±180 flips sign without the pointer having moved, which would
-            // otherwise kick the wheel a whole turn.
-            if (delta > 180) delta -= 360;
-            if (delta < -180) delta += 360;
-            lastPointerAngle.current = next;
-            angle.current += delta;
-            velocity.current = delta;
-            event.currentTarget.style.setProperty('--spin', `${angle.current}deg`);
-          }}
-          onPointerUp={(event) => {
-            dragging.current = false;
-            lastPointerAngle.current = null;
-            event.currentTarget.releasePointerCapture(event.pointerId);
-            // Wound backwards, or flicked fast enough backwards, is a backspin.
-            if (velocity.current < -0.6 || (angle.current % 360) + 0 < -40) onBackspin();
-            coast();
-          }}
-          onPointerCancel={() => {
-            dragging.current = false;
-            lastPointerAngle.current = null;
-            coast();
-          }}
-          onKeyDown={(event) => {
-            const step = event.shiftKey ? 45 : 15;
-            if (event.key === 'ArrowLeft' || event.key === 'ArrowDown') {
-              event.preventDefault();
-              cancelAnimationFrame(frame.current);
-              spinBy(-step);
-            } else if (event.key === 'ArrowRight' || event.key === 'ArrowUp') {
-              event.preventDefault();
-              cancelAnimationFrame(frame.current);
-              spinBy(step);
-            } else if (event.key === ' ' || event.key === 'Enter') {
-              event.preventDefault();
-              cancelAnimationFrame(frame.current);
-              angle.current -= 140;
-              velocity.current = 0;
-              wheel.current?.style.setProperty('--spin', `${angle.current}deg`);
-              onBackspin();
-            }
-          }}
-        >
-          <div className="jog-disc" aria-hidden="true">
-            <span className="jog-groove" />
-            <span className="jog-groove jog-groove-2" />
-            <span className="jog-label" />
-            <span className="jog-spindle" />
-          </div>
-        </div>
-        <p className="jog-hint" aria-hidden="true">
-          Jog
-        </p>
-      </div>
-
-      <p className="max-w-xs text-xs text-muted sm:flex-1">
-        Drag the wheel round to spin the platter. Wind it backwards for a backspin. Arrow keys
-        spin it, space bar backspins.
-      </p>
-    </div>
+    <button
+      type="button"
+      aria-pressed={on}
+      aria-label="Toggle backspin"
+      onClick={onToggle}
+      className={cx(
+        'tap flex flex-col items-center gap-1 rounded-xl border px-1.5 py-1.5 text-[10px] font-semibold uppercase tracking-wider',
+        on ? 'border-acid bg-acid text-acid-ink' : 'border-line bg-surface text-muted',
+      )}
+    >
+      <svg className="backspin-disc" data-on={on ? 'true' : 'false'} width="30" height="30" viewBox="0 0 32 32" aria-hidden="true">
+        <circle cx="16" cy="16" r="14" fill="none" stroke="currentColor" strokeWidth="1.6" />
+        <circle cx="16" cy="16" r="9.5" fill="none" stroke="currentColor" strokeWidth="1" opacity="0.55" />
+        <circle cx="16" cy="16" r="3" fill="currentColor" opacity="0.9" />
+        <line x1="16" y1="2" x2="16" y2="9" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+        <line x1="16" y1="23" x2="16" y2="30" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" opacity="0.4" />
+        <line x1="2" y1="16" x2="9" y2="16" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" opacity="0.4" />
+        <line x1="23" y1="16" x2="30" y2="16" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" opacity="0.4" />
+      </svg>
+      Backspin
+    </button>
   );
 }
 
