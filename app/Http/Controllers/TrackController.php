@@ -32,6 +32,8 @@ class TrackController extends Controller
                 'name' => $track->name,
                 'detail' => $track->detail,
                 'kind' => $track->kind,
+                'section' => $track->section,
+                'style' => $track->style,
                 'bpm' => $track->bpm,
                 'swing' => $track->swing,
                 'mix' => $track->mix,

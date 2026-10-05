@@ -267,6 +267,31 @@ body {
   .track-grid { grid-template-columns: repeat(6, minmax(0, 1fr)); }
 }
 
+/* One grid cell: an optional sub-genre title over a badge. Cells sit on the row's
+   bottom edge, so a title only adds height to the rows that have one and the badges
+   in a row stay level whether or not a title sits above them. */
+.track-grid {
+  align-items: end;
+}
+
+.track-cell {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.track-style {
+  display: block;
+  margin: 0.3rem 0 0.3rem 0.8rem;
+  font-size: 0.625rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  line-height: 1;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--color-acid) 70%, var(--color-muted));
+  white-space: nowrap;
+}
+
 /* A track in the library: a badge in the solo family, filling its grid cell, with
    the name on the left and the track's tempo pinned to the right. */
 .track-badge {

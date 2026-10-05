@@ -116,6 +116,8 @@ final class Arranger
             lead: Phrase::join($intro['lead'], $groove['lead'], $break['lead'], $drop['lead']),
             pad: Phrase::join($intro['pad'], $groove['pad'], $break['pad'], $drop['pad']),
             arp: Phrase::join($intro['arp'], $groove['arp'], $break['arp'], $drop['arp']),
+            section: $t->section,
+            style: $t->style,
         );
     }
 }

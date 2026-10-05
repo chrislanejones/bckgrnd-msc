@@ -26,6 +26,10 @@ export type TrackSummary = {
   name: string;
   detail: string;
   kind: TrackKind;
+  /** Library section the track is filed under, e.g. "EDM". */
+  section: string;
+  /** Sub-genre within the section, e.g. "House". Titled above its first track. */
+  style: string;
   bpm: number;
   swing: number;
   mix: Mix;

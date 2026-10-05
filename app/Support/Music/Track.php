@@ -41,7 +41,25 @@ final class Track
         public readonly array $lead,
         public readonly array $pad,
         public readonly array $arp,
+        public readonly string $section = '',
+        public readonly string $style = '',
     ) {}
+
+    /**
+     * This track, filed under a library section ("EDM") and a sub-genre within it
+     * ("House"). Grouping is a display concern, so it is applied in one place by
+     * `Library` rather than repeated in every definition.
+     */
+    public function grouped(string $section, string $style): self
+    {
+        return new self(
+            id: $this->id, name: $this->name, detail: $this->detail, kind: $this->kind,
+            bpm: $this->bpm, swing: $this->swing, mix: $this->mix,
+            kick: $this->kick, clap: $this->clap, hat: $this->hat, hatOpen: $this->hatOpen,
+            bass: $this->bass, stab: $this->stab, lead: $this->lead, pad: $this->pad,
+            arp: $this->arp, section: $section, style: $style,
+        );
+    }
 
     /**
      * Arrange this groove into the full 16-bar arrangement the engine plays.

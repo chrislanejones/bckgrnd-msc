@@ -271,11 +271,16 @@ export function App() {
   );
 
   const tracks = library?.tracks ?? [];
-  const edmTracks = useMemo(
-    () => tracks.filter((t) => t.kind !== 'lofi'),
-    [tracks],
-  );
-  const lofiTracks = useMemo(() => tracks.filter((t) => t.kind === 'lofi'), [tracks]);
+  /** The library split into its sections, in the order the library lists them. */
+  const sections = useMemo(() => {
+    const out: { name: string; items: TrackSummary[] }[] = [];
+    for (const t of tracks) {
+      const last = out[out.length - 1];
+      if (last && last.name === t.section) last.items.push(t);
+      else out.push({ name: t.section, items: [t] });
+    }
+    return out;
+  }, [tracks]);
 
   async function togglePlay() {
     // Always act on the deck that is actually audible. After an auto mix that is deck
@@ -663,10 +668,12 @@ export function App() {
         </div>
 
         <div className="rise rise-3 mt-4">
-          <p className="text-xs font-semibold tracking-widest text-muted">EDM</p>
-          <TrackGrid items={edmTracks} current={track.id} onPick={selectTrack} />
-          <p className="mt-2.5 text-xs font-semibold tracking-widest text-muted">Lofi</p>
-          <TrackGrid items={lofiTracks} current={track.id} onPick={selectTrack} />
+          {sections.map((section, i) => (
+            <section key={section.name} aria-label={section.name} className={i > 0 ? 'mt-3' : undefined}>
+              <p className="text-xs font-semibold tracking-widest text-muted">{section.name}</p>
+              <TrackGrid items={section.items} current={track.id} onPick={selectTrack} />
+            </section>
+          ))}
         </div>
 
         <div className="rise rise-3 mt-6 grid items-end gap-3 sm:grid-cols-[minmax(0,1fr)_auto_auto_auto]">
@@ -1356,18 +1363,23 @@ function TrackGrid({
   if (items.length === 0) return null;
   return (
     <div className="track-grid mt-1.5">
-      {items.map((item) => (
-        <button
-          key={item.id}
+      {items.map((item, i) => (
+        <div key={item.id} className="track-cell">
+          {/* The sub-genre is titled once, above its first track. */}
+          {item.style && item.style !== items[i - 1]?.style && (
+            <span className="track-style">{item.style}</span>
+          )}
+          <button
           type="button"
           aria-pressed={item.id === current}
-          aria-label={`${item.name}, ${item.bpm} bpm`}
+          aria-label={`${item.name}, ${item.style ? `${item.style}, ` : ''}${item.bpm} bpm`}
           className="track-badge tap"
           onClick={() => onPick(item)}
         >
           <span className="truncate">{item.name}</span>
           <span className="track-bpm">{item.bpm}</span>
-        </button>
+          </button>
+        </div>
       ))}
     </div>
   );

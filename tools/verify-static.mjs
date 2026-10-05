@@ -70,11 +70,11 @@ try {
   const ui = await page.evaluate(() => ({
     h1: document.querySelector('h1')?.textContent?.trim() ?? null,
     stems: document.querySelectorAll('article.stem').length,
-    tracks: document.querySelectorAll('.tap.rounded-xl').length,
+    tracks: document.querySelectorAll('.track-badge').length,
   }));
   check('static shell renders the app', ui.h1 === 'bckgrnd-msc' && ui.stems === 8,
     `h1 ${ui.h1}, ${ui.stems} stems, ${ui.tracks} tracks`);
-  check('library loaded from JSON', ui.tracks === 12, `${ui.tracks} track buttons`);
+  check('library loaded from JSON', ui.tracks === 18, `${ui.tracks} track buttons`);
 
   // 2. No PHP route was contacted — everything came from static files.
   const phpRequests = requests.filter((p) => p.startsWith('/api/'));

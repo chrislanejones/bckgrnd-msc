@@ -194,7 +194,7 @@ try {
 
     // 2. Every style in the library must sound.
     out.tracks = {};
-    for (const id of ['acid', 'tunnel', 'kettle', 'rain']) {
+    for (const id of ['acid', 'tunnel', 'kettle', 'rain', 'southside', 'ravetape', 'lowtide']) {
       out.tracks[id] = await measure({ trackId: id, ms: 900 });
     }
 

@@ -41,6 +41,8 @@ final class ArrangedTrack implements \JsonSerializable
         public readonly array $lead,
         public readonly array $pad,
         public readonly array $arp,
+        public readonly string $section = '',
+        public readonly string $style = '',
     ) {}
 
     public function jsonSerialize(): array
@@ -50,6 +52,8 @@ final class ArrangedTrack implements \JsonSerializable
             'name' => $this->name,
             'detail' => $this->detail,
             'kind' => $this->kind,
+            'section' => $this->section,
+            'style' => $this->style,
             'bpm' => $this->bpm,
             'swing' => $this->swing,
             'mix' => $this->mix,

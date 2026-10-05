@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace App\Support\Music;
 
 /**
- * The built-in track library: twelve grooves, six four-on-the-floor and six lo-fi.
+ * The built-in track library: eighteen grooves, six each of EDM, lo-fi and breaks.
  *
  * Each track is four bars long; `Arranger` stretches it into the 16-bar form the
  * engine plays. Definitions live here rather than in the browser bundle so the
@@ -100,6 +100,32 @@ final class Library
         'lead' => 0.4,
         'pad' => 0.52,
         'arp' => 0.28,
+    ];
+
+    /**
+     * Every track in display order, with its library section and sub-genre.
+     *
+     * @var list<array{0:string, 1:string, 2:string}>
+     */
+    private const GROUPS = [
+        ['warehouse', 'EDM', 'House'],
+        ['basement', 'EDM', 'House'],
+        ['tunnel', 'EDM', 'House'],
+        ['drive', 'EDM', 'Deep'],
+        ['glass', 'EDM', 'Deep'],
+        ['acid', 'EDM', 'Acid'],
+        ['rain', 'Lofi', 'Chillhop'],
+        ['study', 'Lofi', 'Chillhop'],
+        ['porch', 'Lofi', 'Chillhop'],
+        ['tape', 'Lofi', 'Dusty'],
+        ['nightbus', 'Lofi', 'Dusty'],
+        ['kettle', 'Lofi', 'Jazz'],
+        ['southside', 'Breaks', 'Garage'],
+        ['pirate', 'Breaks', 'Garage'],
+        ['bricks', 'Breaks', 'Breakbeat'],
+        ['ravetape', 'Breaks', 'Breakbeat'],
+        ['lowtide', 'Breaks', 'Liquid DnB'],
+        ['slipstream', 'Breaks', 'Liquid DnB'],
     ];
 
     /** @return array<string, Track> */
@@ -670,50 +696,344 @@ final class Library
             ], 4, 0.3),
         );
 
+        // Kettle: jazz changes in B-flat, ii-V-I-vi with ninths on every chord, so no
+        // voice ever sits a tritone off the bass. The swing is the lightest in the lo-fi
+        // set because it is also the slowest — at 78 bpm a heavy shuffle reads as a stumble.
+        $cm9 = ['C3', 'Eb3', 'Bb3', 'D4'];
+        $f9 = ['F3', 'A3', 'Eb4', 'G4'];
+        $bbMaj9 = ['Bb2', 'D3', 'A3', 'C4'];
+        $gm9 = ['G2', 'Bb2', 'F3', 'A3'];
+        $cm9Hi = ['Eb4', 'G4', 'Bb4', 'D5'];
+        $f9Hi = ['A3', 'Eb4', 'G4', 'C5'];
+        $bbMaj9Hi = ['D4', 'F4', 'A4', 'C5'];
+        $gm9Hi = ['Bb3', 'D4', 'F4', 'A4'];
+
         $tracks[] = self::lofiTrack(
-            id: 'kettle', name: 'Kettle', detail: '74 steam', bpm: 74.0, swing: 0.62,
-            mix: ['kick' => 0.66, 'hats' => 0.12, 'pad' => 0.62, 'arp' => 0.14] + self::LOFI_MIX,
-            kick: Phrase::drums([$boomC, $boomC, 'x...............', $boomC], 0.82, 1.0),
-            clap: Phrase::drums([
-                $clap, '....X...........', $clap, '....X.......X...',
-            ], 0.36, 0.66),
-            hat: Phrase::drums([$hatLazy, $hatLazy, $hatLazy, $hatLo], 0.26, 0.4),
-            hatOpen: Phrase::drums([
-                '................', $openLo, '................', $openLo,
-            ], 0.2, 0.2),
+            id: 'kettle', name: 'Kettle', detail: '78 jazz', bpm: 78.0, swing: 0.45,
+            mix: ['pad' => 0.56, 'arp' => 0.2] + self::LOFI_MIX,
+            kick: Phrase::drums([$boom, $boomB, $boom, 'x.......x.x.....'], 0.9, 1.0),
+            clap: Phrase::drums([$clap, $clap, $clap, '....X....x..X...'], 0.42, 0.78),
+            hat: Phrase::drums([$hatLo, $hatLo, $hatLo, $hatLo], 0.3, 0.48),
+            hatOpen: Phrase::drums([$openLo, $openLo, $openLo, $openLo], 0.24, 0.24),
             bass: Phrase::paint([
-                [0, 0, 'Bb2', 12, 0.76],
-                [1, 0, 'Eb2', 10, 0.74],
-                [2, 0, 'G2', 8, 0.72], [2, 10, 'F2', 4, 0.66],
-                [3, 0, 'F2', 6, 0.74], [3, 8, 'Bb2', 6, 0.8],
+                [0, 0, 'C2', 6, 0.82], [0, 8, 'G2', 4, 0.7], [0, 12, 'Bb2', 2, 0.66],
+                [1, 0, 'F2', 6, 0.8], [1, 8, 'C3', 4, 0.7], [1, 12, 'A2', 2, 0.66],
+                [2, 0, 'Bb1', 6, 0.82], [2, 8, 'F2', 4, 0.7], [2, 12, 'A2', 2, 0.66],
+                [3, 0, 'G2', 6, 0.8], [3, 8, 'F2', 3, 0.7], [3, 12, 'D2', 2, 0.68],
             ]),
             stab: Phrase::paint([
-                [0, 8, $bb, 4, 0.34],
-                [1, 8, $eb, 4, 0.32],
-                [2, 8, ['G4', 'Bb4', 'D5'], 4, 0.34],
-                [3, 4, $fCh, 4, 0.32],
+                [0, 4, $cm9Hi, 2, 0.36], [0, 11, $cm9Hi, 1, 0.28],
+                [1, 4, $f9Hi, 2, 0.36], [1, 11, $f9Hi, 1, 0.28],
+                [2, 4, $bbMaj9Hi, 2, 0.36], [2, 11, $bbMaj9Hi, 1, 0.28],
+                [3, 4, $gm9Hi, 2, 0.36], [3, 11, $gm9Hi, 1, 0.3],
             ]),
             lead: Phrase::paint([
-                [0, 4, 'D4', 8, 0.34],
-                [1, 6, 'Bb4', 8, 0.34],
-                [2, 4, 'C5', 8, 0.36],
-                [3, 8, 'A4', 6, 0.36],
+                [0, 2, 'G4', 2, 0.4], [0, 4, 'Bb4', 2, 0.38], [0, 6, 'C5', 4, 0.42], [0, 12, 'D5', 2, 0.36],
+                [1, 0, 'C5', 3, 0.4], [1, 4, 'A4', 2, 0.36], [1, 8, 'F4', 4, 0.38],
+                [2, 2, 'D5', 2, 0.42], [2, 4, 'C5', 2, 0.38], [2, 6, 'A4', 6, 0.4],
+                [3, 0, 'Bb4', 2, 0.38], [3, 2, 'A4', 2, 0.36], [3, 4, 'G4', 4, 0.4], [3, 10, 'F4', 4, 0.36],
             ]),
             pad: Phrase::paint([
-                [0, 0, $bbHigh, 16, 0.58],
-                [1, 0, $ebMaj7, 16, 0.54],
-                [2, 0, $gm7Lo, 16, 0.52],
-                [3, 0, $fMaj7, 16, 0.5],
+                [0, 0, $cm9, 16, 0.5],
+                [1, 0, $f9, 16, 0.48],
+                [2, 0, $bbMaj9, 16, 0.5],
+                [3, 0, $gm9, 16, 0.48],
             ]),
-            arp: Phrase::arpCycle([
-                ['Bb3', 'D4', 'F4', 'A4'],
-                ['Eb4', 'G4', 'Bb4', 'D5'],
-                ['G3', 'Bb3', 'D4', 'F4'],
-                ['F3', 'A3', 'C4', 'E4'],
-            ], 4, 0.26),
+            arp: Phrase::arpCycle([$cm9Hi, $f9Hi, $bbMaj9Hi, $gm9Hi], 4, 0.22),
         );
 
-        return array_column(array_map(static fn (Track $t): array => [$t->id, $t], $tracks), 1, 0);
+        // -------------------------------------------------------------------
+        // Breaks: garage, breakbeat and liquid drum & bass. Broken kicks and
+        // shuffled hats, on the engine's existing house, deep and acid voicings.
+        // -------------------------------------------------------------------
+
+        $twoStep = 'x.........x.....';
+        $twoStepB = 'x......x..x.....';
+        $hatGarage = '..x.xx.x..x.xx.x';
+        $snareGhost = '....X..x.x..X..x';
+        $dnbKick = 'x.........x.....';
+        $hatDnb = 'x.x.x.xxx.x.x.xx';
+
+        $tracks[] = new Track(
+            id: 'southside',
+            name: 'Southside',
+            detail: '132 garage',
+            kind: 'deep',
+            bpm: 132.0,
+            swing: 0.36,
+            mix: ['hats' => 0.42, 'stab' => 0.46, 'pad' => 0.28, 'arp' => 0.22] + self::BASE_MIX,
+            kick: Phrase::drums([$twoStep, $twoStepB, $twoStep, 'x......x..x...x.'], 0.95, 1.0),
+            clap: Phrase::drums([$clap, $clap, $clap, '....X.......X.x.'], 0.5, 0.9),
+            hat: Phrase::drums([$hatGarage, $hatGarage, $hatGarage, $hatGarage], 0.34, 0.6),
+            hatOpen: Phrase::drums([$openLo, $openLo, $openLo, $openLo], 0.4, 0.4),
+            bass: Phrase::paint([
+                [0, 0, 'F2', 3, 0.86], [0, 7, 'F2', 2, 0.74], [0, 10, 'Ab2', 3, 0.8], [0, 14, 'C3', 2, 0.72],
+                [1, 0, 'Db2', 3, 0.86], [1, 7, 'Db2', 2, 0.74], [1, 10, 'F2', 3, 0.8], [1, 14, 'Ab2', 2, 0.72],
+                [2, 0, 'Eb2', 3, 0.86], [2, 7, 'Eb2', 2, 0.74], [2, 10, 'G2', 3, 0.8], [2, 14, 'Bb2', 2, 0.72],
+                [3, 0, 'C2', 3, 0.86], [3, 7, 'C2', 2, 0.74], [3, 10, 'Eb2', 3, 0.8], [3, 13, 'G2', 3, 0.74],
+            ]),
+            stab: Phrase::paint([
+                [0, 3, ['Ab3', 'C4', 'Eb4', 'G4'], 2, 0.5], [0, 10, ['Ab3', 'C4', 'Eb4', 'G4'], 2, 0.44],
+                [1, 3, ['Ab3', 'C4', 'Db4', 'F4'], 2, 0.5], [1, 10, ['Ab3', 'C4', 'Db4', 'F4'], 2, 0.44],
+                [2, 3, ['G3', 'Bb3', 'Eb4', 'F4'], 2, 0.5], [2, 10, ['G3', 'Bb3', 'Eb4', 'F4'], 2, 0.44],
+                [3, 3, ['G3', 'Bb3', 'C4', 'Eb4'], 2, 0.5], [3, 10, ['G3', 'Bb3', 'C4', 'Eb4'], 2, 0.44],
+                [3, 14, ['G3', 'Bb3', 'C4', 'Eb4'], 1, 0.4],
+            ]),
+            lead: Phrase::paint([
+                [0, 6, 'C5', 2, 0.44], [0, 8, 'Eb5', 4, 0.46],
+                [1, 6, 'Db5', 2, 0.44], [1, 8, 'C5', 4, 0.46],
+                [2, 6, 'Bb4', 2, 0.44], [2, 8, 'G4', 4, 0.46],
+                [3, 2, 'C5', 2, 0.44], [3, 6, 'Bb4', 2, 0.42], [3, 10, 'G4', 4, 0.46],
+            ]),
+            pad: Phrase::paint([
+                [0, 0, $fm7, 16, 0.4],
+                [1, 0, ['Db3', 'F3', 'Ab3', 'C4'], 16, 0.4],
+                [2, 0, $ebMaj7, 16, 0.4],
+                [3, 0, ['C3', 'Eb3', 'G3', 'Bb3'], 16, 0.4],
+            ]),
+            arp: Phrase::arpCycle([
+                ['F4', 'Ab4', 'C5', 'Eb5'],
+                ['Db4', 'F4', 'Ab4', 'C5'],
+                ['Eb4', 'G4', 'Bb4', 'D5'],
+                ['C4', 'Eb4', 'G4', 'Bb4'],
+            ], 3, 0.24),
+        );
+
+        $tracks[] = new Track(
+            id: 'pirate',
+            name: 'Pirate',
+            detail: '134 garage',
+            kind: 'house',
+            bpm: 134.0,
+            swing: 0.3,
+            mix: ['hats' => 0.4, 'stab' => 0.44, 'lead' => 0.3, 'arp' => 0.2] + self::BASE_MIX,
+            kick: Phrase::drums([$twoStep, 'x.........x..x..', $twoStep, $twoStepB], 0.95, 1.0),
+            clap: Phrase::drums([$clap, '....X..x....X...', $clap, '....X..x....X.x.'], 0.4, 0.9),
+            hat: Phrase::drums([$hatGarage, $hatGarage, $hatGarage, $hatGarage], 0.32, 0.58),
+            hatOpen: Phrase::drums([$open, $open, $open, $open], 0.42, 0.42),
+            bass: Phrase::paint([
+                [0, 0, 'G2', 2, 0.86], [0, 3, 'G3', 1, 0.7], [0, 7, 'G2', 2, 0.8], [0, 10, 'Bb2', 2, 0.8], [0, 14, 'D3', 2, 0.74],
+                [1, 0, 'Eb2', 2, 0.86], [1, 3, 'Eb3', 1, 0.7], [1, 7, 'Eb2', 2, 0.8], [1, 10, 'G2', 2, 0.8], [1, 14, 'Bb2', 2, 0.74],
+                [2, 0, 'Bb2', 2, 0.86], [2, 3, 'Bb2', 1, 0.7], [2, 7, 'F2', 2, 0.8], [2, 10, 'Bb2', 2, 0.8], [2, 14, 'D3', 2, 0.74],
+                [3, 0, 'F2', 2, 0.86], [3, 3, 'F3', 1, 0.7], [3, 7, 'F2', 2, 0.8], [3, 10, 'A2', 2, 0.8], [3, 14, 'C3', 2, 0.74],
+            ]),
+            stab: Phrase::paint([
+                [0, 2, $gm, 1, 0.5], [0, 7, $gm, 1, 0.46], [0, 13, $gm, 1, 0.44],
+                [1, 2, ['Eb4', 'G4', 'Bb4'], 1, 0.5], [1, 7, ['Eb4', 'G4', 'Bb4'], 1, 0.46], [1, 13, ['Eb4', 'G4', 'Bb4'], 1, 0.44],
+                [2, 2, ['Bb3', 'D4', 'F4'], 1, 0.5], [2, 7, ['Bb3', 'D4', 'F4'], 1, 0.46], [2, 13, ['Bb3', 'D4', 'F4'], 1, 0.44],
+                [3, 2, $fCh, 1, 0.5], [3, 7, $fCh, 1, 0.46], [3, 13, $fCh, 1, 0.44],
+            ]),
+            lead: Phrase::paint([
+                [0, 2, 'D5', 2, 0.44], [0, 6, 'Bb4', 2, 0.42], [0, 10, 'G4', 4, 0.46],
+                [1, 2, 'Eb5', 2, 0.44], [1, 6, 'D5', 2, 0.42], [1, 10, 'Bb4', 4, 0.46],
+                [2, 2, 'F5', 2, 0.46], [2, 6, 'D5', 2, 0.42], [2, 10, 'Bb4', 4, 0.46],
+                [3, 2, 'C5', 2, 0.44], [3, 6, 'A4', 2, 0.42], [3, 10, 'F4', 4, 0.44],
+            ]),
+            pad: Phrase::paint([
+                [0, 0, $gm7, 16, 0.34],
+                [1, 0, $ebMaj7, 16, 0.34],
+                [2, 0, ['Bb2', 'D3', 'F3', 'A3'], 16, 0.34],
+                [3, 0, ['F3', 'A3', 'C4', 'Eb4'], 16, 0.34],
+            ]),
+            arp: Phrase::arpCycle([$gm, ['Eb4', 'G4', 'Bb4'], ['Bb3', 'D4', 'F4'], $fCh], 2, 0.2),
+        );
+
+        $tracks[] = new Track(
+            id: 'bricks',
+            name: 'Bricks',
+            detail: '130 breaks',
+            kind: 'house',
+            bpm: 130.0,
+            swing: 0.1,
+            mix: ['clap' => 0.6, 'hats' => 0.38, 'stab' => 0.4] + self::BASE_MIX,
+            kick: Phrase::drums([
+                'x.x.......xx....', 'x.x.......x.....', 'x.x.......xx....', 'x.x.......x..x..',
+            ], 0.9, 1.0),
+            clap: Phrase::drums([$snareGhost, '....X..x....X...', $snareGhost, '....X..x.x..X.xx'], 0.3, 0.9),
+            hat: Phrase::drums([$hat8, $hat8, $hat8, $hat8], 0.36, 0.6),
+            hatOpen: Phrase::drums([$openLo, $openLo, $openLo, $openLo], 0.4, 0.4),
+            bass: Phrase::paint([
+                [0, 0, 'D2', 6, 0.86], [0, 10, 'D2', 2, 0.78], [0, 13, 'F2', 3, 0.8],
+                [1, 0, 'Bb1', 6, 0.86], [1, 10, 'Bb1', 2, 0.78], [1, 13, 'D2', 3, 0.8],
+                [2, 0, 'F2', 6, 0.86], [2, 10, 'F2', 2, 0.78], [2, 13, 'A2', 3, 0.8],
+                [3, 0, 'C2', 6, 0.86], [3, 10, 'C2', 2, 0.78], [3, 13, 'E2', 3, 0.8],
+            ]),
+            stab: Phrase::paint([
+                [0, 6, $dm, 1, 0.5], [0, 14, $dm, 1, 0.44],
+                [1, 6, $bb, 1, 0.5], [1, 14, $bb, 1, 0.44],
+                [2, 6, $fCh, 1, 0.5], [2, 14, $fCh, 1, 0.44],
+                [3, 6, $cCh, 1, 0.5], [3, 14, $cCh, 1, 0.48],
+            ]),
+            lead: Phrase::paint([
+                [0, 0, 'A4', 2, 0.46], [0, 3, 'F4', 2, 0.42], [0, 6, 'D4', 4, 0.44],
+                [1, 0, 'F4', 2, 0.46], [1, 3, 'D4', 2, 0.42], [1, 6, 'Bb3', 4, 0.44],
+                [2, 0, 'C5', 2, 0.48], [2, 3, 'A4', 2, 0.44], [2, 6, 'F4', 4, 0.46],
+                [3, 0, 'E4', 2, 0.46], [3, 3, 'G4', 2, 0.44], [3, 6, 'C5', 6, 0.48],
+            ]),
+            pad: Phrase::paint([
+                [0, 0, $dm7, 16, 0.32],
+                [1, 0, $bbMaj7, 16, 0.32],
+                [2, 0, $fMaj7, 16, 0.32],
+                [3, 0, $cMaj7, 16, 0.32],
+            ]),
+            arp: Phrase::arpCycle([$dm, $bb, $fCh, $cCh], 4, 0.26),
+        );
+
+        $tracks[] = new Track(
+            id: 'ravetape',
+            name: 'Rave Tape',
+            detail: '136 acid breaks',
+            kind: 'acid',
+            bpm: 136.0,
+            swing: 0.06,
+            mix: ['bass' => 0.86, 'clap' => 0.56, 'hats' => 0.4, 'stab' => 0.3] + self::BASE_MIX,
+            kick: Phrase::drums([
+                'x.....x...x.....', 'x.....x...x..x..', 'x.....x...x.....', 'x.x...x...x.....',
+            ], 0.9, 1.0),
+            clap: Phrase::drums([$snareGhost, $snareGhost, $snareGhost, '....X..x.x..X.XX'], 0.3, 0.88),
+            hat: Phrase::drums(array_fill(0, 4, 'x.xxx.xxx.xxx.xx'), 0.3, 0.55),
+            hatOpen: Phrase::drums([$open, $open, $open, $open], 0.4, 0.4),
+            bass: Phrase::paint(self::accentLine([
+                0 => [[0, 'E2', 0.95, true], [2, 'E2', 0.7], [3, 'G2', 0.78], [6, 'E3', 0.9, true],
+                    [8, 'E2', 0.72], [10, 'D3', 0.8], [11, 'B2', 0.74], [14, 'G2', 0.9, true]],
+                1 => [[0, 'E2', 0.95, true], [1, 'E2', 0.7], [4, 'B2', 0.8], [6, 'D3', 0.92, true],
+                    [7, 'E3', 0.76], [10, 'E2', 0.72], [12, 'G2', 0.82], [14, 'A2', 0.9, true]],
+                2 => [[0, 'C3', 0.95, true], [2, 'C3', 0.7], [3, 'E3', 0.78], [6, 'G3', 0.9, true],
+                    [8, 'C3', 0.72], [10, 'B2', 0.8], [12, 'G2', 0.74], [14, 'E2', 0.9, true]],
+                3 => [[0, 'D3', 0.95, true], [2, 'D3', 0.72], [4, 'A2', 0.8], [6, 'D3', 0.92, true],
+                    [8, 'C3', 0.74], [10, 'B2', 0.8], [12, 'A2', 0.78], [14, 'B2', 0.92, true]],
+            ])),
+            stab: Phrase::paint([
+                [0, 0, $em, 1, 0.46], [1, 0, $em, 1, 0.42],
+                [2, 0, $cCh, 1, 0.46], [3, 0, $dMaj, 1, 0.46], [3, 8, $dMaj, 1, 0.42],
+            ]),
+            lead: Phrase::paint([
+                [0, 8, 'B4', 4, 0.4],
+                [1, 8, 'D5', 4, 0.4],
+                [2, 8, 'E5', 4, 0.42],
+                [3, 8, 'F#5', 4, 0.44],
+            ]),
+            pad: Phrase::paint([
+                [0, 0, $eMin7, 16, 0.26],
+                [1, 0, $eMin7, 16, 0.26],
+                [2, 0, $cMaj7, 16, 0.26],
+                [3, 0, $dMaj7, 16, 0.26],
+            ]),
+            arp: Phrase::arpCycle([$em, $em, $cCh, $dMaj], 3, 0.22),
+        );
+
+        $tracks[] = new Track(
+            id: 'lowtide',
+            name: 'Lowtide',
+            detail: '172 liquid',
+            kind: 'deep',
+            bpm: 172.0,
+            swing: 0.0,
+            mix: [
+                'kick' => 0.86, 'clap' => 0.56, 'hats' => 0.3, 'bass' => 0.86,
+                'stab' => 0.3, 'lead' => 0.34, 'pad' => 0.5, 'arp' => 0.2,
+            ],
+            kick: Phrase::drums([$dnbKick, $dnbKick, $dnbKick, 'x.......x.x.....'], 0.92, 1.0),
+            clap: Phrase::drums([$clap, '....X.......X..x', $clap, '....X..x....X..x'], 0.3, 0.92),
+            hat: Phrase::drums([$hatDnb, $hatDnb, $hatDnb, $hatDnb], 0.28, 0.5),
+            hatOpen: Phrase::drums([$openLo, $openLo, $openLo, $openLo], 0.3, 0.3),
+            bass: Phrase::paint([
+                [0, 0, 'Eb2', 9, 0.86], [0, 10, 'Bb1', 6, 0.8],
+                [1, 0, 'C2', 9, 0.86], [1, 10, 'G1', 6, 0.8],
+                [2, 0, 'Ab1', 9, 0.86], [2, 10, 'Eb2', 6, 0.8],
+                [3, 0, 'Bb1', 9, 0.86], [3, 10, 'F2', 4, 0.8], [3, 14, 'D2', 2, 0.76],
+            ]),
+            stab: Phrase::paint([
+                [0, 6, ['Eb4', 'G4', 'Bb4', 'D5'], 3, 0.38], [0, 14, ['Eb4', 'G4', 'Bb4', 'D5'], 2, 0.32],
+                [1, 6, ['C4', 'Eb4', 'G4', 'Bb4'], 3, 0.38], [1, 14, ['C4', 'Eb4', 'G4', 'Bb4'], 2, 0.32],
+                [2, 6, ['Ab3', 'C4', 'Eb4', 'G4'], 3, 0.38], [2, 14, ['Ab3', 'C4', 'Eb4', 'G4'], 2, 0.32],
+                [3, 6, ['Bb3', 'D4', 'F4', 'C5'], 3, 0.38], [3, 14, ['Bb3', 'D4', 'F4', 'C5'], 2, 0.34],
+            ]),
+            lead: Phrase::paint([
+                [0, 0, 'G5', 6, 0.36], [0, 8, 'F5', 2, 0.32], [0, 10, 'Eb5', 6, 0.36],
+                [1, 0, 'Eb5', 4, 0.34], [1, 4, 'D5', 2, 0.32], [1, 6, 'C5', 10, 0.36],
+                [2, 0, 'Eb5', 6, 0.36], [2, 8, 'G5', 8, 0.36],
+                [3, 0, 'F5', 8, 0.36], [3, 8, 'D5', 8, 0.34],
+            ]),
+            pad: Phrase::paint([
+                [0, 0, $ebMaj7, 16, 0.48],
+                [1, 0, ['C3', 'Eb3', 'G3', 'Bb3'], 16, 0.46],
+                [2, 0, $abMaj7, 16, 0.48],
+                [3, 0, ['Bb2', 'D3', 'F3', 'C4'], 16, 0.46],
+            ]),
+            arp: Phrase::arpCycle([
+                ['Eb4', 'G4', 'Bb4', 'D5'],
+                ['C4', 'Eb4', 'G4', 'Bb4'],
+                ['Ab3', 'C4', 'Eb4', 'G4'],
+                ['Bb3', 'D4', 'F4', 'C5'],
+            ], 2, 0.2),
+        );
+
+        $tracks[] = new Track(
+            id: 'slipstream',
+            name: 'Slipstream',
+            detail: '174 liquid',
+            kind: 'deep',
+            bpm: 174.0,
+            swing: 0.0,
+            mix: [
+                'kick' => 0.86, 'clap' => 0.56, 'hats' => 0.32, 'bass' => 0.86,
+                'stab' => 0.26, 'lead' => 0.36, 'pad' => 0.48, 'arp' => 0.22,
+            ],
+            kick: Phrase::drums([$dnbKick, $dnbKick, $dnbKick, 'x.........x.x...'], 0.92, 1.0),
+            clap: Phrase::drums([$clap, '....X..x....X...', $clap, '....X..x....X..x'], 0.3, 0.92),
+            hat: Phrase::drums([$hat8, $hatDnb, $hat8, $hatDnb], 0.28, 0.5),
+            hatOpen: Phrase::drums([$openLo, $openLo, $openLo, $openLo], 0.3, 0.3),
+            bass: Phrase::paint([
+                [0, 0, 'A1', 9, 0.86], [0, 10, 'E2', 6, 0.8],
+                [1, 0, 'F1', 9, 0.86], [1, 10, 'C2', 6, 0.8],
+                [2, 0, 'D2', 9, 0.86], [2, 10, 'A1', 6, 0.8],
+                [3, 0, 'E2', 6, 0.86], [3, 6, 'G2', 4, 0.8], [3, 10, 'E2', 6, 0.8],
+            ]),
+            stab: Phrase::paint([
+                [0, 10, ['C4', 'E4', 'G4', 'B4'], 2, 0.32],
+                [1, 10, ['F3', 'A3', 'C4', 'E4'], 2, 0.32],
+                [2, 10, ['F3', 'C4', 'E4', 'A4'], 2, 0.32],
+                [3, 10, ['E3', 'G3', 'B3', 'D4'], 2, 0.34],
+            ]),
+            lead: Phrase::paint([
+                [0, 0, 'E5', 4, 0.38], [0, 4, 'C5', 4, 0.36], [0, 8, 'B4', 8, 0.38],
+                [1, 0, 'C5', 4, 0.38], [1, 4, 'A4', 4, 0.36], [1, 8, 'G4', 8, 0.36],
+                [2, 0, 'A4', 4, 0.38], [2, 4, 'C5', 4, 0.36], [2, 8, 'D5', 8, 0.38],
+                [3, 0, 'B4', 4, 0.38], [3, 4, 'G4', 4, 0.36], [3, 8, 'E5', 8, 0.38],
+            ]),
+            pad: Phrase::paint([
+                [0, 0, $am7, 16, 0.46],
+                [1, 0, $fMaj7, 16, 0.44],
+                [2, 0, $dm7, 16, 0.46],
+                [3, 0, $eMin7, 16, 0.44],
+            ]),
+            arp: Phrase::arpCycle([
+                ['A4', 'C5', 'E5', 'G5'],
+                ['F4', 'A4', 'C5', 'E5'],
+                ['D4', 'F4', 'A4', 'C5'],
+                ['E4', 'G4', 'B4', 'D5'],
+            ], 2, 0.22),
+        );
+
+        // Display order and grouping, in one list: section, then sub-genre, then track.
+        // The UI titles each sub-genre above its first track, so a style's tracks
+        // must sit together here.
+        $byId = [];
+        foreach ($tracks as $track) {
+            $byId[$track->id] = $track;
+        }
+        $ordered = [];
+        foreach (self::GROUPS as [$id, $section, $style]) {
+            $track = $byId[$id] ?? throw new \LogicException("grouped track is not defined: {$id}");
+            $ordered[$id] = $track->grouped($section, $style);
+            unset($byId[$id]);
+        }
+        if ($byId !== []) {
+            throw new \LogicException('tracks missing from Library::GROUPS: '.implode(', ', array_keys($byId)));
+        }
+
+        return $ordered;
     }
 
     /**
@@ -745,6 +1065,25 @@ final class Library
                 [$step, $pitch, $velocity] = $note;
                 $accent = $note[3] ?? false;
                 $out[] = [(int) $bar, $step, $pitch, 1, $velocity, $accent];
+            }
+        }
+
+        return $out;
+    }
+
+    /**
+     * Turn a bar-keyed table of `[step, pitch, velocity, accent?]` sixteenths into
+     * `Phrase::paint` items: the shape `acidBass` uses, for any other acid line.
+     *
+     * @param  array<int, list<array{0:int, 1:string, 2:float, 3?:bool}>>  $bars
+     * @return list<array{0:int, 1:int, 2:string, 3:int, 4:float, 5:bool}>
+     */
+    private static function accentLine(array $bars): array
+    {
+        $out = [];
+        foreach ($bars as $bar => $notes) {
+            foreach ($notes as $note) {
+                $out[] = [(int) $bar, $note[0], $note[1], 1, $note[2], $note[3] ?? false];
             }
         }
 
