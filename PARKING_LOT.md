@@ -79,11 +79,9 @@ the reference (instant drop, linear return).
 - `.env` and `.env.static` are still in `floor-desktop/`. Move them to the repo root.
   `verify:static` fails until `.env.static` is there, because `vite build --mode static`
   reads it from the project root.
-- The Laravel `APP_KEY` was committed in `01558c3` and is on both remotes. Rotate it with
-  `php artisan key:generate`. Removing it from history needs a force-push.
-  - 10-05-2026: `verify:static` no longer depends on `.env.static`. `build:app:static`
-    now sets `VITE_STATIC=1` itself (`ba9ad0c`), and the check passes. The files in
-    `floor-desktop/` still want moving for the desktop build.
+- ~~The Laravel `APP_KEY` was committed~~ — closed 10-05-2026. The app is stateless
+  (no sessions, no encryption), so the key protected nothing; `floor-desktop/.env`
+  and `.env.static` were also scrubbed from history on both remotes.
 
 ## Found 10-05-2026
 
