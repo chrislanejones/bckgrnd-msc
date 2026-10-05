@@ -748,17 +748,38 @@ impl Compressor {
         }
     }
 
+    /// Compress one stereo frame, stereo-linked.
+    ///
+    /// One detector step per sample, driven by the louder of the two channels, and
+    /// the same gain applied to both. Running a mono compressor left-then-right (as
+    /// the master did) stepped the envelope twice per sample, so attack and release
+    /// ran at half their configured times, and the detector alternated between the
+    /// channels, so a loud left pulled the right down on alternate samples only.
+    /// Linking also keeps the stereo image still while the compressor works.
     #[inline]
-    pub fn process(&mut self, x: f32) -> f32 {
-        let level_db = 20.0 * x.abs().max(1e-9).log10();
+    pub fn process_stereo(&mut self, left: f32, right: f32) -> (f32, f32) {
+        let peak = left.abs().max(right.abs()).max(1e-9);
+        let level_db = 20.0 * peak.log10();
         let coef = if level_db > self.env_db {
             self.attack_coef
         } else {
             self.release_coef
         };
-        self.env_db = coef * level_db + (1.0 - coef) * self.env_db;
+        // One-pole smoothing: `coef` is `exp(-1 / (t * sr))`, the fraction of the
+        // *previous* envelope kept each sample. This was written the other way round,
+        // weighting the new level by ~0.99998, so the detector followed the signal
+        // sample by sample and the compressor acted as a waveshaper with no attack or
+        // release at all.
+        self.env_db = level_db + coef * (self.env_db - level_db);
 
-        x * (10.0f32).powf(self.reduction_db(self.env_db) / 20.0)
+        let gain = (10.0f32).powf(self.reduction_db(self.env_db) / 20.0);
+        (left * gain, right * gain)
+    }
+
+    /// The detector level in dB, for tests that pin the ballistics.
+    #[cfg(test)]
+    pub fn envelope_db(&self) -> f32 {
+        self.env_db
     }
 
     pub fn reset(&mut self) {

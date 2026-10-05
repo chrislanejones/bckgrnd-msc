@@ -355,8 +355,10 @@ impl Master {
         // --- Dynamics, then the saturator, then the dry trim. Both sit *before* the EQ
         // so the low end is controlled on the summed signal rather than after it has
         // already been shaped.
-        l = self.comp.process(l) * self.dry;
-        r = self.comp.process(r) * self.dry;
+        // Stereo-linked: one detector step per sample, one gain for both sides.
+        (l, r) = self.comp.process_stereo(l, r);
+        l *= self.dry;
+        r *= self.dry;
 
         l = self.saturate(0, l);
         r = self.saturate(1, r);
@@ -716,9 +718,18 @@ mod tests {
         // A loud, continuous low tone is the case the dynamics stage exists for. With
         // no compressor the sum reaches the clipper and the saturator distorts it; the
         // compressor's job is to pull it back first. Threshold is -12 dB at 2.6:1, so a
-        // 0 dBFS tone should come out meaningfully lower.
+        // 0.8 tone should come out meaningfully lower than the same chain would pass
+        // it uncompressed.
+        //
+        // The bound is relative to that uncompressed level rather than an absolute
+        // number. It used to be `< 0.45`, which was calibrated on a detector whose
+        // one-pole weights were swapped: it followed the waveform sample by sample and
+        // squashed each peak like a waveshaper. With real 8 ms / 200 ms ballistics the
+        // detector sits a little under the sine's crest, so the reduction is a few dB
+        // rather than six, and it is gain riding rather than distortion.
         let sr = 48_000.0;
         let mut m = Master::new(sr);
+        let uncompressed = m.gain * soft_clip(0.8, 1.35);
         let mut peak = 0.0f32;
         for i in 0..(sr as usize) {
             let t = i as f32 / sr;
@@ -728,11 +739,15 @@ mod tests {
                 peak = peak.max(l.abs());
             }
         }
+        // At least 2.5 dB of reduction, and no more than about 9 dB.
         assert!(
-            peak < 0.45,
-            "the sum is not being held down: 0.8 in, {peak:.3} out"
+            peak < uncompressed * 0.75,
+            "the sum is not being held down: {uncompressed:.3} uncompressed, {peak:.3} out"
         );
-        assert!(peak > 0.1, "the compressor is over-reducing: {peak:.3}");
+        assert!(
+            peak > uncompressed * 0.35,
+            "the compressor is over-reducing: {uncompressed:.3} uncompressed, {peak:.3} out"
+        );
     }
 
     /// A hard-panned source has to stay on its own side through the whole chain.
@@ -760,6 +775,52 @@ mod tests {
             right_peak < 1e-6,
             "left leaked into the right channel at {right_peak}"
         );
+    }
+
+    /// The master's compressor has to release over the time it was configured with.
+    ///
+    /// Two faults hid this. The detector's one-pole had its weights swapped, so the
+    /// envelope followed the signal sample by sample with no release at all; and the
+    /// master ran one mono compressor left-then-right, stepping it twice per sample.
+    /// After a drop the detector must close 63% of the gap in one release time
+    /// constant, 0.2 s, not instantly and not in 0.1 s.
+    #[test]
+    fn the_compressor_releases_over_its_configured_time() {
+        let sr = 48_000.0;
+        let release = 0.2;
+        let mut c = Compressor::new(sr, -12.0, 8.0, 2.6, 0.008, release);
+        // Settle on a loud level, on the left only: the link has to see it anyway.
+        for _ in 0..(sr as usize) {
+            c.process_stereo(0.5, 0.0);
+        }
+        let loud = c.envelope_db();
+        let quiet_db = 20.0 * 0.05f32.log10();
+        let target = quiet_db + (loud - quiet_db) * (-1.0f32).exp();
+        let mut crossed = None;
+        for i in 0..(sr as usize) {
+            c.process_stereo(0.0, 0.05);
+            if crossed.is_none() && c.envelope_db() <= target {
+                crossed = Some(i as f32 / sr);
+            }
+        }
+        let t = crossed.expect("the detector never released");
+        assert!(
+            (t - release).abs() < release * 0.05,
+            "released in {t:.4} s, configured {release} s"
+        );
+    }
+
+    /// Linked: both channels take the same gain, whichever side is loud.
+    #[test]
+    fn the_compressor_applies_one_gain_to_both_channels() {
+        let mut c = Compressor::new(48_000.0, -12.0, 8.0, 2.6, 0.008, 0.2);
+        let mut last = (0.0, 0.0);
+        for _ in 0..4_800 {
+            last = c.process_stereo(0.9, 0.1);
+        }
+        let (gl, gr) = (last.0 / 0.9, last.1 / 0.1);
+        assert!(gl < 0.8, "a 0.9 peak should be reduced, gain {gl}");
+        assert!((gl - gr).abs() < 1e-6, "gains differ: {gl} vs {gr}");
     }
 
     #[test]
