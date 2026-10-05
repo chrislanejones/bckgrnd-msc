@@ -16,7 +16,7 @@ downbeat. The UI
 tracks which deck is live (`liveDeck`) instead of assuming deck A.
 
 ## Consequences
-+ Handovers are seamless: the incoming track is already loaded and starts on
++ Handovers have no gap: the incoming track is already loaded and starts on
   a shared downbeat, aligned to within one render quantum (under 3 ms).
 + One worklet, one message channel, one place that sees both clocks.
 - Both engines run every block, so the audio thread pays for two decks even
