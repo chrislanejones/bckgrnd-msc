@@ -229,6 +229,13 @@ The engine's defects found and fixed during the port, and the audio notes behind
 are written up in [HANDOFF.md](HANDOFF.md). Open items are in
 [PARKING_LOT.md](PARKING_LOT.md).
 
+## Coming next: a mobile app
+
+I'm planning to package this as a phone app with NativePHP. The desktop side of
+NativePHP (`nativephp/laravel`, `nativephp/electron`) is already in `composer.json`; mobile
+is a separate package and isn't set up yet. The open questions are in
+[PARKING_LOT.md](PARKING_LOT.md).
+
 ## `old/`
 
 `old/` is the first version of this: a TanStack Start app running the engine in Web

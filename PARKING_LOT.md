@@ -77,3 +77,28 @@ Run in this order, after the waveform scratch lands. None needs a 9th stem.
 - `HANDOFF.md` is partly stale ("12 tracks", layout missing `scratch.rs`,
   `transition.rs`, the Breaks section; British spellings on lines 5 and 119). Worth a
   targeted update rather than archiving.
+
+
+## Planned: NativePHP mobile app (target: week of 10-05-2026)
+
+Package the app for iOS and Android with NativePHP's mobile package. The desktop
+packages (`nativephp/laravel`, `nativephp/electron`) are already installed; mobile is
+not. Things to settle before or while building it:
+
+- **AudioWorklet in the app's webview.** The whole engine runs in an `AudioWorklet`,
+  which only exists in a secure context. Check that the mobile webview serves the app
+  from an origin that counts as secure, on both iOS and Android, before anything else.
+- **Audio session behavior.** Silent switch on iOS, playing with the screen locked or the
+  app in the background, and interruptions (calls, other apps' audio).
+- **Touch.** The jog wheel and the waveform scratch are pointer gestures; check them on a
+  real phone, including that the page doesn't scroll under a drag.
+- **CPU and battery.** Two engines render in one worklet at all times. Measure on a mid-range
+  phone; the filter CPU check (Silas, 10-05) is the first step.
+- **Presets.** Saved presets are JSON on disk through Laravel. On mobile that disk is the
+  app's own storage, so they could work there even though the Netlify build lacks them.
+- **Leftovers from the desktop setup.** `config/nativephp.php` still has the old app id
+  `dev.floor.stemmachine` (the app was called FLOOR), and `floor-desktop/` still holds the
+  desktop `.env` files. Rename and move as part of this work.
+- **Layout.** The phone layout works in a narrow browser; recheck it at real phone sizes
+  with the system's safe areas (notch, home bar).
+
