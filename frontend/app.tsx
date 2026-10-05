@@ -641,6 +641,7 @@ export function App() {
             status={liveDeck === 'a' ? (playing ? 'Live' : 'Cue') : 'Idle'}
             silenced={liveDeck === 'a' ? silenced : undefined}
             bpm={bpm}
+            mixing={mixing !== null}
           />
           <DeckWave
             side="b"
@@ -649,6 +650,7 @@ export function App() {
             status={liveDeck === 'b' ? (playing ? 'Live' : 'Cue') : 'Idle'}
             silenced={liveDeck === 'b' ? silenced : undefined}
             bpm={bpm}
+            mixing={mixing !== null}
           />
         </div>
 
@@ -1410,11 +1412,13 @@ function useScrub(step: number, bpm: number, live: boolean) {
 
   useEffect(() => () => window.clearTimeout(rest.current), []);
 
-  // Losing the deck mid-drag (a mix handover, a stop) must not leave the engine
-  // scratching with nobody holding it.
+  // Losing the platter mid-drag — a stop, or a mix starting — drops the drag here
+  // only. The engine has already let go on its own (stop and mix both release the
+  // platter where the hand had it), and by the time this deck stops being live the
+  // other deck is, so a scratchEnd sent now would jump the wrong track.
   useEffect(() => {
     if (!live && drag.current) {
-      engine.scratchEnd(Math.round(drag.current.at));
+      window.clearTimeout(rest.current);
       drag.current = null;
       setShown(null);
     }
@@ -1500,6 +1504,7 @@ function DeckWave({
   status,
   silenced,
   bpm,
+  mixing,
 }: {
   side: 'a' | 'b';
   track: TrackArrangement | null;
@@ -1509,6 +1514,8 @@ function DeckWave({
   silenced?: Record<StemId, boolean>;
   /** Current tempo, so a drag's speed can be expressed as a playback rate. */
   bpm: number;
+  /** A mix is running. The platter cannot be grabbed until it hands over. */
+  mixing: boolean;
 }) {
   // Both decks always draw. Before a track is cued there is nothing to show, so the
   // slot keeps its height with a placeholder rather than collapsing — a deck that
@@ -1520,7 +1527,8 @@ function DeckWave({
     [track, silentKey],
   );
   const live = status === 'Live';
-  const scrub = useScrub(step, bpm, live);
+  const grabbable = live && !mixing;
+  const scrub = useScrub(step, bpm, grabbable);
   const shown = scrub.step ?? step;
   const head = shown < 0 ? 0 : ((shown % STEPS) / STEPS) * 100;
 
@@ -1535,8 +1543,8 @@ function DeckWave({
         <p className="shrink-0 text-xs text-muted">{status}</p>
       </div>
       <div
-        className={cx('relative mx-2 mb-5 mt-1', live && 'wave-scrub', scrub.held && 'is-held')}
-        {...(live ? scrub.handlers : {})}
+        className={cx('relative mx-2 mb-5 mt-1', grabbable && 'wave-scrub', scrub.held && 'is-held')}
+        {...(grabbable ? scrub.handlers : {})}
       >
         <svg
           viewBox="0 0 256 48"

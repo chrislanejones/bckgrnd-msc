@@ -286,6 +286,9 @@ class EngineProcessor extends AudioWorkletProcessor {
     if (!from.is_playing()) {
       from.play();
     }
+    // A held platter never reaches a downbeat, so the handover below would be timed
+    // against a clock that is not moving. Let go first, where the hand had it.
+    from.scratch_release();
 
     // Eight beats of crossfade, starting at the next four-bar boundary when that
     // is soon enough to be worth waiting for, otherwise the next bar.

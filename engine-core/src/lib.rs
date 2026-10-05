@@ -610,6 +610,16 @@ impl Engine {
         }
     }
 
+    /// Let go of a scratch, if there is one, and carry on from the step it was
+    /// grabbed on. A no-op when not scratching.
+    ///
+    /// For a mix: the handover is timed from this deck's next downbeat, and a held
+    /// transport never reaches one, so the platter has to be released before the
+    /// mix measures where that downbeat is.
+    pub fn scratch_release(&mut self) {
+        self.let_go_of_the_platter();
+    }
+
     /// End a scratch, if there is one, without moving the playhead.
     fn let_go_of_the_platter(&mut self) {
         if self.scratch.held() {
@@ -1844,6 +1854,54 @@ mod tests {
         assert!(!e.scratch.held() && !e.transport.held);
         run(&mut e, 20);
         assert!(!e.scratch.active(), "the reader outlived its fade");
+    }
+
+    #[test]
+    fn releasing_a_scratch_resumes_from_the_step_it_was_grabbed_on() {
+        let mut e = Engine::new(48_000.0);
+        e.load_track(track_with_kick());
+        e.play();
+        run(&mut e, 400);
+        e.scratch_start();
+        e.scratch_rate(-1.0);
+        run(&mut e, 50);
+        let held = e.visual_step();
+        let wait_held = e.samples_to_next_downbeat(1, 0.0);
+        run(&mut e, 200);
+        assert_eq!(e.visual_step(), held, "the step moved under a held platter");
+
+        e.scratch_release();
+        assert!(
+            !e.scratch.held() && !e.transport.held,
+            "release left it held"
+        );
+        assert!(e.is_playing(), "release stopped the deck");
+        // Downbeat timing counts from the held step again, so a mix started now is
+        // scheduled against a transport that is actually moving.
+        assert_eq!(e.samples_to_next_downbeat(1, 0.0), wait_held);
+        run(&mut e, 400);
+        assert_ne!(
+            e.visual_step(),
+            held,
+            "playback did not resume after release"
+        );
+        assert!(!e.scratch.active(), "the reader outlived its fade");
+    }
+
+    #[test]
+    fn releasing_without_a_scratch_does_nothing() {
+        let mut e = Engine::new(48_000.0);
+        e.load_track(track_with_kick());
+        e.play();
+        run(&mut e, 300);
+        let before = e.visual_step();
+        e.scratch_release();
+        run(&mut e, 1);
+        assert!(!e.scratch.held() && e.is_playing());
+        assert!(
+            e.visual_step() == before || e.visual_step() == before + 1,
+            "it jumped"
+        );
     }
 
     #[test]
