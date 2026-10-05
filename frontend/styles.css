@@ -489,7 +489,7 @@ body {
 }
 
 /* The deck: the jog wheel on the left, and its six pads in a 2 x 3 block to its
-   right. The block is centred against the wheel, so the wheel's height never
+   right. The block is centered against the wheel, so the wheel's height never
    stretches a pad. */
 .deck-row {
   --jog: clamp(13rem, 28vw, 18rem);
