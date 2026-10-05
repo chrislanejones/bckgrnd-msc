@@ -4,7 +4,7 @@
 //! instantly at the fader without touching the voices, and so send levels stay
 //! independent of fader position.
 
-use crate::dsp::{soft_clip, Compressor, Delay, Reverb, StereoBiquad};
+use crate::dsp::{soft_clip, Compressor, Delay, Limiter, Reverb, StereoBiquad};
 use crate::track::{Stem, TrackKind};
 
 /// Stereo accumulators for one stem.
@@ -85,7 +85,7 @@ impl Channel {
 ///        └─ per-stem sends ─────────────────► delay ───┘
 ///                                                       ▼
 ///              hp 28 Hz ─► compressor ─► saturator ─► dry ─► low ─► mid
-///                    ─► high ─► tape sweep ─► recorder ─► master gain
+///                    ─► high ─► tape sweep ─► recorder ─► master gain ─► limiter
 /// ```
 ///
 /// The order matters and was wrong here before. Saturation and compression have to
@@ -139,6 +139,9 @@ pub struct Master {
     shaper_prev: [f32; 2],
     /// Per-stem sends accumulated for the current sample, drained by `process`.
     send_acc: f32,
+    /// Output safety ceiling, the very last stage. The EQ, tape filter and master gain
+    /// all sit after the compressor and can lift the sum past full scale.
+    limiter: Limiter,
 }
 
 /// The reverb's wet level, and the highpasses either side of the send.
@@ -146,6 +149,10 @@ const VERB_WET: f32 = 0.07;
 const VERB_PRE_HZ: f32 = 380.0;
 const ECHO_HP_HZ: f32 = 240.0;
 const RUMBLE_HP_HZ: f32 = 28.0;
+/// The output limiter: untouched below the knee, never past the ceiling.
+const LIMIT_KNEE_DB: f32 = -3.0;
+const LIMIT_CEILING_DB: f32 = -0.3;
+const LIMIT_RELEASE: f32 = 0.08;
 
 impl Master {
     pub fn new(sample_rate: f32) -> Self {
@@ -195,6 +202,7 @@ impl Master {
             echo_on: false,
             shaper_prev: [0.0; 2],
             send_acc: 0.0,
+            limiter: Limiter::new(sample_rate, LIMIT_KNEE_DB, LIMIT_CEILING_DB, LIMIT_RELEASE),
         }
     }
 
@@ -210,6 +218,7 @@ impl Master {
         self.verb.reset();
         self.comp.reset();
         self.shaper_prev = [0.0; 2];
+        self.limiter.reset();
     }
 
     /// Accumulate a stem's send for this sample. The line itself is written exactly
@@ -383,6 +392,9 @@ impl Master {
         };
         out_l *= self.filter_gain;
         out_r *= self.filter_gain;
+
+        // --- The safety ceiling, last of all, so nothing upstream can clip the output.
+        (out_l, out_r) = self.limiter.process(out_l, out_r);
 
         self.scope_t += 1.0;
         if self.scope_t >= self.sample_rate / 60.0 {
@@ -821,6 +833,19 @@ mod tests {
         let (gl, gr) = (last.0 / 0.9, last.1 / 0.1);
         assert!(gl < 0.8, "a 0.9 peak should be reduced, gain {gl}");
         assert!((gl - gr).abs() < 1e-6, "gains differ: {gl} vs {gr}");
+    }
+
+    /// Normal levels leave the limiter idle: unity gain the whole way through.
+    #[test]
+    fn the_limiter_is_idle_at_normal_levels() {
+        let sr = 48_000.0;
+        let mut m = Master::new(sr);
+        for i in 0..(sr as usize) {
+            let t = i as f32 / sr;
+            let v = 0.25 * (t * 220.0 * std::f32::consts::TAU).sin();
+            m.process(v, v);
+            assert_eq!(m.limiter.gain(), 1.0, "limiter engaged at sample {i}");
+        }
     }
 
     #[test]

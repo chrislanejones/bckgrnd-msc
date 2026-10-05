@@ -543,6 +543,43 @@ pub fn midi_hz(note: f32) -> f32 {
 mod tests {
     use super::*;
 
+    /// Below the knee the limiter must not touch a single bit.
+    #[test]
+    fn the_limiter_passes_quiet_material_untouched() {
+        let mut lim = Limiter::new(48_000.0, -3.0, -0.3, 0.08);
+        for i in 0..48_000 {
+            let t = i as f32 / 48_000.0;
+            // -4 dBFS peak, under the -3 dBFS knee.
+            let l = 0.63 * (t * 330.0 * core::f32::consts::TAU).sin();
+            let r = 0.5 * (t * 97.0 * core::f32::consts::TAU).sin();
+            let (ol, or) = lim.process(l, r);
+            assert_eq!(ol.to_bits(), l.to_bits(), "left altered at {i}");
+            assert_eq!(or.to_bits(), r.to_bits(), "right altered at {i}");
+        }
+        assert_eq!(lim.gain(), 1.0);
+    }
+
+    /// Nothing gets past the ceiling, however hot, and the gain recovers afterwards.
+    #[test]
+    fn the_limiter_holds_the_ceiling_and_recovers() {
+        let sr = 48_000.0;
+        let ceiling = 10f32.powf(-0.3 / 20.0);
+        let mut lim = Limiter::new(sr, -3.0, -0.3, 0.08);
+        for i in 0..(sr as usize) {
+            let t = i as f32 / sr;
+            let x = 4.0 * (t * 55.0 * core::f32::consts::TAU).sin() + noise();
+            let (l, r) = lim.process(x, -0.5 * x);
+            assert!(
+                l.abs() < ceiling && r.abs() < ceiling,
+                "over at {i}: {l} {r}"
+            );
+        }
+        for _ in 0..(sr as usize) {
+            lim.process(0.0, 0.0);
+        }
+        assert!(lim.gain() > 0.999, "did not recover: {}", lim.gain());
+    }
+
     #[test]
     fn midi_hz_is_a440_at_69() {
         assert!((midi_hz(69.0) - 440.0).abs() < 1e-4);
@@ -784,6 +821,73 @@ impl Compressor {
 
     pub fn reset(&mut self) {
         self.env_db = -120.0;
+    }
+}
+
+/// Output safety limiter: a stereo-linked, lookahead-free peak ceiling.
+///
+/// Sits at the very end of the master, after the EQ, the tape filter and the master
+/// gain, all of which come after the compressor and can push the sum past full scale.
+/// Without this the browser hard-clips the overs.
+///
+/// Below the knee (about -3 dBFS) the gain is exactly 1.0, so normal material passes
+/// bit-identical. Above it, each peak is mapped onto a `tanh` curve that leaves the
+/// knee with unity slope and approaches the ceiling asymptotically, so no sample can
+/// reach it. The gain required for that drops instantly (no lookahead, so no added
+/// latency and nothing to allocate) and recovers over the release time. One gain
+/// serves both channels, so the image does not shift while it works.
+#[derive(Clone, Debug)]
+pub struct Limiter {
+    knee: f32,
+    ceiling: f32,
+    release_coef: f32,
+    gain: f32,
+}
+
+impl Limiter {
+    /// `knee_db` and `ceiling_db` in dBFS, `release` in seconds.
+    pub fn new(sample_rate: f32, knee_db: f32, ceiling_db: f32, release: f32) -> Self {
+        let ceiling = 10f32.powf(ceiling_db / 20.0);
+        let knee = 10f32.powf(knee_db / 20.0).min(ceiling * 0.99);
+        Self {
+            knee,
+            ceiling,
+            release_coef: 1.0 - (-1.0 / (release.max(1e-4) * sample_rate.max(1.0))).exp(),
+            gain: 1.0,
+        }
+    }
+
+    /// The gain a peak of `p` needs so it lands on the soft-knee curve.
+    #[inline]
+    fn required(&self, p: f32) -> f32 {
+        if p <= self.knee {
+            return 1.0;
+        }
+        // Aim a hair (-0.004 dB) under the ceiling: `tanh` saturates to exactly 1.0
+        // in f32 for hot input, and the divide-then-multiply can round up by an ulp.
+        let span = self.ceiling * 0.9995 - self.knee;
+        (self.knee + span * ((p - self.knee) / span).tanh()) / p
+    }
+
+    #[inline]
+    pub fn process(&mut self, left: f32, right: f32) -> (f32, f32) {
+        let need = self.required(left.abs().max(right.abs()));
+        if need < self.gain {
+            self.gain = need;
+        } else {
+            self.gain += (need - self.gain) * self.release_coef;
+        }
+        (left * self.gain, right * self.gain)
+    }
+
+    /// Current gain, 1.0 when idle.
+    #[cfg(test)]
+    pub fn gain(&self) -> f32 {
+        self.gain
+    }
+
+    pub fn reset(&mut self) {
+        self.gain = 1.0;
     }
 }
 

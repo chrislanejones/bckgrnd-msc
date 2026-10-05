@@ -1267,8 +1267,7 @@ mod tests {
         assert!(peak > 0.05, "no audio, peak {peak}");
     }
 
-    #[test]
-    fn output_never_nans_under_a_full_mix() {
+    fn dense_track() -> Track {
         let mut t = Track::silence("full");
         for s in 0..STEPS {
             t.kick[s] = if s % 4 == 0 { 1.0 } else { 0.0 };
@@ -1297,6 +1296,12 @@ mod tests {
                 None
             };
         }
+        t
+    }
+
+    #[test]
+    fn output_never_nans_under_a_full_mix() {
+        let t = dense_track();
         let mut e = Engine::new(48_000.0);
         e.load_track(t);
         e.play();
@@ -1307,6 +1312,44 @@ mod tests {
             assert!(l.iter().all(|v| v.is_finite()));
             assert!(r.iter().all(|v| v.is_finite()));
             assert!(l.iter().all(|v| v.abs() <= 1.5), "clipping too hard");
+        }
+    }
+
+    /// Every band boosted, master fully up, a dense mix: the output still never
+    /// reaches the -0.3 dBFS ceiling. The EQ and master gain come after the
+    /// compressor, so without the limiter this went past full scale.
+    #[test]
+    fn the_output_never_passes_the_ceiling() {
+        let ceiling = 10f32.powf(-0.3 / 20.0);
+        for kind in [
+            TrackKind::House,
+            TrackKind::Deep,
+            TrackKind::Acid,
+            TrackKind::Lofi,
+        ] {
+            for echo in [false, true] {
+                let mut t = dense_track();
+                t.kind = kind;
+                let mut e = Engine::new(48_000.0);
+                e.load_track(t);
+                e.set_bands(1.4, 1.4, 1.4);
+                e.set_master(1.0);
+                e.set_echo(echo);
+                e.play();
+                let mut peak = 0.0f32;
+                for _ in 0..(6 * 48_000 / 128) {
+                    let mut l = [0.0f32; 128];
+                    let mut r = [0.0f32; 128];
+                    e.process(&mut l, &mut r);
+                    for v in l.iter().chain(r.iter()) {
+                        peak = peak.max(v.abs());
+                    }
+                }
+                assert!(
+                    peak <= ceiling,
+                    "{kind:?} echo={echo}: peak {peak} passed the ceiling {ceiling}"
+                );
+            }
         }
     }
 
