@@ -14,3 +14,6 @@ interface ImportMetaEnv {
 interface ImportMeta {
   readonly env: ImportMetaEnv;
 }
+
+/** Unique per `vite build`, set in vite.config.ts; a cache key for fixed-name assets. */
+declare const __BUILD_ID__: string;

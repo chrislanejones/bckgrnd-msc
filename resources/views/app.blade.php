@@ -9,7 +9,10 @@
     <link rel="icon" type="image/svg+xml" href="/favicon.svg">
 
     {{-- Built by Vite from frontend/. Copied into public/build by `npm run build`. --}}
-    <link rel="stylesheet" href="/build/assets/app.css">
+    {{-- The file names are fixed, so the build's date is the cache key: without it the
+         browser kept reusing an old app.js after a rebuild. --}}
+    @php($v = @filemtime(public_path('build/assets/app.js')) ?: 0)
+    <link rel="stylesheet" href="/build/assets/app.css?v={{ $v }}">
     <script>window.__BCKGRND__ = @json($initialTrack ?? null);</script>
 </head>
 <body>
@@ -21,6 +24,6 @@
         it is loaded lazily on first play rather than at boot, because an
         AudioContext cannot start before a user gesture anyway.
     --}}
-    <script type="module" src="/build/assets/app.js"></script>
+    <script type="module" src="/build/assets/app.js?v={{ $v }}"></script>
 </body>
 </html>

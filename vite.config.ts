@@ -15,6 +15,10 @@ export default defineConfig({
   // comes through undefined and the static bundle quietly keeps calling the API.
   envDir: import.meta.dirname,
   publicDir: false,
+  // A cache key for the worklet and wasm, whose names are fixed (see engine.ts).
+  define: {
+    __BUILD_ID__: JSON.stringify(Date.now().toString(36)),
+  },
   plugins: [react(), tailwindcss()],
   resolve: {
     alias: {

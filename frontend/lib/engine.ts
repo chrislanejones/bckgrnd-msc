@@ -36,8 +36,10 @@ type WorkletMessage =
 type Listener = (telemetry: Telemetry) => void;
 type ErrorListener = (message: string) => void;
 
-const WASM_URL = '/wasm/bckgrnd_msc_engine_bg.wasm';
-const WORKLET_URL = '/build/engine-worklet.js';
+// Stamped with the build, because the file names never change and a browser that
+// had cached the old engine kept playing it after a rebuild.
+const WASM_URL = `/wasm/bckgrnd_msc_engine_bg.wasm?v=${__BUILD_ID__}`;
+const WORKLET_URL = `/build/engine-worklet.js?v=${__BUILD_ID__}`;
 
 export class EngineHost {
   private ctx: AudioContext | null = null;

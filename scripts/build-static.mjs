@@ -12,7 +12,7 @@
  * library and the document shell need.
  */
 import { execFileSync } from 'node:child_process';
-import { copyFileSync, cpSync, mkdirSync, existsSync, rmSync } from 'node:fs';
+import { cpSync, mkdirSync, existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -43,7 +43,14 @@ run('pnpm', ['run', 'build:app:static'], 'building the app in static mode');
 // 2. Copy the shell. `public/index.html` is only reached when there is no Laravel
 //    route in front of it; with `php artisan serve` the route wins.
 mkdirSync(resolve(root, 'public'), { recursive: true });
-copyFileSync(resolve(root, 'frontend/static.html'), resolve(root, 'public/index.html'));
+// Stamp the bundle URLs with this build, as the Blade shell does with the file date:
+// the names are fixed, so without a key the browser keeps an old app.js.
+const stamp = Date.now().toString(36);
+const shell = readFileSync(resolve(root, 'frontend/static.html'), 'utf8').replace(
+  /(\/build\/assets\/app\.(?:js|css))"/g,
+  `$1?v=${stamp}"`,
+);
+writeFileSync(resolve(root, 'public/index.html'), shell);
 console.log('[static] wrote public/index.html');
 
 // 3. Sanity check: the engine and the frontend bundle must already exist, or the
