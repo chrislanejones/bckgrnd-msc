@@ -36,28 +36,47 @@ up() {
   return 1
 }
 
-# --- Build anything missing, so a fresh clone works from one command.
-if [ ! -f vendor/autoload.php ]; then
+# --- Build anything missing or out of date, so a fresh clone and a changed source
+# both come up from one command. Checking for existence alone kept serving the old
+# engine after engine-core/src changed, until someone rebuilt it by hand.
+
+# stale OUTPUT SOURCE... — true when OUTPUT is missing, or any file under the
+# SOURCE paths is newer than it.
+stale() {
+  out=$1
+  shift
+  [ -e "$out" ] || return 0
+  [ -n "$(find "$@" -type f -newer "$out" -print -quit 2>/dev/null)" ]
+}
+
+if stale vendor/autoload.php composer.json composer.lock; then
   echo "==> composer install"
   composer install --no-interaction
+  # Composer only rewrites the autoloader when it changes; touch it so an
+  # up-to-date install is not repeated on every start.
+  touch vendor/autoload.php
 fi
 
-if [ ! -d node_modules ]; then
+if stale node_modules/.modules.yaml package.json pnpm-lock.yaml; then
   echo "==> pnpm install"
   pnpm install
+  # A no-op install leaves the marker's date alone; touch it so the next run agrees.
+  touch node_modules/.modules.yaml
 fi
 
-if [ ! -f public/wasm/bckgrnd_msc_engine_bg.wasm ]; then
+if stale public/wasm/bckgrnd_msc_engine_bg.wasm engine-core/src engine-core/Cargo.toml; then
   echo "==> building the Rust engine (wasm-pack)"
   pnpm run build:engine
 fi
 
-if [ ! -f public/build/assets/app.js ] || [ ! -f public/build/engine-worklet.js ]; then
+# The worklet bundles the wasm glue, so a rebuilt engine means a rebuilt app too.
+if stale public/build/assets/app.js frontend public/wasm vite.config.ts tsconfig.json \
+  || stale public/build/engine-worklet.js frontend/worklets public/wasm scripts/build-worklet.mjs; then
   echo "==> pnpm run build"
   pnpm run build
 fi
 
-if [ ! -f public/library/index.json ]; then
+if stale public/library/index.json app/Support/Music tools/export-library.php; then
   echo "==> exporting the track library"
   php tools/export-library.php public/library
 fi
