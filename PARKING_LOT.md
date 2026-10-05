@@ -96,7 +96,18 @@ the reference (instant drop, linear return).
 - The top section of this file ("backspin fix, uncommitted") is stale: that fix landed
   in `a5f064d`. Worth a pass by Dara.
 
-## Queued sound work (approved 10-05-2026, engine work for Silas)
+## Sound work (approved 10-05-2026) — DONE
+
+Landed as 8bfa55e (transition sounds), d82bcd6 (lo-fi texture) and 5a5fd6a
+(percussion). The original brief is kept below for reference.
+
+- Follow-up: the crackle filters ran on silence and produced subnormal floats, costing
+  150–250 ns per sample until they were reset after each click. Other filters in the
+  engine that ring down to silence may have the same cost. Worth a profiling pass.
+- `verify:audio` can't jump the playhead, so the browser gate never reaches the
+  Break/Drop transitions or most percussion. Only the Rust tests cover them.
+
+### Original brief
 
 Run in this order, after the waveform scratch lands. None needs a 9th stem.
 
