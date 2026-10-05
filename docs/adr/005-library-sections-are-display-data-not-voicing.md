@@ -1,5 +1,5 @@
 # ADR-005: Library sections and styles are display data in one list, separate from `kind`
-Date: 2026-10-05 (backfilled)   Status: draft
+Date: 2026-10-05 (backfilled)   Status: accepted (10-05-2026)
 
 ## Context
 The Breaks section (63027ed) brought the library to 18 tracks and needed titles

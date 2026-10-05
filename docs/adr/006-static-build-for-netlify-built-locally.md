@@ -1,5 +1,5 @@
 # ADR-006: The public site is a static build, built locally and uploaded to Netlify
-Date: 2026-10-05 (backfilled)   Status: draft
+Date: 2026-10-05 (backfilled)   Status: accepted (10-05-2026)
 
 ## Context
 The app needed a public URL. The library and song form can be exported to JSON

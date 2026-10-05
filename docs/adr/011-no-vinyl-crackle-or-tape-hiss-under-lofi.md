@@ -1,5 +1,5 @@
 # ADR-011: Lo-fi tracks carry no synthesized vinyl crackle or tape hiss
-Date: 2026-10-05 (backfilled)   Status: draft
+Date: 2026-10-05 (backfilled)   Status: accepted (10-05-2026)
 
 ## Context
 The approved sound pass included a lo-fi texture: vinyl crackle and tape hiss

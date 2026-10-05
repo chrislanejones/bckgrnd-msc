@@ -1,5 +1,5 @@
 # ADR-008: Transition sounds sit outside the stems and fire only on a natural crossing
-Date: 2026-10-05 (backfilled)   Status: draft
+Date: 2026-10-05 (backfilled)   Status: accepted (10-05-2026)
 
 ## Context
 The song is 256 steps in four 4-bar parts, and the `[ ]` brackets on the

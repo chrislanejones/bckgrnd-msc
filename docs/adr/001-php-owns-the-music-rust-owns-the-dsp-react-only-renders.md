@@ -1,5 +1,5 @@
 # ADR-001: PHP owns the music, Rust/WASM owns all DSP, React only draws and sends intent
-Date: 2026-10-02 (backfilled)   Status: draft
+Date: 2026-10-02 (backfilled)   Status: accepted (10-05-2026)
 
 ## Context
 The first version (`old/`, TanStack Start) ran sequencing, synthesis and UI in

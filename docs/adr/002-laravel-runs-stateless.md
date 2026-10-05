@@ -1,5 +1,5 @@
 # ADR-002: Laravel runs stateless: no sessions, no CSRF, no database
-Date: 2026-10-02 (backfilled)   Status: draft
+Date: 2026-10-02 (backfilled)   Status: accepted (10-05-2026)
 
 ## Context
 There are no accounts and no login. The only thing the app saves is a preset

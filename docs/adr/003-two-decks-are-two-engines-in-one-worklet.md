@@ -1,5 +1,5 @@
 # ADR-003: The two decks are two engines in one AudioWorklet, each with its own buffers
-Date: 2026-10-03 (backfilled)   Status: draft
+Date: 2026-10-03 (backfilled)   Status: accepted (10-05-2026)
 
 ## Context
 Auto mix crossfades one track into the next, so two tracks render at once. The

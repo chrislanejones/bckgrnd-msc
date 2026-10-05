@@ -1,5 +1,7 @@
 # bckgrnd-msc
 
+![bckgrnd-msc: two decks with song-part brackets, the track library in EDM, Lofi and Breaks, and the eight stems with Solo and Cut](screenshots/bckgrnd-msc.webp)
+
 A stem machine. Eighteen tracks, eight stems each. Cut any stem and the rest of the
 instrumental keeps playing, so you build the track yourself while it runs.
 

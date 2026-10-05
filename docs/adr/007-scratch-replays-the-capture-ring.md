@@ -1,5 +1,5 @@
 # ADR-007: A scratch replays the engine's own recent output from a frozen capture ring
-Date: 2026-10-05 (backfilled)   Status: draft
+Date: 2026-10-05 (backfilled)   Status: accepted (10-05-2026)
 
 ## Context
 The waveform was to work like a platter: grab it and drag. But the engine

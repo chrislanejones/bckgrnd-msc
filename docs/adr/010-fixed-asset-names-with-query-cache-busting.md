@@ -1,5 +1,5 @@
 # ADR-010: Assets keep fixed names and are cache-busted with a `?v=` query
-Date: 2026-10-05 (backfilled)   Status: draft
+Date: 2026-10-05 (backfilled)   Status: accepted (10-05-2026)
 
 ## Context
 `vite.config.ts` emits fixed names (`assets/app.js`, `app.css`,

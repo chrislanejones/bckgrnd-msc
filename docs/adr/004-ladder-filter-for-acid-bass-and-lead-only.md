@@ -1,5 +1,5 @@
 # ADR-004: A four-pole ladder filter, for the acid bass and lead only
-Date: 2026-10-05 (backfilled)   Status: draft
+Date: 2026-10-05 (backfilled)   Status: accepted (10-05-2026)
 
 ## Context
 The acid 303 line ran through the same resonant biquad as every other voice.

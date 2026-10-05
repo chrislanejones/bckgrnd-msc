@@ -1,5 +1,5 @@
 # ADR-009: Percussion is extra voices on the hats stem; the app stays at eight stems
-Date: 2026-10-05 (backfilled)   Status: draft
+Date: 2026-10-05 (backfilled)   Status: accepted (10-05-2026)
 
 ## Context
 The garage, breaks and lofi grooves wanted shaker, rimshot and congas. Eight
