@@ -81,8 +81,8 @@ impl Channel {
 /// ```text
 /// stems ─┬─────────────────────────────────────────────► hp 28 Hz
 ///        ├─ pre 380 Hz ─► room ─► wet 0.07 ─────────────┤
-///        ├─ echo hp 240 Hz ─► throw ─► delay ─► wet ────┤
-///        └─ per-stem sends ─────────────────► delay ───┘
+///        ├─ echo hp 240 Hz ─► throw ─► ping-pong ─► wet ┤
+///        └─ per-stem sends ─────────────────► ping-pong ┘
 ///                                                       ▼
 ///              hp 28 Hz ─► compressor ─► saturator ─► dry ─► low ─► mid
 ///                    ─► high ─► tape sweep ─► recorder ─► master gain ─► limiter
@@ -149,6 +149,8 @@ const VERB_WET: f32 = 0.07;
 const VERB_PRE_HZ: f32 = 380.0;
 const ECHO_HP_HZ: f32 = 240.0;
 const RUMBLE_HP_HZ: f32 = 28.0;
+/// Equal-power makeup for the ping-pong returns, each repeat being on one side only.
+const PING_PONG_GAIN: f32 = core::f32::consts::SQRT_2;
 /// The output limiter: untouched below the knee, never past the ceiling.
 const LIMIT_KNEE_DB: f32 = -3.0;
 const LIMIT_CEILING_DB: f32 = -0.3;
@@ -233,8 +235,8 @@ impl Master {
     /// was not an echo, it was a 20 ms metallic comb.
     ///
     /// Takes both channels so the two-call pattern that caused this cannot recur.
-    /// The line is mono, so the pair is averaged, matching the echo throw's own
-    /// `0.5 * (l + r)`.
+    /// The send is mono into the ping-pong's left line, so the pair is averaged,
+    /// matching the echo throw's own `0.5 * (l + r)`.
     #[inline]
     pub fn feed_send(&mut self, left: f32, right: f32, amount: f32) {
         if amount > 0.0 {
@@ -340,7 +342,12 @@ impl Master {
         // sends accumulated for this sample plus the echo throw off the summed bus.
         // Read the tap before writing, so the line delays rather than feeding this
         // sample straight back out.
-        let wet = self.delay.tap();
+        //
+        // Stereo ping-pong: each repeat lands on one side only, so the returns are
+        // lifted by sqrt(2) to keep the echo's power where the mono return had it
+        // (the mono line put every repeat on both sides at full level).
+        let (wet_l, wet_r) = self.delay.tap_stereo();
+        let (wet_l, wet_r) = (wet_l * PING_PONG_GAIN, wet_r * PING_PONG_GAIN);
         let throw = if self.throw > 0.0 {
             let (t_l, t_r) = self.echo_hp.process(left, right);
             0.5 * (t_l + t_r) * self.throw
@@ -353,7 +360,6 @@ impl Master {
         // --- Reverb send, tapped off the summed buses before any master processing.
         let (send_l, send_r) = self.verb_pre.process(left, right);
         let (verb_l, verb_r) = self.verb.process(send_l, send_r);
-        let (wet_l, wet_r) = (wet, wet);
 
         // --- Rumble filter, taking the sum and every wet return together.
         let (mut l, mut r) = self.hp.process(
@@ -546,6 +552,49 @@ mod tests {
                 "{sending_stems} sending stem(s): echo arrived at {onset:.4} s, \
                  expected {expected:.4} s"
             );
+        }
+    }
+
+    /// The echo is a ping-pong: the first repeat on the left, the second on the right,
+    /// and so on, each at the dotted eighth after the last.
+    #[test]
+    fn successive_repeats_alternate_sides() {
+        let sr = 48_000.0;
+        let bpm = 126.0;
+        let step = (60.0 / bpm) * 0.75;
+        let mut m = Master::new(sr);
+        m.set_delay_time(bpm, 1.0);
+        m.set_echo(true);
+        for _ in 0..(sr as usize) {
+            m.process(0.0, 0.0);
+        }
+        // A short burst into the sends only, so nothing but the echo reaches the output.
+        let total = (sr * step * 4.6) as usize;
+        let mut out = Vec::with_capacity(total);
+        for i in 0..total {
+            let drive = if i < (sr * 0.01) as usize { 0.6 } else { 0.0 };
+            m.feed_send(drive, drive, 0.3);
+            out.push(m.process(0.0, 0.0));
+        }
+        for k in 1..=4usize {
+            let at = (k as f32 * step * sr) as usize;
+            let (mut el, mut er) = (0.0f32, 0.0f32);
+            for (l, r) in &out[at.saturating_sub(480)..(at + 1440).min(total)] {
+                el += l * l;
+                er += r * r;
+            }
+            assert!(el + er > 1e-6, "repeat {k} is missing");
+            if k % 2 == 1 {
+                assert!(
+                    el > er * 20.0,
+                    "repeat {k} should be on the left: L {el} R {er}"
+                );
+            } else {
+                assert!(
+                    er > el * 20.0,
+                    "repeat {k} should be on the right: L {el} R {er}"
+                );
+            }
         }
     }
 

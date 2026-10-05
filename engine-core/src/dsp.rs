@@ -420,12 +420,23 @@ impl OnePole {
     }
 }
 
-/// Circular delay line with a damped feedback path.
+/// Ping-pong delay: two circular lines with damped feedback crossed between them.
+///
+/// The send enters the left line only. What leaves the left line is fed, damped and
+/// scaled by the feedback, into the right line, and what leaves the right line back
+/// into the left, so each repeat lands on the opposite side to the one before:
+/// left at one delay time, right at two, left at three. Each pass is damped and
+/// scaled once, exactly as the single mono line this replaces did, so the summed
+/// tail decays the same way; it is only spread across the field.
 ///
 /// Both delay time and feedback glide toward their targets, which is what makes the
 /// tempo-synced echo slide rather than jump when the tempo or the echo throw changes.
+/// The two lines share one write pointer and one glided time, so they cannot drift.
 pub struct Delay {
+    /// The line the send enters, heard on the left.
     buf: Vec<f32>,
+    /// The crossed line, heard on the right.
+    buf_r: Vec<f32>,
     size: usize,
     write: usize,
     time: f32,
@@ -434,15 +445,19 @@ pub struct Delay {
     feedback: f32,
     target_feedback: f32,
     fb_coef: f32,
+    /// Damping on what leaves the left line on its way into the right one.
     damp: OnePole,
+    /// Damping on what leaves the right line on its way back into the left.
+    damp_r: OnePole,
     sr: f32,
 }
 
 impl Delay {
     pub fn new(sr: f32, max_seconds: f32) -> Self {
-        let size = (sr * max_seconds).ceil() as usize;
+        let size = ((sr * max_seconds).ceil() as usize).max(4);
         Self {
             buf: vec![0.0; size],
+            buf_r: vec![0.0; size],
             size,
             write: 0,
             time: 0.25,
@@ -452,6 +467,7 @@ impl Delay {
             target_feedback: 0.3,
             fb_coef: glide_coef(0.03, sr),
             damp: OnePole::new(sr, 2400.0),
+            damp_r: OnePole::new(sr, 2400.0),
             sr,
         }
     }
@@ -468,13 +484,16 @@ impl Delay {
     }
 
     pub fn reset(&mut self) {
-        self.buf.iter_mut().for_each(|v| *v = 0.0);
+        self.buf.fill(0.0);
+        self.buf_r.fill(0.0);
         self.damp.reset();
+        self.damp_r.reset();
     }
 
-    #[inline]
+    /// Read the summed tap, then push `input`. Mono convenience for tests.
+    #[cfg(test)]
     pub fn process(&mut self, input: f32) -> f32 {
-        let out = self.read();
+        let out = self.tap();
         self.write_input(input);
         out
     }
@@ -486,23 +505,39 @@ impl Delay {
     pub fn write_input(&mut self, input: f32) {
         self.time += (self.target_time - self.time) * self.time_coef;
         self.feedback += (self.target_feedback - self.feedback) * self.fb_coef;
-        let damped = self.damp.process(self.read()) * self.feedback;
+        let (out_l, out_r) = self.tap_stereo();
         let idx = self.write;
-        self.buf[idx] = input + damped;
+        // Crossed: the right line's output returns on the left and vice versa.
+        self.buf[idx] = input + self.damp_r.process(out_r) * self.feedback;
+        self.buf_r[idx] = self.damp.process(out_l) * self.feedback;
         self.write += 1;
         if self.write >= self.size {
             self.write = 0;
         }
     }
 
-    /// Read the current wet tap without advancing the line.
+    /// The two sides summed, without advancing the line. Any one repeat is on one
+    /// side only, so this is the same signal the mono line used to return.
     #[inline]
     pub fn tap(&self) -> f32 {
-        self.read()
+        let (l, r) = self.tap_stereo();
+        l + r
     }
 
-    /// Fractional read, linearly interpolated.
-    fn read(&self) -> f32 {
+    /// The left and right taps, without advancing the line.
+    #[inline]
+    pub fn tap_stereo(&self) -> (f32, f32) {
+        let (i0, i1, frac) = self.read_pos();
+        (
+            self.buf[i0] * (1.0 - frac) + self.buf[i1] * frac,
+            self.buf_r[i0] * (1.0 - frac) + self.buf_r[i1] * frac,
+        )
+    }
+
+    /// Fractional read position, shared by both lines: the two indices either side
+    /// and the interpolation weight.
+    #[inline]
+    fn read_pos(&self) -> (usize, usize, f32) {
         let d = (self.time * self.sr).max(1.0);
         let mut pos = self.write as f32 - d;
         while pos < 0.0 {
@@ -510,8 +545,7 @@ impl Delay {
         }
         let i0 = pos.floor() as usize % self.size;
         let i1 = (i0 + 1) % self.size;
-        let frac = pos - pos.floor();
-        self.buf[i0] * (1.0 - frac) + self.buf[i1] * frac
+        (i0, i1, pos - pos.floor())
     }
 }
 
