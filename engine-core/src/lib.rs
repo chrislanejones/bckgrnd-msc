@@ -65,6 +65,7 @@ mod drums;
 mod dsp;
 mod mixer;
 mod scratch;
+mod texture;
 mod tone;
 mod track;
 mod transition;
@@ -440,6 +441,8 @@ pub struct Engine {
     kick_root_hz: f32,
     /// Riser, crash and downsweep at the song's seams, summed into the master.
     transitions: transition::Transitions,
+    /// Vinyl crackle and tape hiss under lo-fi tracks, summed into the master.
+    texture: texture::Texture,
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen)]
@@ -474,6 +477,7 @@ impl Engine {
             output_gain: 1.0,
             kick_root_hz: track.kick_root_hz(),
             transitions: transition::Transitions::new(track.kind, sr),
+            texture: texture::Texture::new(sr),
             track,
         }
     }
@@ -482,6 +486,7 @@ impl Engine {
         self.let_go_of_the_platter();
         self.transport.start();
         self.transitions.reset();
+        self.texture.set_running(true);
     }
 
     pub fn stop(&mut self) {
@@ -491,6 +496,7 @@ impl Engine {
             v.release();
         }
         self.transitions.release();
+        self.texture.set_running(false);
         for c in self.channels.iter_mut() {
             c.duck = 1.0;
         }
@@ -857,6 +863,11 @@ impl Engine {
         // Voices with no stem bypass the channel strips and are held back to be added
         // to the master sum directly, after the faders have been applied below.
         let (mut direct_l, mut direct_r) = self.transitions.process(&self.transport);
+        // The record's surface: not a stem, so no cut or solo touches it, but it goes
+        // quiet with the music under a scratch like everything else on the record.
+        let (tex_l, tex_r) = self.texture.process();
+        direct_l += tex_l;
+        direct_r += tex_r;
         for slot in self.voices.iter_mut() {
             let Some(voice) = slot.as_mut() else { continue };
             let stem = voice.stem();
@@ -1057,6 +1068,8 @@ impl Engine {
         self.master.set_delay_time(self.transport.bpm, 1.0);
         self.ducker = Ducker::new(self.track.kind, self.transport.bpm, self.sample_rate);
         self.transitions.set_kind(self.track.kind);
+        self.texture.set_enabled(self.track.kind == TrackKind::Lofi);
+        self.texture.set_running(self.transport.playing);
         self.ring.clear();
     }
     pub fn track(&self) -> &Track {
@@ -2080,5 +2093,92 @@ mod tests {
         e.stop();
         run(&mut e, 400);
         assert!(!e.transitions.active());
+    }
+
+    /// Output of a silent lo-fi track with every stem cut: the medium alone.
+    /// Returns RMS in dBFS over the window and the peak.
+    fn texture_only(kind: TrackKind, seconds: f32, crackle: bool) -> (f32, f32) {
+        let mut t = Track::silence("medium");
+        t.kind = kind;
+        let mut e = Engine::new(48_000.0);
+        e.load_track(t);
+        e.texture.crackle = crackle;
+        for s in Stem::ALL {
+            e.set_muted(s, true);
+        }
+        e.play();
+        // Past the fade-in.
+        run(&mut e, 100);
+        let (mut ss, mut peak, mut n) = (0.0f64, 0.0f32, 0usize);
+        for _ in 0..(seconds * 48_000.0 / 128.0) as usize {
+            let mut l = [0.0f32; 128];
+            let mut r = [0.0f32; 128];
+            e.process(&mut l, &mut r);
+            for (a, b) in l.iter().zip(r.iter()) {
+                assert!(a.is_finite() && b.is_finite());
+                ss += 0.5 * (a * a + b * b) as f64;
+                peak = peak.max(a.abs()).max(b.abs());
+                n += 1;
+            }
+        }
+        ((10.0 * (ss / n.max(1) as f64).log10()) as f32, peak)
+    }
+
+    #[test]
+    fn the_lofi_medium_is_quiet_bounded_and_ignores_the_stems() {
+        // Every stem cut, and the hiss and crackle are still there: they are the
+        // record, not a part on it.
+        let (hiss, hiss_peak) = texture_only(TrackKind::Lofi, 6.0, false);
+        assert!(
+            (-45.0..=-40.0).contains(&hiss),
+            "hiss at {hiss:.2} dBFS, want -45..-40"
+        );
+        assert!(hiss_peak < 0.05, "hiss peak {hiss_peak}");
+        let (all, peak) = texture_only(TrackKind::Lofi, 12.0, true);
+        assert!(all > -46.0 && all < -38.0, "texture at {all:.2} dBFS");
+        // Crackle peaks stay far under a lo-fi mix, which peaks around 0.45.
+        assert!(peak < 0.1, "crackle peak {peak}");
+    }
+
+    #[test]
+    fn the_medium_is_silent_on_other_kinds() {
+        for kind in [TrackKind::House, TrackKind::Deep, TrackKind::Acid] {
+            let (_, peak) = texture_only(kind, 3.0, true);
+            assert_eq!(peak, 0.0, "{kind:?}: texture on a non-lo-fi track");
+        }
+    }
+
+    #[test]
+    fn the_medium_fades_out_with_stop() {
+        let mut t = Track::silence("medium");
+        t.kind = TrackKind::Lofi;
+        let mut e = Engine::new(48_000.0);
+        e.load_track(t);
+        e.play();
+        assert!(run(&mut e, 200) > 0.0);
+        e.stop();
+        // The 0.25 s fade, then the room and filters settle: the reverb and the
+        // filters ring for a while after the last of the noise.
+        run(&mut e, 600);
+        let mut l = [0.0f32; 128];
+        let mut r = [0.0f32; 128];
+        for _ in 0..100 {
+            e.process(&mut l, &mut r);
+            assert!(l.iter().chain(r.iter()).all(|v| v.abs() < 1e-6));
+        }
+        assert!(!e.texture.audible());
+    }
+
+    #[test]
+    fn loading_a_club_track_silences_the_medium() {
+        let mut t = Track::silence("medium");
+        t.kind = TrackKind::Lofi;
+        let mut e = Engine::new(48_000.0);
+        e.load_track(t);
+        e.play();
+        run(&mut e, 50);
+        assert!(e.texture.audible());
+        e.load_track(Track::silence("club"));
+        assert!(!e.texture.audible());
     }
 }

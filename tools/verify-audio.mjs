@@ -228,6 +228,20 @@ try {
       })),
     });
 
+    // 3b. A lo-fi track with every stem cut keeps only the record's surface: the
+    //     crackle and tape hiss are the medium rather than a stem, so no cut silences
+    //     them. Deliberately not the check above, which stays on a club track and
+    //     stays at true silence.
+    out.lofiMuted = await measure({
+      trackId: 'rain',
+      ms: 1500,
+      commands: Array.from({ length: 8 }, (_, index) => ({
+        type: 'mute',
+        index,
+        value: true,
+      })),
+    });
+
     // 4. Soloing the bass leaves something, but far less than the full mix.
     //
     //    Measured over two bars rather than a fraction of one: every track's form
@@ -308,6 +322,11 @@ try {
     'cutting every stem falls silent',
     result.allMuted.peak < 1e-3,
     `peak ${result.allMuted.peak.toExponential(2)}`,
+  );
+  check(
+    'a lo-fi track with every stem cut keeps only its hiss and crackle',
+    result.lofiMuted.peak > 1e-4 && result.lofiMuted.peak < 0.1 && result.lofiMuted.nonFinite === 0,
+    `peak ${result.lofiMuted.peak.toExponential(2)}`,
   );
   check(
     'bass solo is audible but quieter than the full mix',
