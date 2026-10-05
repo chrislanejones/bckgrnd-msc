@@ -29,6 +29,31 @@ pub fn noise() -> f32 {
     })
 }
 
+/// Below this magnitude, filter and delay-line state is flushed to exactly zero.
+///
+/// 1e-20 is -400 dBFS, far under anything audible or measurable (the existing level
+/// and timbre tests resolve to well above -300 dB), and still 18 orders of magnitude
+/// above the subnormal range that starts at about 1.2e-38.
+const FLUSH_BELOW: f32 = 1e-20;
+
+/// Flush a value that has decayed to near-silence to exactly zero.
+///
+/// Recursive state (biquads, one-poles, comb, allpass and delay lines) fed silence
+/// decays geometrically into the subnormal range, and with rounding it often never
+/// leaves: a comb at feedback 0.7 maps the smallest subnormal back onto itself.
+/// Subnormal arithmetic costs tens to hundreds of cycles per operation on x86, and
+/// WASM has no flush-to-zero mode, so after Stop or with every stem cut the master
+/// chain used to get 10-20x more expensive the longer it sat in silence. Applied at
+/// each state write; compiles to a compare and a select, no branch.
+#[inline(always)]
+pub fn flush(x: f32) -> f32 {
+    if x.abs() < FLUSH_BELOW {
+        0.0
+    } else {
+        x
+    }
+}
+
 /// Geometric interpolation between two positive gains.
 ///
 /// Web Audio's `exponentialRampToValueAtTime` moves linearly in the log domain, so
@@ -386,6 +411,7 @@ impl Biquad {
                     .mul_add(self.x2, -(self.a1.mul_add(self.y1, self.a2 * self.y2))),
             ),
         );
+        let y = flush(y);
         self.x2 = self.x1;
         self.x1 = x;
         self.y2 = self.y1;
@@ -494,7 +520,7 @@ impl OnePole {
 
     #[inline]
     pub fn process(&mut self, x: f32) -> f32 {
-        self.z += self.coef * (x - self.z);
+        self.z = flush(self.z + self.coef * (x - self.z));
         self.z
     }
 
@@ -573,6 +599,14 @@ impl Delay {
         self.damp_r.reset();
     }
 
+    /// Both lines and both damping filters hold exactly zero.
+    #[cfg(test)]
+    pub fn is_silent(&self) -> bool {
+        self.buf.iter().chain(&self.buf_r).all(|v| *v == 0.0)
+            && self.damp.z == 0.0
+            && self.damp_r.z == 0.0
+    }
+
     /// Read the summed tap, then push `input`. Mono convenience for tests.
     #[cfg(test)]
     pub fn process(&mut self, input: f32) -> f32 {
@@ -591,8 +625,8 @@ impl Delay {
         let (out_l, out_r) = self.tap_stereo();
         let idx = self.write;
         // Crossed: the right line's output returns on the left and vice versa.
-        self.buf[idx] = input + self.damp_r.process(out_r) * self.feedback;
-        self.buf_r[idx] = self.damp.process(out_l) * self.feedback;
+        self.buf[idx] = flush(input + self.damp_r.process(out_r) * self.feedback);
+        self.buf_r[idx] = flush(self.damp.process(out_l) * self.feedback);
         self.write += 1;
         if self.write >= self.size {
             self.write = 0;
@@ -659,6 +693,106 @@ pub fn midi_hz(note: f32) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Excite with half a second of noise, then feed `secs` seconds of silence.
+    fn ring_out(secs: f32, mut step: impl FnMut(f32)) {
+        for _ in 0..24_000 {
+            step(noise() * 0.8);
+        }
+        for _ in 0..(secs * 48_000.0) as usize {
+            step(0.0);
+        }
+    }
+
+    /// Every filter left in silence must settle to exactly zero, not to a residue in
+    /// the subnormal range. Before `flush`, these states decayed into subnormals and
+    /// stayed there (rounding maps the smallest values back onto themselves), which
+    /// made the whole master chain 10-20x more expensive after Stop.
+    #[test]
+    fn filters_settle_to_exact_zero_in_silence() {
+        let sr = 48_000.0;
+        type Shape = fn(&mut Biquad);
+        let shapes: [(&str, Shape); 7] = [
+            ("rumble hp 28 Hz", |b| b.highpass(48_000.0, 28.0, 0.7)),
+            ("tape lp 240 Hz", |b| b.lowpass(48_000.0, 240.0, 0.85)),
+            ("low shelf +6", |b| b.low_shelf(48_000.0, 180.0, 6.0)),
+            ("mid peak -12", |b| b.peaking(48_000.0, 1000.0, 0.7, -12.0)),
+            ("high shelf +6", |b| b.high_shelf(48_000.0, 3200.0, 6.0)),
+            ("resonant bp", |b| b.bandpass(48_000.0, 6000.0, 12.0)),
+            ("resonant lp", |b| b.lowpass(48_000.0, 80.0, 8.0)),
+        ];
+        for (name, shape) in shapes {
+            let mut f = Biquad::new();
+            shape(&mut f);
+            ring_out(10.0, |x| {
+                f.process(x);
+            });
+            assert_eq!(
+                [f.x1, f.x2, f.y1, f.y2],
+                [0.0; 4],
+                "{name} left state behind in silence"
+            );
+        }
+        let mut p = OnePole::new(sr, 2400.0);
+        ring_out(10.0, |x| {
+            p.process(x);
+        });
+        assert_eq!(p.z, 0.0, "the one-pole left state behind in silence");
+    }
+
+    /// The reverb's combs and allpasses, and both ping-pong lines at the echo throw's
+    /// long feedback, must ring out to exactly zero.
+    #[test]
+    fn reverb_and_delay_lines_ring_out_to_exact_zero() {
+        let mut verb = Reverb::new(48_000.0);
+        ring_out(10.0, |x| {
+            verb.process(x, -x);
+        });
+        let lines = verb
+            .combs_l
+            .iter()
+            .chain(&verb.combs_r)
+            .map(|c| &c.buf)
+            .chain(verb.allpass_l.iter().chain(&verb.allpass_r).map(|a| &a.buf));
+        for buf in lines {
+            assert!(
+                buf.iter().all(|v| *v == 0.0),
+                "a reverb line kept a residue"
+            );
+        }
+
+        let mut d = Delay::new(48_000.0, 1.5);
+        d.set_time(0.357);
+        d.set_feedback(0.78);
+        ring_out(90.0, |x| {
+            d.write_input(x);
+        });
+        assert!(
+            d.buf.iter().chain(&d.buf_r).all(|v| *v == 0.0),
+            "the ping-pong lines kept a residue"
+        );
+        assert_eq!(
+            [d.damp.z, d.damp_r.z],
+            [0.0; 2],
+            "the delay damping kept state"
+        );
+    }
+
+    /// The ladder rides a -360 dB DC offset instead of `flush`, so its states settle
+    /// on that offset. Pinned so nobody removes it: without it they go subnormal.
+    #[test]
+    fn the_ladder_never_settles_into_subnormals() {
+        let mut f = Ladder::new();
+        f.set(48_000.0, 300.0, Ladder::q_to_k(10.0));
+        ring_out(10.0, |x| {
+            f.process(x);
+        });
+        assert!(
+            f.s.iter().all(|s| !s.is_subnormal()),
+            "ladder state went subnormal: {:?}",
+            f.s
+        );
+    }
 
     /// Below the knee the limiter must not touch a single bit.
     #[test]
@@ -1106,7 +1240,7 @@ impl Comb {
     #[inline]
     fn process(&mut self, input: f32) -> f32 {
         let out = self.buf[self.idx];
-        self.buf[self.idx] = input + out * self.feedback;
+        self.buf[self.idx] = flush(input + out * self.feedback);
         self.idx += 1;
         if self.idx >= self.size {
             self.idx = 0;
@@ -1143,7 +1277,7 @@ impl Allpass {
         const G: f32 = 0.5;
         let buffered = self.buf[self.idx];
         let out = buffered - G * input;
-        self.buf[self.idx] = input + G * out;
+        self.buf[self.idx] = flush(input + G * out);
         self.idx += 1;
         if self.idx >= self.size {
             self.idx = 0;

@@ -546,6 +546,34 @@ impl Ducker {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The whole master chain left in silence after an echo throw must go back to
+    /// emitting exact zeros, with no subnormal residue anywhere it recirculates. This is
+    /// the Stop / every-stem-cut case: the chain keeps running on silence, and before
+    /// `dsp::flush` its reverb, delay and filter states sat in the subnormal range
+    /// indefinitely, costing 10-20x the normal render time.
+    #[test]
+    fn the_master_falls_to_exact_silence_after_an_echo_tail() {
+        let mut m = Master::new(48_000.0);
+        m.set_eq(3.0, -2.0, 2.0);
+        m.set_filter(0.4);
+        m.set_echo(true);
+        for _ in 0..96_000 {
+            let x = crate::dsp::noise() * 0.5;
+            m.feed_send(x, x, 0.3);
+            m.process(x, -x);
+        }
+        m.set_echo(false);
+        let mut last = (1.0, 1.0);
+        for _ in 0..(30 * 48_000) {
+            last = m.process(0.0, 0.0);
+        }
+        assert_eq!(last, (0.0, 0.0), "the master never fell to exact silence");
+        assert!(
+            m.delay.is_silent(),
+            "the echo lines kept a residue after 30 s of silence"
+        );
+    }
     /// The echo has to arrive where the tempo says it does.
     ///
     /// This is measured through the real call pattern — several stems feeding sends
