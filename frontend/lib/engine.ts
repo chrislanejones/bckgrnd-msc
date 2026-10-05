@@ -367,6 +367,11 @@ export class EngineHost {
     this.post({ type: 'stereoBalance', value: balance });
   }
 
+  /** Echo time in beats: 0.25 a sixteenth, 0.75 a dotted eighth (default), 1 a quarter; 0 is off. */
+  setEchoTime(beats: number): void {
+    this.post({ type: 'echoTime', beats });
+  }
+
   setLoop(bars: number): void {
     this.post({ type: 'loop', bars });
   }

@@ -31,6 +31,7 @@ type Inbound =
   | { type: 'filter'; value: number }
   | { type: 'bands'; low: number; mid: number; high: number }
   | { type: 'echo'; on: boolean }
+  | { type: 'echoTime'; beats: number }
   | { type: 'loop'; bars: number }
   | { type: 'stereo'; mode: 0 | 1 | 2 }
   | { type: 'stereoBalance'; value: number }
@@ -180,6 +181,10 @@ class EngineProcessor extends AudioWorkletProcessor {
 
       case 'echo':
         for (const engine of this.liveEngines()) engine.set_echo(message.on);
+        return;
+
+      case 'echoTime':
+        for (const engine of this.liveEngines()) engine.set_echo_time(message.beats);
         return;
 
       case 'stereo':

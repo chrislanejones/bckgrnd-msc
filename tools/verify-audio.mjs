@@ -228,10 +228,9 @@ try {
       })),
     });
 
-    // 3b. A lo-fi track with every stem cut keeps only the record's surface: the
-    //     crackle and tape hiss are the medium rather than a stem, so no cut silences
-    //     them. Deliberately not the check above, which stays on a club track and
-    //     stays at true silence.
+    // 3b. The same on a lo-fi track: with every stem cut it falls silent too. (It
+    //     once carried vinyl crackle and tape hiss outside the stems; they read as
+    //     rain and were taken out.)
     out.lofiMuted = await measure({
       trackId: 'rain',
       ms: 1500,
@@ -324,8 +323,8 @@ try {
     `peak ${result.allMuted.peak.toExponential(2)}`,
   );
   check(
-    'a lo-fi track with every stem cut keeps only its hiss and crackle',
-    result.lofiMuted.peak > 1e-4 && result.lofiMuted.peak < 0.1 && result.lofiMuted.nonFinite === 0,
+    'a lo-fi track with every stem cut falls silent too',
+    result.lofiMuted.peak < 1e-6 && result.lofiMuted.nonFinite === 0,
     `peak ${result.lofiMuted.peak.toExponential(2)}`,
   );
   check(

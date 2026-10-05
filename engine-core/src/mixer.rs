@@ -112,6 +112,11 @@ pub struct Master {
     sample_rate: f32,
     scope_t: f32,
     sweep_open: f32,
+    /// Echo time in beats. 0.75 (a dotted eighth) unless the UI picks another.
+    delay_beats: f32,
+    /// Whether the per-stem sends reach the echo. Off by choosing echo time 0; the
+    /// echo throw is a separate feed and still works.
+    sends_on: bool,
     sweep_target: f32,
     filter_gain: f32,
     /// Rumble filter on the sum, before the dynamics stage.
@@ -149,6 +154,11 @@ const VERB_WET: f32 = 0.07;
 const VERB_PRE_HZ: f32 = 380.0;
 const ECHO_HP_HZ: f32 = 240.0;
 const RUMBLE_HP_HZ: f32 = 28.0;
+/// The echo's default time: a dotted eighth.
+pub const DELAY_BEATS_DEFAULT: f32 = 0.75;
+/// Longest echo time, in seconds. A dotted quarter at the slowest tempo (70 bpm) is
+/// 1.29 s; the line holds 1.5 s.
+const DELAY_MAX_SECONDS: f32 = 1.45;
 /// Equal-power makeup for the ping-pong returns, each repeat being on one side only.
 const PING_PONG_GAIN: f32 = core::f32::consts::SQRT_2;
 /// The output limiter: untouched below the knee, never past the ceiling.
@@ -188,6 +198,8 @@ impl Master {
             sample_rate,
             scope_t: 0.0,
             sweep_open: 1.0,
+            delay_beats: DELAY_BEATS_DEFAULT,
+            sends_on: true,
             sweep_target: 1.0,
             filter_gain: 1.0,
             hp,
@@ -239,7 +251,7 @@ impl Master {
     /// matching the echo throw's own `0.5 * (l + r)`.
     #[inline]
     pub fn feed_send(&mut self, left: f32, right: f32, amount: f32) {
-        if amount > 0.0 {
+        if amount > 0.0 && self.sends_on {
             self.send_acc += 0.5 * (left + right) * amount;
         }
     }
@@ -280,10 +292,32 @@ impl Master {
         self.high.high_shelf(self.sample_rate, 3200.0, high_db);
     }
 
-    /// Beat-synced dotted-eighth delay.
+    /// Beat-synced delay, `delay_beats` long (a dotted eighth by default).
     pub fn set_delay_time(&mut self, bpm: f32, rate: f32) {
-        let dotted = (60.0 / (bpm * rate.max(0.2))).clamp(0.05, 1.2) * 0.75;
-        self.delay.set_time(dotted);
+        let beat = 60.0 / (bpm * rate.max(0.2));
+        self.delay
+            .set_time((beat * self.delay_beats).clamp(0.05, DELAY_MAX_SECONDS));
+    }
+
+    /// Choose the echo time in beats (0.25 a sixteenth, 1 a quarter, ...), clamped to
+    /// 1/8 to 2 beats, and retime the line for the current tempo. The line glides to
+    /// the new time, so a change mid-echo slides rather than clicks.
+    ///
+    /// Zero or less turns the stem sends off: nothing new enters the line, and what is
+    /// already in it rings out on its own feedback rather than being cut. The time is
+    /// left where it was, so the echo throw still repeats at the last chosen value.
+    pub fn set_delay_beats(&mut self, beats: f32, bpm: f32, rate: f32) {
+        if beats.is_finite() && beats <= 0.0 {
+            self.sends_on = false;
+            return;
+        }
+        self.sends_on = true;
+        self.delay_beats = if beats.is_finite() {
+            beats.clamp(0.125, 2.0)
+        } else {
+            DELAY_BEATS_DEFAULT
+        };
+        self.set_delay_time(bpm, rate);
     }
 
     /// The echo throw: the summed bus, high-passed, fed into the delay line, plus a
@@ -552,6 +586,97 @@ mod tests {
                 "{sending_stems} sending stem(s): echo arrived at {onset:.4} s, \
                  expected {expected:.4} s"
             );
+        }
+    }
+
+    /// Every echo time the UI offers lands on its own division of the beat.
+    #[test]
+    fn each_echo_time_lands_on_its_division() {
+        let sr = 48_000.0;
+        let bpm = 120.0;
+        for beats in [0.25f32, 1.0 / 3.0, 0.5, 0.75, 1.0, 1.5] {
+            let expected = (60.0 / bpm) * beats;
+            let mut m = Master::new(sr);
+            m.set_delay_beats(beats, bpm, 1.0);
+            // Let the time glide settle before measuring.
+            for _ in 0..(sr as usize * 2) {
+                m.process(0.0, 0.0);
+            }
+            let mut onset = None;
+            for i in 0..(sr as usize * 2) {
+                let drive = if i < (sr * 0.01) as usize { 0.6 } else { 0.0 };
+                m.feed_send(drive, drive, 0.3);
+                m.process(0.0, 0.0);
+                if onset.is_none() && i > (sr * 0.02) as usize && m.delay.tap().abs() > 0.02 {
+                    onset = Some(i as f32 / sr);
+                }
+            }
+            let onset = onset.expect("the delay never returned anything");
+            assert!(
+                (onset - expected).abs() < 0.02,
+                "{beats} beats: echo at {onset:.4} s, expected {expected:.4} s"
+            );
+        }
+    }
+
+    #[test]
+    fn echo_time_zero_turns_the_sends_off_and_lets_the_tail_ring() {
+        let sr = 48_000.0;
+        let mut m = Master::new(sr);
+        m.set_delay_beats(0.5, 120.0, 1.0);
+        for _ in 0..(sr as usize) {
+            m.process(0.0, 0.0);
+        }
+        // A burst in, then off: the repeat already in the line still arrives.
+        for i in 0..(sr * 0.01) as usize {
+            m.feed_send(0.6, 0.6, 0.3);
+            m.process(0.0, 0.0);
+            let _ = i;
+        }
+        m.set_delay_beats(0.0, 120.0, 1.0);
+        let mut tail = 0.0f32;
+        for _ in 0..(sr as usize) {
+            m.process(0.0, 0.0);
+            tail = tail.max(m.delay.tap().abs());
+        }
+        assert!(tail > 0.02, "switching off cut the echo already sounding");
+
+        // Once it has rung out, sends no longer reach the line at all.
+        for _ in 0..(sr as usize * 6) {
+            m.process(0.0, 0.0);
+        }
+        let mut leak = 0.0f32;
+        for _ in 0..(sr as usize) {
+            m.feed_send(0.6, 0.6, 0.3);
+            m.process(0.0, 0.0);
+            leak = leak.max(m.delay.tap().abs());
+        }
+        assert!(
+            leak < 1e-4,
+            "sends still feed the echo when it is off: {leak}"
+        );
+
+        // And any time turns it back on.
+        m.set_delay_beats(0.25, 120.0, 1.0);
+        let mut back = 0.0f32;
+        for _ in 0..(sr as usize) {
+            m.feed_send(0.6, 0.6, 0.3);
+            m.process(0.0, 0.0);
+            back = back.max(m.delay.tap().abs());
+        }
+        assert!(back > 0.02, "the echo did not come back on");
+    }
+
+    #[test]
+    fn echo_times_out_of_range_are_clamped_and_finite() {
+        let mut m = Master::new(48_000.0);
+        for beats in [f32::NAN, f32::INFINITY, -1.0, 0.0, 50.0] {
+            m.set_delay_beats(beats, 70.0, 1.0);
+            for _ in 0..4_800 {
+                m.feed_send(0.3, 0.3, 0.3);
+                let (l, r) = m.process(0.1, 0.1);
+                assert!(l.is_finite() && r.is_finite(), "{beats}: non-finite output");
+            }
         }
     }
 
