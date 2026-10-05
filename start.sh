@@ -22,9 +22,20 @@ cd "$(dirname "$0")"
 LARAVEL_PORT=8080
 STATIC_PORT=8090
 
+# Stop whatever is listening on our two ports, and the process group it belongs to
+# (artisan serve runs its own child server). Matching by port, not by command line:
+# `pkill -f "artisan serve"` also killed any other project's server, and any shell
+# whose command line merely mentioned it.
+stop_port() {
+  for pid in $(lsof -t -iTCP:"$1" -sTCP:LISTEN 2>/dev/null); do
+    pgid=$(ps -o pgid= -p "$pid" | tr -d ' ')
+    kill -- "-$pgid" 2>/dev/null || kill "$pid" 2>/dev/null || true
+  done
+}
+
 stop() {
-  pkill -f "artisan serve" 2>/dev/null || true
-  pkill -f "php -S 0.0.0.0:$STATIC_PORT" 2>/dev/null || true
+  stop_port "$LARAVEL_PORT"
+  stop_port "$STATIC_PORT"
   echo "stopped"
   exit 0
 }
@@ -86,7 +97,10 @@ if up "$LARAVEL_PORT"; then
   echo "already up: http://localhost:$LARAVEL_PORT"
 else
   echo "==> starting Laravel on :$LARAVEL_PORT"
-  php artisan serve --host=0.0.0.0 --port="$LARAVEL_PORT" >/tmp/floor-laravel.log 2>&1 &
+  # setsid + nohup: detach from this terminal, so closing it doesn't take the
+  # server down with it.
+  setsid nohup php artisan serve --host=0.0.0.0 --port="$LARAVEL_PORT" \
+    >/tmp/floor-laravel.log 2>&1 </dev/null &
 fi
 
 # --- Static.
@@ -94,7 +108,8 @@ if up "$STATIC_PORT"; then
   echo "already up: http://localhost:$STATIC_PORT"
 else
   echo "==> starting the static server on :$STATIC_PORT"
-  php -S "0.0.0.0:$STATIC_PORT" -t public >/tmp/floor-static.log 2>&1 &
+  setsid nohup php -S "0.0.0.0:$STATIC_PORT" -t public \
+    >/tmp/floor-static.log 2>&1 </dev/null &
 fi
 
 # Give both a moment, then report rather than assuming.
