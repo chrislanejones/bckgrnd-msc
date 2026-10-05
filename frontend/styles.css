@@ -267,6 +267,45 @@ body {
   .track-grid { grid-template-columns: repeat(6, minmax(0, 1fr)); }
 }
 
+/* A library section: its name runs up the left edge, beside a rule as tall as the
+   section, so EDM / Lofi / Breaks read as spines rather than three more headings
+   competing with the sub-genre titles. Read bottom to top, like a record spine. */
+.lib-section {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  column-gap: 0.75rem;
+  align-items: stretch;
+}
+
+.lib-section > .track-grid {
+  margin-top: 0;
+}
+
+/* The spine is positioned, not flowed, so a long name like BREAKS can never make a
+   one-row section taller than its badges: it centers on the rule and overflows
+   evenly if it must. */
+.lib-section-title {
+  position: relative;
+  width: 1.5rem;
+  border-left: 2px solid color-mix(in srgb, var(--color-acid) 55%, var(--color-line));
+}
+
+.lib-section-title > span {
+  position: absolute;
+  top: 50%;
+  left: 0.55rem;
+  translate: 0 -50%;
+  writing-mode: vertical-rl;
+  rotate: 180deg;
+  font-size: 0.6875rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  line-height: 1;
+  text-transform: uppercase;
+  color: var(--color-fg);
+  white-space: nowrap;
+}
+
 /* One grid cell: an optional sub-genre title over a badge. Cells sit on the row's
    bottom edge, so a title only adds height to the rows that have one and the badges
    in a row stay level whether or not a title sits above them. */

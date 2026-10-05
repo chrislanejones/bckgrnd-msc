@@ -669,8 +669,14 @@ export function App() {
 
         <div className="rise rise-3 mt-4">
           {sections.map((section, i) => (
-            <section key={section.name} aria-label={section.name} className={i > 0 ? 'mt-3' : undefined}>
-              <p className="text-xs font-semibold tracking-widest text-muted">{section.name}</p>
+            <section
+              key={section.name}
+              aria-labelledby={`lib-${i}`}
+              className={cx('lib-section', i > 0 && 'mt-4')}
+            >
+              <h2 id={`lib-${i}`} className="lib-section-title">
+                <span>{section.name}</span>
+              </h2>
               <TrackGrid items={section.items} current={track.id} onPick={selectTrack} />
             </section>
           ))}
