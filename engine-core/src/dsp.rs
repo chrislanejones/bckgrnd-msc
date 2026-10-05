@@ -114,6 +114,12 @@ impl Osc {
         self.inc = phase_inc(freq, sample_rate);
     }
 
+    /// The frequency this oscillator is running at, for tests that pin tuning.
+    #[cfg(test)]
+    pub fn frequency(&self, sample_rate: f32) -> f32 {
+        self.inc * sample_rate
+    }
+
     pub fn next(&mut self) -> f32 {
         let out = match self.wave {
             Wave::Sine => (self.phase * core::f32::consts::TAU).sin(),

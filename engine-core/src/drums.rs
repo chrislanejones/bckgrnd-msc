@@ -80,9 +80,15 @@ pub struct KickVoice {
 }
 
 impl KickVoice {
-    pub fn new(vel: f32, sample_rate: f32, lofi: bool) -> Self {
-        // Body: 168 Hz snapping down to 49 Hz in 55 ms, then easing to 36 Hz.
+    /// `sub_hz` is the track's root in the low octave, from
+    /// [`crate::track::Track::kick_root_hz`], so the kick sits in key with the bass.
+    pub fn new(vel: f32, sample_rate: f32, lofi: bool, sub_hz: f32) -> Self {
+        // Body: 168 Hz snapping down to 49 Hz in 55 ms, then easing to its resting
+        // pitch. That used to be a fixed 36 Hz against a fixed 54 Hz sub, a fifth
+        // below it (36:54 is 2:3); the rest now follows the tuned sub at the same
+        // interval, so the body's tail is in key too.
         let start = if lofi { 108.0 } else { 168.0 };
+        let rest = sub_hz * (2.0 / 3.0);
         Self {
             body_env: Adsr::new(
                 if lofi { 0.62 } else { 0.95 } * vel,
@@ -94,7 +100,7 @@ impl KickVoice {
                 sample_rate,
             ),
             body: Osc::new(Wave::Sine, start, sample_rate),
-            pitch: PitchEnv::new(start, 49.0, 36.0, 0.055, 0.22, sample_rate),
+            pitch: PitchEnv::new(start, 49.0, rest, 0.055, 0.22, sample_rate),
             sub_env: Adsr::new(
                 if lofi { 0.32 } else { 0.55 } * vel,
                 0.012,
@@ -104,7 +110,7 @@ impl KickVoice {
                 0.02,
                 sample_rate,
             ),
-            sub: Osc::new(Wave::Sine, 54.0, sample_rate),
+            sub: Osc::new(Wave::Sine, sub_hz, sample_rate),
             click_env: if lofi { 0.08 } else { 0.42 } * vel,
             click_hp: {
                 let mut f = Biquad::new();
@@ -120,6 +126,14 @@ impl KickVoice {
             sample_rate,
             done: false,
         }
+    }
+}
+
+impl KickVoice {
+    /// The sub layer's pitch, for tests that pin the tuning.
+    #[cfg(test)]
+    pub fn sub_hz(&self) -> f32 {
+        self.sub.frequency(self.sample_rate)
     }
 }
 
@@ -377,7 +391,7 @@ mod tests {
     #[test]
     fn kick_finishes_and_stays_silent_afterwards() {
         let sr = 48_000.0;
-        let mut k = KickVoice::new(1.0, sr, false);
+        let mut k = KickVoice::new(1.0, sr, false, 54.0);
         let mut finished = false;
         for _ in 0..(sr as usize) {
             let (_, _, done) = k.process();
@@ -479,9 +493,18 @@ mod tests {
     }
 
     #[test]
+    fn the_kick_sub_plays_the_root_it_is_given() {
+        let sr = 48_000.0;
+        for root in [43.654f32, 55.0, 65.406] {
+            let k = KickVoice::new(1.0, sr, false, root);
+            assert!((k.sub_hz() - root).abs() < 1e-3, "{} vs {root}", k.sub_hz());
+        }
+    }
+
+    #[test]
     fn release_now_ends_the_voice() {
         let sr = 48_000.0;
-        let mut k = KickVoice::new(1.0, sr, false);
+        let mut k = KickVoice::new(1.0, sr, false, 54.0);
         for _ in 0..100 {
             k.process();
         }

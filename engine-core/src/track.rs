@@ -319,11 +319,88 @@ impl Track {
     pub fn fader(&self, stem: Stem) -> f32 {
         self.mix.get(stem)
     }
+
+    /// The pitch the kick's sub is tuned to: the track's root in the low octave.
+    ///
+    /// The arrangement carries no key, so the root is read off the bass part: the
+    /// pitch class it sounds for the most steps, ties going to whichever reaches
+    /// lower. That, not the bass's lowest note, is what tracks the tonic here. Lines
+    /// on these tracks routinely dip a fourth or a third under their root (the acid
+    /// and warehouse lines sit on A and drop to E, basement sits on F over a low C),
+    /// and the lowest note would put the kick on the fifth or the sixth.
+    ///
+    /// The pitch class is placed in the octave nearest 49 Hz (the geometric middle of
+    /// 40-60 Hz), MIDI 25..=36, so the result is always between C#1 (34.6 Hz) and C2
+    /// (65.4 Hz). A track with no bass keeps the fixed 54 Hz the kick always had.
+    ///
+    /// Called once per track load, never on the audio path.
+    pub fn kick_root_hz(&self) -> f32 {
+        // Steps sounded and lowest note, per pitch class.
+        let mut weight = [0.0f32; 12];
+        let mut lowest = [f32::INFINITY; 12];
+        for ev in self.bass.iter().flatten() {
+            for n in ev.notes.iter().copied().filter(|n| n.is_finite()) {
+                let pc = (n.round() as i32).rem_euclid(12) as usize;
+                weight[pc] += ev.len.max(1.0);
+                lowest[pc] = lowest[pc].min(n);
+            }
+        }
+        let mut best: Option<usize> = None;
+        for pc in 0..12 {
+            if weight[pc] <= 0.0 {
+                continue;
+            }
+            best = match best {
+                Some(b)
+                    if weight[b] > weight[pc]
+                        || (weight[b] == weight[pc] && lowest[b] <= lowest[pc]) =>
+                {
+                    Some(b)
+                }
+                _ => Some(pc),
+            };
+        }
+        let Some(pitch_class) = best else {
+            return KICK_SUB_DEFAULT_HZ;
+        };
+        let midi = 25 + (pitch_class as i32 - 25).rem_euclid(12);
+        440.0 * 2f32.powf((midi as f32 - 69.0) / 12.0)
+    }
 }
+
+/// The kick sub's pitch when there is no bass part to take a key from.
+pub const KICK_SUB_DEFAULT_HZ: f32 = 54.0;
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The kick's sub follows the key: the bass's most-sounded pitch class, in the
+    /// octave nearest 49 Hz.
+    #[test]
+    fn the_kick_root_is_the_most_sounded_bass_pitch() {
+        let in_key = |notes: &[f32]| {
+            let mut t = Track::silence("k");
+            for (i, n) in notes.iter().enumerate() {
+                t.bass[i * 4] = Some(NoteEvent::new(vec![*n], 2.0, 0.8, false));
+            }
+            t.kick_root_hz()
+        };
+        // A minor, on A with a dip to the E below: A1, 55 Hz, not E.
+        assert!((in_key(&[45.0, 45.0, 40.0, 48.0, 57.0]) - 55.0).abs() < 0.01);
+        // F, over a low C: F1, 43.65 Hz.
+        assert!((in_key(&[41.0, 36.0, 41.0, 44.0]) - 43.654).abs() < 0.01);
+        // A tie goes to the lower note: C under G gives C2, 65.4 Hz, the top of the
+        // range rather than C1 at 32.7.
+        assert!((in_key(&[55.0, 48.0]) - 65.406).abs() < 0.01);
+        // No bass: the old fixed tuning.
+        assert_eq!(in_key(&[]), KICK_SUB_DEFAULT_HZ);
+        // Every pitch class lands in range.
+        for pc in 0..12 {
+            let hz = in_key(&[36.0 + pc as f32]);
+            assert!((34.0..66.0).contains(&hz), "pitch class {pc}: {hz} Hz");
+        }
+    }
 
     #[test]
     fn hat_open_takes_precedence_over_closed() {

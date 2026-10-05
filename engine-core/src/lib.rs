@@ -412,6 +412,9 @@ pub struct Engine {
     echo_on: bool,
     /// Post-master trim, for crossfading two engines in the worklet.
     output_gain: f32,
+    /// The kick sub's pitch for the loaded track, worked out once at load so the
+    /// audio path only reads it.
+    kick_root_hz: f32,
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen)]
@@ -439,6 +442,7 @@ impl Engine {
             levels: vec![0.0; 8],
             echo_on: false,
             output_gain: 1.0,
+            kick_root_hz: track.kick_root_hz(),
             track,
         }
     }
@@ -787,6 +791,7 @@ impl Engine {
                 vel,
                 self.sample_rate,
                 kind == TrackKind::Lofi,
+                self.kick_root_hz,
             )));
             if self.channels[Stem::Kick.index()]
                 .audible(Stem::ALL.iter().any(|s| self.channels[s.index()].solo))
@@ -902,6 +907,7 @@ impl Engine {
     /// re-applies the faders so a loaded track's mix is heard immediately.
     pub fn load_track(&mut self, track: Track) {
         self.track = track;
+        self.kick_root_hz = self.track.kick_root_hz();
         for stem in Stem::ALL {
             let i = stem.index();
             self.channels[i].vol = self.track.fader(stem);
@@ -1351,6 +1357,31 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// A loaded track's kicks are tuned to its key: an A-minor bass line puts the sub
+    /// on A1, 55 Hz.
+    #[test]
+    fn the_kick_sub_is_tuned_to_the_track_root() {
+        let mut t = track_with_kick();
+        t.bass[0] = Some(NoteEvent::new(vec![45.0], 2.0, 0.9, false));
+        t.bass[8] = Some(NoteEvent::new(vec![52.0], 2.0, 0.9, false));
+        let mut e = Engine::new(48_000.0);
+        e.load_track(t);
+        e.play();
+        let mut l = [0.0f32; 128];
+        let mut r = [0.0f32; 128];
+        e.process(&mut l, &mut r);
+        let sub = e
+            .voices
+            .iter()
+            .flatten()
+            .find_map(|v| match v {
+                Voice::Kick(k) => Some(k.sub_hz()),
+                _ => None,
+            })
+            .expect("a kick on the downbeat");
+        assert!((sub - 55.0).abs() < 1e-3, "sub at {sub} Hz, expected 55");
     }
 
     #[test]
