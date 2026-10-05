@@ -252,9 +252,28 @@ impl DrumVoice for ClapVoice {
     }
 }
 
-/// Closed or open hat: filtered noise with a very short decay.
+/// The TR-808's metal bank: six square oscillators at non-harmonic ratios. Summed and
+/// band-passed high, their upper partials beat against each other into the shimmer a
+/// cymbal has and white noise does not.
+const METAL_HZ: [f32; 6] = [205.3, 304.4, 369.6, 522.7, 540.0, 800.0];
+
+/// Output trim, +14.8 dB, so the metal hats sit where the white-noise hats they
+/// replaced did. Most of the bank's energy is in the squares' fundamentals, which the
+/// filters throw away. Measured as RMS over a 0.3 s window for every flavor, closed
+/// and open: the gap was 14.2 to 15.3 dB, so one trim lands all eight within 0.6 dB.
+/// Pinned by `the_metal_hats_sit_where_the_noise_hats_did`.
+const HAT_TRIM: f32 = 5.495;
+
+/// How much white noise rides under the metal bank. The 808 does not, but a little
+/// takes the edge off the pure square buzz and many later machines blend it in.
+const HAT_NOISE: f32 = 0.25;
+
+/// Closed or open hat: the 808-style six-square metal bank with a touch of noise,
+/// band-passed and high-passed, with a very short decay.
 pub struct HatVoice {
     env: Adsr,
+    metal: [Osc; 6],
+    bp: Biquad,
     hp: Biquad,
     done: bool,
 }
@@ -302,10 +321,24 @@ impl HatVoice {
             } else {
                 0.44
             };
+        // The band the metal speaks in: around 10 kHz, and lower on lo-fi so it stays
+        // as dark and soft as the noise hat was there.
+        let bp_freq = if lofi { 6_000.0 } else { 10_000.0 };
+        let mut bp = Biquad::new();
+        bp.bandpass(sample_rate, bp_freq, 0.9);
         let mut hp = Biquad::new();
         hp.highpass(sample_rate, hp_freq, FRAC_1_SQRT_2);
+        // Free-running on the hardware, so every hit catches the bank at a different
+        // phase. Without this every hat is the same sample.
+        let metal = core::array::from_fn(|i| {
+            let mut osc = Osc::new(Wave::Square, METAL_HZ[i], sample_rate);
+            osc.advance_phase(noise() * 0.5 + 0.5);
+            osc
+        });
         Self {
             env: Adsr::new(amp, 0.001, decay, 0.0, 0.0, 0.01, sample_rate),
+            metal,
+            bp,
             hp,
             done: false,
         }
@@ -317,7 +350,15 @@ impl DrumVoice for HatVoice {
         if self.done {
             return (0.0, 0.0, true);
         }
-        let out = self.hp.process(noise()) * self.env.process();
+        let mut metal = 0.0;
+        for osc in &mut self.metal {
+            metal += osc.next();
+        }
+        // Six unit squares sum to an RMS of about sqrt(6); scale that to the RMS of
+        // the uniform noise (1 / sqrt(3)) so `HAT_NOISE` is a true blend ratio.
+        const METAL_NORM: f32 = 0.235_702_26; // (1 / sqrt(3)) / sqrt(6)
+        let src = metal * METAL_NORM * (1.0 - HAT_NOISE) + noise() * HAT_NOISE;
+        let out = self.hp.process(self.bp.process(src)) * HAT_TRIM * self.env.process();
         if self.env.is_done() {
             self.done = true;
         }
@@ -373,6 +414,68 @@ mod tests {
         let (_, _, od) = open.process();
         assert!(!cd);
         assert!(!od);
+    }
+
+    /// Mean RMS of a hat over a 0.3 s window, in dB, averaged across many hits so the
+    /// noise share and the free-running phases average out.
+    fn hat_rms_db(kind: crate::track::TrackKind, open: bool, hits: usize) -> f32 {
+        let sr = 48_000.0;
+        let win = (0.3 * sr) as usize;
+        let mut ss = 0.0f64;
+        for _ in 0..hits {
+            let mut h = HatVoice::new(1.0, sr, open, kind);
+            for _ in 0..win {
+                let (l, _, _) = h.process();
+                ss += (l * l) as f64;
+            }
+        }
+        (10.0 * (ss / (hits * win) as f64).log10()) as f32
+    }
+
+    /// Swapping the noise source for the metal bank must not move the hats in the
+    /// mix. These are the white-noise hat's levels, measured before the swap.
+    #[test]
+    fn the_metal_hats_sit_where_the_noise_hats_did() {
+        use crate::track::TrackKind;
+        let before = [
+            (TrackKind::House, false, -32.83),
+            (TrackKind::House, true, -25.57),
+            (TrackKind::Deep, false, -32.83),
+            (TrackKind::Deep, true, -24.62),
+            (TrackKind::Acid, false, -34.64),
+            (TrackKind::Acid, true, -25.56),
+            (TrackKind::Lofi, false, -30.77),
+            (TrackKind::Lofi, true, -24.15),
+        ];
+        for (kind, open, db) in before {
+            let now = hat_rms_db(kind, open, 40);
+            println!("HATRMS {kind:?} open={open}: {now:.3} dB (was {db})");
+            assert!(
+                (now - db).abs() <= 1.5,
+                "{kind:?} open={open}: {now:.2} dB, the noise hat was {db} dB"
+            );
+        }
+    }
+
+    /// Still a hat: the metal's energy sits up top, not in the squares' fundamentals.
+    #[test]
+    fn the_metal_hat_lives_in_the_top_octaves() {
+        let sr = 48_000.0;
+        let mut h = HatVoice::new(1.0, sr, true, crate::track::TrackKind::House);
+        let mut lp = Biquad::new();
+        lp.lowpass(sr, 2_000.0, FRAC_1_SQRT_2);
+        let (mut total, mut low) = (0.0f32, 0.0f32);
+        for _ in 0..(0.2 * sr) as usize {
+            let (l, _, _) = h.process();
+            total += l * l;
+            low += lp.process(l).powi(2);
+        }
+        assert!(total > 0.0);
+        assert!(
+            low < total * 0.05,
+            "too much below 2 kHz: {:.3}",
+            low / total
+        );
     }
 
     #[test]
