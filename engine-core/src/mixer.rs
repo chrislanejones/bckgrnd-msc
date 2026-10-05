@@ -133,8 +133,10 @@ pub struct Master {
     /// the per-stem sends pass straight through untouched.
     throw: f32,
     echo_on: bool,
-    /// Previous input to the saturator, for the 2x oversampled curve.
-    shaper_prev: f32,
+    /// Previous input to the saturator, for the 2x oversampled curve, one per
+    /// channel. A single shared value (as this was) built the right channel's
+    /// interpolated midpoint from the current *left* sample, leaking left into right.
+    shaper_prev: [f32; 2],
     /// Per-stem sends accumulated for the current sample, drained by `process`.
     send_acc: f32,
 }
@@ -191,7 +193,7 @@ impl Master {
             wet: 0.24,
             throw: 0.0,
             echo_on: false,
-            shaper_prev: 0.0,
+            shaper_prev: [0.0; 2],
             send_acc: 0.0,
         }
     }
@@ -207,7 +209,7 @@ impl Master {
         self.echo_hp.reset();
         self.verb.reset();
         self.comp.reset();
-        self.shaper_prev = 0.0;
+        self.shaper_prev = [0.0; 2];
     }
 
     /// Accumulate a stem's send for this sample. The line itself is written exactly
@@ -303,11 +305,15 @@ impl Master {
     /// octave, saturating both interpolated points and averaging them back down puts an
     /// anti-image filter in front of the fold, which is what the Web Audio waveshaper's
     /// `oversample = "2x"` does.
+    ///
+    /// `ch` is 0 for left and 1 for right: the interpolation reads the previous sample
+    /// of the *same* channel.
     #[inline]
-    fn saturate(&mut self, x: f32) -> f32 {
+    fn saturate(&mut self, ch: usize, x: f32) -> f32 {
         const AMOUNT: f32 = 1.35;
-        let up = 0.5 * (x + self.shaper_prev);
-        self.shaper_prev = x;
+        let prev = &mut self.shaper_prev[ch & 1];
+        let up = 0.5 * (x + *prev);
+        *prev = x;
         0.5 * (soft_clip(up, AMOUNT) + soft_clip(x, AMOUNT))
     }
 
@@ -352,8 +358,8 @@ impl Master {
         l = self.comp.process(l) * self.dry;
         r = self.comp.process(r) * self.dry;
 
-        l = self.saturate(l);
-        r = self.saturate(r);
+        l = self.saturate(0, l);
+        r = self.saturate(1, r);
 
         // --- EQ and the tape filter, after the glue.
         (l, r) = self.low.process(l, r);
@@ -727,6 +733,33 @@ mod tests {
             "the sum is not being held down: 0.8 in, {peak:.3} out"
         );
         assert!(peak > 0.1, "the compressor is over-reducing: {peak:.3}");
+    }
+
+    /// A hard-panned source has to stay on its own side through the whole chain.
+    ///
+    /// The saturator's 2x interpolation used one `shaper_prev` for both channels, so
+    /// the right channel's midpoint was built from the current left sample and a
+    /// hard-left source leaked audibly into the right.
+    #[test]
+    fn a_hard_left_source_stays_off_the_right_channel() {
+        let sr = 48_000.0;
+        let mut m = Master::new(sr);
+        let mut left_peak = 0.0f32;
+        let mut right_peak = 0.0f32;
+        for i in 0..(sr as usize) {
+            let t = i as f32 / sr;
+            let (l, r) = m.process(0.7 * (t * 110.0 * std::f32::consts::TAU).sin(), 0.0);
+            left_peak = left_peak.max(l.abs());
+            right_peak = right_peak.max(r.abs());
+        }
+        assert!(
+            left_peak > 0.1,
+            "the left side should carry the tone: {left_peak}"
+        );
+        assert!(
+            right_peak < 1e-6,
+            "left leaked into the right channel at {right_peak}"
+        );
     }
 
     #[test]
