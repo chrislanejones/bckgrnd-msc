@@ -6,12 +6,13 @@
  *   public/library/*.json  — the track library, exported from the PHP source so the
  *                            static and Laravel shapes cannot disagree
  *   public/index.html      — the shell, copied from frontend/static.html
+ *   dist/                  — just the files a static host serves, for Netlify
  *
  * The wasm engine and the Vite bundle are separate steps; this only covers what the
  * library and the document shell need.
  */
 import { execFileSync } from 'node:child_process';
-import { copyFileSync, mkdirSync, existsSync } from 'node:fs';
+import { copyFileSync, cpSync, mkdirSync, existsSync, rmSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -63,4 +64,14 @@ if (missing.length) {
   process.exit(1);
 }
 
-console.log('[static] ready — serve public/ with any static file server');
+// 4. Assemble dist/: only what a static host should serve. public/ also holds
+//    Laravel's index.php, which a static host would hand out as a download.
+const dist = resolve(root, 'dist');
+rmSync(dist, { recursive: true, force: true });
+mkdirSync(dist);
+for (const entry of ['index.html', 'favicon.svg', 'build', 'wasm', 'library']) {
+  cpSync(resolve(root, 'public', entry), resolve(dist, entry), { recursive: true });
+}
+console.log('[static] assembled dist/');
+
+console.log('[static] ready — serve dist/ (or public/) with any static file server');

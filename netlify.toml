@@ -1,0 +1,25 @@
+# Netlify serves the static build: the frontend, the wasm engine and the track
+# library exported to JSON. No PHP runs on Netlify, so saved presets (Laravel's
+# /api/presets) are not available there; everything else is.
+#
+# Netlify's build image has no Rust or wasm-pack, so the site is built locally and
+# uploaded rather than built on push:
+#
+#   pnpm run build:netlify
+#   netlify deploy --dir dist          # preview URL
+#   netlify deploy --dir dist --prod   # live
+[build]
+  publish = "dist"
+
+# The bundle, worklet and wasm keep fixed file names (the Blade shell needs them), so
+# they cannot be cached forever. Revalidate instead; Netlify's ETags keep it cheap.
+[[headers]]
+  for = "/*"
+  [headers.values]
+    Cache-Control = "public, max-age=0, must-revalidate"
+    X-Content-Type-Options = "nosniff"
+
+[[headers]]
+  for = "/wasm/*.wasm"
+  [headers.values]
+    Content-Type = "application/wasm"
