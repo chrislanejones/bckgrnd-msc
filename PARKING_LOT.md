@@ -87,9 +87,8 @@ the reference (instant drop, linear return).
 
 ## Found 10-05-2026
 
-- `start.sh` only builds outputs that are *missing*, not ones older than their source.
-  A changed `engine-core/src` keeps serving the old `.wasm` until someone runs
-  `pnpm run build:engine` by hand.
+- ~~`start.sh` only builds missing outputs~~ — fixed 10-05-2026, it now rebuilds
+  anything older than its source.
 - `verify:audio` failed once in about ten runs on "telemetry arrives at ~30 Hz" and
   "playhead advances", then passed on rerun. It times a 1.2 s window, so it is
   sensitive to load on the machine.
@@ -121,8 +120,7 @@ Run in this order, after the waveform scratch lands. None needs a 9th stem.
 
 ## Found with the waveform scratch (10-05-2026)
 
-- Starting an auto mix while the live deck is held in a scratch isn't handled, and the
-  handover's downbeat math ignores the pause. The UI lets go of the scratch when its
-  deck stops being live, but the engine side is untested.
+- ~~Auto mix during a held scratch~~ — fixed 10-05-2026: the mix releases the
+  scratch first (`scratch_release`), and the UI no longer messages the new deck.
 - The scratch reader is a new engine primitive (`engine-core/src/scratch.rs`), and
   the ladder filter from the sound pass is another. Both are worth an ADR from Dara.
