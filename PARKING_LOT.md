@@ -97,8 +97,9 @@ the reference (instant drop, linear return).
 
 ## Sound work (approved 10-05-2026) — DONE
 
-Landed as 8bfa55e (transition sounds), d82bcd6 (lo-fi texture) and 5a5fd6a
-(percussion). The original brief is kept below for reference.
+Landed as transition sounds, lo-fi texture and percussion (hashes changed in the
+10-05 history scrub). The lo-fi texture was later **removed**: it read as rain.
+The original brief is kept below for reference.
 
 - Follow-up: the crackle filters ran on silence and produced subnormal floats, costing
   150–250 ns per sample until they were reset after each click. Other filters in the
