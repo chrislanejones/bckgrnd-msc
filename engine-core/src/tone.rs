@@ -4,7 +4,7 @@
 //! with its own envelope, then an amplitude envelope. Voicing per track flavour is
 //! selected by [`Voicing`] so the house/deep/acid/lo-fi characters stay distinct.
 
-use crate::dsp::{exp_between, midi_hz, Adsr, Osc, StereoBiquad, Wave};
+use crate::dsp::{exp_between, midi_hz, Adsr, Ladder, Osc, StereoBiquad, Wave};
 use crate::track::{NoteEvent, TrackKind};
 
 /// Per-stem voicing parameters.
@@ -42,6 +42,10 @@ pub struct Voicing {
     pub unison: usize,
     /// How this voicing adjusts the gate the engine hands it.
     pub hold: Hold,
+    /// Filter through the four-pole ladder instead of the resonant biquad. The 303
+    /// line (acid bass and lead) only; `q` is mapped onto ladder feedback. Ignored on
+    /// a wide voicing, since the ladder runs once on the mono sum.
+    pub ladder: bool,
 }
 
 /// What a voicing does to the gate it is given.
@@ -112,6 +116,7 @@ fn bass_voicing(kind: TrackKind, ev: &NoteEvent, freq: f32) -> Voicing {
             f_attack: 0.018,
             wide: false,
             unison: 1,
+            ladder: true,
             hold: Hold::Shortened {
                 floor: 0.05,
                 scale: 0.85,
@@ -132,6 +137,7 @@ fn bass_voicing(kind: TrackKind, ev: &NoteEvent, freq: f32) -> Voicing {
             f_attack: 0.04,
             wide: false,
             unison: 1,
+            ladder: false,
             hold: Hold::AsGiven,
         },
         TrackKind::Deep => Voicing {
@@ -149,6 +155,7 @@ fn bass_voicing(kind: TrackKind, ev: &NoteEvent, freq: f32) -> Voicing {
             f_attack: 0.02,
             wide: false,
             unison: 1,
+            ladder: false,
             hold: Hold::AsGiven,
         },
         TrackKind::House => Voicing {
@@ -166,6 +173,7 @@ fn bass_voicing(kind: TrackKind, ev: &NoteEvent, freq: f32) -> Voicing {
             f_attack: 0.02,
             wide: false,
             unison: 1,
+            ladder: false,
             hold: Hold::AsGiven,
         },
     }
@@ -203,6 +211,7 @@ pub fn bass_sub_layer(stem: Stem, kind: TrackKind, ev: &NoteEvent, freq: f32) ->
                 f_attack: 0.03,
                 wide: false,
                 unison: 1,
+                ladder: false,
                 hold: Hold::AsGiven,
             })
         }
@@ -230,6 +239,7 @@ fn stab_voicing(kind: TrackKind, ev: &NoteEvent) -> Voicing {
             f_attack: 0.04,
             wide: true,
             unison: 1,
+            ladder: false,
             hold: Hold::AsGiven,
         },
         TrackKind::Deep => Voicing {
@@ -247,6 +257,7 @@ fn stab_voicing(kind: TrackKind, ev: &NoteEvent) -> Voicing {
             f_attack: 0.03,
             wide: true,
             unison: 1,
+            ladder: false,
             hold: Hold::AsGiven,
         },
         TrackKind::Acid => Voicing {
@@ -264,6 +275,7 @@ fn stab_voicing(kind: TrackKind, ev: &NoteEvent) -> Voicing {
             f_attack: 0.012,
             wide: true,
             unison: 1,
+            ladder: false,
             hold: Hold::Capped(0.08),
         },
         TrackKind::House => Voicing {
@@ -281,6 +293,7 @@ fn stab_voicing(kind: TrackKind, ev: &NoteEvent) -> Voicing {
             f_attack: 0.012,
             wide: true,
             unison: 1,
+            ladder: false,
             hold: Hold::Capped(0.14),
         },
     }
@@ -303,6 +316,7 @@ fn lead_voicing(kind: TrackKind, ev: &NoteEvent, freq: f32) -> Voicing {
             f_attack: 0.06,
             wide: false,
             unison: 1,
+            ladder: false,
             hold: Hold::AsGiven,
         },
         TrackKind::Deep => Voicing {
@@ -320,6 +334,7 @@ fn lead_voicing(kind: TrackKind, ev: &NoteEvent, freq: f32) -> Voicing {
             f_attack: 0.1,
             wide: false,
             unison: 1,
+            ladder: false,
             hold: Hold::AsGiven,
         },
         TrackKind::Acid => Voicing {
@@ -337,6 +352,7 @@ fn lead_voicing(kind: TrackKind, ev: &NoteEvent, freq: f32) -> Voicing {
             f_attack: 0.04,
             wide: false,
             unison: 1,
+            ladder: true,
             hold: Hold::Capped(0.4),
         },
         TrackKind::House => Voicing {
@@ -354,6 +370,7 @@ fn lead_voicing(kind: TrackKind, ev: &NoteEvent, freq: f32) -> Voicing {
             f_attack: 0.05,
             wide: true,
             unison: 2,
+            ladder: false,
             hold: Hold::AsGiven,
         },
     }
@@ -399,6 +416,7 @@ fn pad_voicing(kind: TrackKind, ev: &NoteEvent) -> Voicing {
         f_attack: 0.4,
         wide: true,
         unison: 2,
+        ladder: false,
         hold: Hold::AsGiven,
     }
 }
@@ -442,6 +460,7 @@ fn arp_voicing(kind: TrackKind, ev: &NoteEvent) -> Voicing {
         f_attack: 0.012,
         wide: false,
         unison: 1,
+        ladder: false,
         hold: Hold::Shortened {
             floor: 0.05,
             scale: 1.0,
@@ -469,13 +488,42 @@ struct Partial {
     pan: f32,
 }
 
+/// The voice's lowpass: the resonant biquad, stereo, or the ladder on the mono sum.
+enum VoiceFilter {
+    Biquad(StereoBiquad),
+    Ladder(Ladder),
+}
+
+impl VoiceFilter {
+    #[inline]
+    fn set(&mut self, sr: f32, cutoff: f32, q: f32) {
+        match self {
+            VoiceFilter::Biquad(f) => f.lowpass(sr, cutoff, q),
+            VoiceFilter::Ladder(f) => f.set(sr, cutoff, Ladder::q_to_k(q)),
+        }
+    }
+
+    #[inline]
+    fn process(&mut self, left: f32, right: f32) -> (f32, f32) {
+        match self {
+            VoiceFilter::Biquad(f) => f.process(left, right),
+            // Only built for voicings that are not wide, where every partial is
+            // centered and the two channels are identical, so one pass serves both.
+            VoiceFilter::Ladder(f) => {
+                let y = f.process(left);
+                (y, y)
+            }
+        }
+    }
+}
+
 /// A pitched voice: detuned partials through an enveloped resonant lowpass into an
 /// amplitude envelope.
 pub struct ToneVoice {
     /// Which stem bus this voice feeds.
     stem: Stem,
     partials: Vec<Partial>,
-    filter: StereoBiquad,
+    filter: VoiceFilter,
     env: Adsr,
     voicing: Voicing,
     /// Filter envelope position, in samples, and its stage durations.
@@ -553,8 +601,12 @@ impl ToneVoice {
                 }
             })
             .collect();
-        let mut filter = StereoBiquad::new();
-        filter.lowpass(sample_rate, v.f_start.max(30.0), v.q);
+        let mut filter = if v.ladder && !v.wide {
+            VoiceFilter::Ladder(Ladder::new())
+        } else {
+            VoiceFilter::Biquad(StereoBiquad::new())
+        };
+        filter.set(sample_rate, v.f_start.max(30.0), v.q);
         Self {
             stem,
             partials,
@@ -635,7 +687,7 @@ impl ToneVoice {
         let attack = v.f_attack.max(0.008) * self.sample_rate;
         match self.filt_stage {
             0 => {
-                self.filter.lowpass(self.sample_rate, start_f, v.q);
+                self.filter.set(self.sample_rate, start_f, v.q);
                 self.filt_t = 0.0;
                 self.filt_stage = 1;
             }
@@ -643,7 +695,7 @@ impl ToneVoice {
                 self.filt_t += 1.0;
                 let t = (self.filt_t / attack).min(1.0);
                 self.filter
-                    .lowpass(self.sample_rate, exp_between(start_f, peak_f, t), v.q);
+                    .set(self.sample_rate, exp_between(start_f, peak_f, t), v.q);
                 if self.filt_t >= attack {
                     // How long the closing sweep should take: from the end of the
                     // attack to the point the amplitude envelope releases.
@@ -655,7 +707,7 @@ impl ToneVoice {
             2 => {
                 if !v.sweeps() {
                     // A flat filter gesture: park at the peak.
-                    self.filter.lowpass(self.sample_rate, peak_f, v.q);
+                    self.filter.set(self.sample_rate, peak_f, v.q);
                     self.filt_stage = 3;
                     return;
                 }
@@ -666,7 +718,7 @@ impl ToneVoice {
                 self.filt_t += 1.0;
                 let t = (self.filt_t / self.filt_ramp).min(1.0);
                 self.filter
-                    .lowpass(self.sample_rate, exp_between(peak_f, end_f, t), v.q);
+                    .set(self.sample_rate, exp_between(peak_f, end_f, t), v.q);
                 if self.filt_t >= self.filt_ramp {
                     self.filt_t = 0.0;
                     self.filt_stage = 3;
@@ -693,6 +745,86 @@ mod tests {
         let b = voicing(Stem::Bass, TrackKind::Acid, &plain, 110.0);
         assert!(a.f_peak > b.f_peak);
         assert!(a.q > b.q);
+    }
+
+    /// Mean-square level in dB of a stem's voice over a few notes.
+    fn voice_db(stem: Stem, kind: TrackKind, notes: [f32; 3], hold: f32, accent: bool) -> f32 {
+        let sr = 48_000.0;
+        let mut ss = 0.0f64;
+        let mut n = 0usize;
+        for note in notes {
+            let ev = NoteEvent::new(vec![note], 1.0, 0.9, accent);
+            let f = midi_hz(note);
+            let v = voicing(stem, kind, &ev, f);
+            let mut tv = ToneVoice::with_stem(stem, &ev, f, hold, sr, v);
+            for _ in 0..(0.4 * sr) as usize {
+                let (l, r, _) = tv.process();
+                assert!(l.is_finite() && r.is_finite());
+                ss += (l * l) as f64;
+                n += 1;
+            }
+        }
+        (10.0 * (ss / n as f64).log10()) as f32
+    }
+
+    /// The 303 line runs through the ladder, and only the 303 line.
+    #[test]
+    fn only_the_acid_bass_and_lead_use_the_ladder() {
+        let ev = NoteEvent::new(vec![45.0], 1.0, 0.9, false);
+        for kind in [
+            TrackKind::House,
+            TrackKind::Deep,
+            TrackKind::Acid,
+            TrackKind::Lofi,
+        ] {
+            for stem in Stem::TUNED {
+                let acid_line = kind == TrackKind::Acid && matches!(stem, Stem::Bass | Stem::Lead);
+                assert_eq!(
+                    voicing(stem, kind, &ev, 110.0).ladder,
+                    acid_line,
+                    "{kind:?} {stem:?}"
+                );
+            }
+        }
+    }
+
+    /// Moving the acid line onto the ladder must not move it in the mix. These are
+    /// the biquad versions' levels, measured before the change.
+    #[test]
+    fn the_ladder_acid_line_keeps_its_level() {
+        for (stem, notes, hold, accent, before) in [
+            (Stem::Bass, [33.0, 40.0, 45.0], 0.12, false, -24.47f32),
+            (Stem::Bass, [33.0, 40.0, 45.0], 0.12, true, -24.77),
+            (Stem::Lead, [57.0, 64.0, 69.0], 0.3, false, -34.16),
+        ] {
+            let now = voice_db(stem, TrackKind::Acid, notes, hold, accent);
+            println!("TONERMS {stem:?} accent={accent}: {now:.2} dB (was {before})");
+            assert!(
+                (now - before).abs() <= 1.5,
+                "{stem:?} accent={accent}: {now:.2} dB, the biquad version was {before} dB"
+            );
+        }
+    }
+
+    /// An accent still opens the filter further: brighter means more energy above
+    /// the note's low harmonics.
+    #[test]
+    fn an_accent_is_brighter_through_the_ladder() {
+        let sr = 48_000.0;
+        let bright = |accent: bool| -> f32 {
+            let ev = NoteEvent::new(vec![45.0], 1.0, 0.9, accent);
+            let f = midi_hz(45.0);
+            let v = voicing(Stem::Bass, TrackKind::Acid, &ev, f);
+            let mut tv = ToneVoice::with_stem(Stem::Bass, &ev, f, 0.12, sr, v);
+            let mut hp = crate::dsp::Biquad::new();
+            hp.highpass(sr, 1_000.0, 0.707);
+            let mut e = 0.0f32;
+            for _ in 0..(0.1 * sr) as usize {
+                e += hp.process(tv.process().0).powi(2);
+            }
+            e
+        };
+        assert!(bright(true) > bright(false) * 1.5);
     }
 
     #[test]

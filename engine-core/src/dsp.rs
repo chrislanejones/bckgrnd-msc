@@ -401,6 +401,83 @@ fn coeffs(sr: f32, freq: f32, q: f32) -> (f32, f32) {
     (w0.cos(), w0.sin() / (2.0 * q.max(0.05)))
 }
 
+/// Four-pole transistor-ladder lowpass, zero-delay-feedback (TPT) form with `tanh`
+/// in the loop: the 303 filter.
+///
+/// Four trapezoidal one-poles in series, with the global feedback solved implicitly
+/// each sample (Zavalishin's linear ladder), so cutoff can be swept at audio rate
+/// without the tuning drift or blow-ups of a naive digital ladder. The resolved input
+/// to the first stage goes through `tanh`, which is where the squelch comes from:
+/// as resonance rises, the feedback pushes that input into saturation and the peak
+/// rounds over and growls instead of whistling.
+///
+/// Bounded by construction: `tanh` caps the input at +/-1 and each trapezoidal
+/// one-pole is stable for every cutoff, so no setting can make it run away. A DC
+/// offset far below audibility (-360 dB) keeps the states out of denormals in silence.
+#[derive(Clone, Debug, Default)]
+pub struct Ladder {
+    s: [f32; 4],
+    /// One-pole gain `g / (1 + g)`, with `g = tan(pi * fc / sr)`.
+    big_g: f32,
+    /// Feedback amount, 0..4. Self-oscillation sits at 4.
+    k: f32,
+}
+
+/// Input level into the ladder's `tanh`. Higher drives the squelch harder. 2.4 also
+/// lands the acid bass and lead within 0.1 dB of the biquad versions' RMS, so no
+/// separate makeup gain is needed (pinned by `the_ladder_acid_line_keeps_its_level`).
+const LADDER_DRIVE: f32 = 2.4;
+
+impl Ladder {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Map a biquad-style Q onto ladder feedback, so the existing voicing values
+    /// keep their meaning: Q 0.707 is no resonance, Q 3.2 (the acid lead) is about
+    /// 2.1, Q 10 and 15 (the acid bass, plain and accented) are about 3.2 and 3.5, just
+    /// short of self-oscillation.
+    pub fn q_to_k(q: f32) -> f32 {
+        (4.0 * (q - FRAC_1_SQRT_2) / (q + 1.5)).clamp(0.0, 3.95)
+    }
+
+    /// Set cutoff in Hz and feedback `k` (0..4).
+    #[inline]
+    pub fn set(&mut self, sr: f32, cutoff: f32, k: f32) {
+        let fc = cutoff.clamp(20.0, sr * 0.45);
+        let g = (core::f32::consts::PI * fc / sr).tan();
+        self.big_g = g / (1.0 + g);
+        self.k = k.clamp(0.0, 4.0);
+    }
+
+    #[inline]
+    pub fn process(&mut self, x: f32) -> f32 {
+        let g = self.big_g;
+        let one_minus = 1.0 - g;
+        // Each stage is y = G * in + (1 - G) * s; fold the four stage memories into
+        // what the last stage would output for zero input, then solve the loop.
+        let m = [
+            one_minus * self.s[0],
+            one_minus * self.s[1],
+            one_minus * self.s[2],
+            one_minus * self.s[3],
+        ];
+        let g2 = g * g;
+        let sigma = g2 * g * m[0] + g2 * m[1] + g * m[2] + m[3];
+        let u = (x * LADDER_DRIVE + 1e-18 - self.k * sigma) / (1.0 + self.k * g2 * g2);
+        let mut v = u.tanh();
+        for s in &mut self.s {
+            let y = g * v + (1.0 - g) * *s;
+            // Trapezoidal state update: s' = 2y - s.
+            *s = 2.0 * y - *s;
+            v = y;
+        }
+        // The ladder's passband falls as 1 / (1 + k); give back half of that so the
+        // low end does not vanish when the resonance comes up, as on the hardware.
+        v * (1.0 + 0.5 * self.k)
+    }
+}
+
 /// One-pole lowpass, used for damping the delay feedback path.
 pub struct OnePole {
     coef: f32,
@@ -618,6 +695,79 @@ mod tests {
             lim.process(0.0, 0.0);
         }
         assert!(lim.gain() > 0.999, "did not recover: {}", lim.gain());
+    }
+
+    /// Maximum resonance, a hot input and a cutoff swept across the whole range at
+    /// audio rate: the ladder must stay finite and bounded throughout.
+    #[test]
+    fn the_ladder_stays_stable_under_max_resonance_and_fast_sweeps() {
+        let sr = 48_000.0;
+        let mut f = Ladder::new();
+        let mut saw = Osc::new(Wave::Saw, 55.0, sr);
+        let mut peak = 0.0f32;
+        for i in 0..(2.0 * sr) as usize {
+            let t = i as f32 / sr;
+            // 30 Hz to 21 kHz and back, 200 times a second.
+            let sweep = 0.5 + 0.5 * (t * 200.0 * core::f32::consts::TAU).sin();
+            f.set(sr, exp_between(30.0, 21_000.0, sweep), 4.0);
+            let y = f.process(8.0 * saw.next() + noise());
+            assert!(y.is_finite(), "non-finite at {i}");
+            peak = peak.max(y.abs());
+        }
+        assert!(peak < 8.0, "unbounded: peak {peak}");
+        // And it rings down to silence, not into denormals or a stuck state.
+        f.set(sr, 400.0, 4.0);
+        let mut last = 0.0f32;
+        for _ in 0..(4.0 * sr) as usize {
+            last = f.process(0.0);
+        }
+        assert!(
+            last.is_finite() && last.abs() < 1.0,
+            "did not settle: {last}"
+        );
+    }
+
+    /// The ladder is a lowpass: four poles, so well above cutoff it is far down.
+    #[test]
+    fn the_ladder_attenuates_above_cutoff() {
+        let sr = 48_000.0;
+        let level = |hz: f32| -> f32 {
+            let mut f = Ladder::new();
+            f.set(sr, 500.0, Ladder::q_to_k(0.707));
+            let mut e = 0.0f32;
+            for i in 0..(sr as usize) / 2 {
+                let x = 0.1 * (i as f32 / sr * hz * core::f32::consts::TAU).sin();
+                let y = f.process(x);
+                if i > 4_800 {
+                    e += y * y;
+                }
+            }
+            e
+        };
+        let pass = level(100.0);
+        let stop = level(8_000.0);
+        let db = 10.0 * (stop / pass).log10();
+        assert!(db < -60.0, "only {db:.1} dB down four octaves above cutoff");
+    }
+
+    /// Resonance peaks the response at the cutoff, which is the whole point of it.
+    #[test]
+    fn the_ladder_resonates_at_cutoff() {
+        let sr = 48_000.0;
+        let gain_at = |k: f32| -> f32 {
+            let mut f = Ladder::new();
+            f.set(sr, 1_000.0, k);
+            let mut e = 0.0f32;
+            for i in 0..(sr as usize) / 2 {
+                let x = 0.05 * (i as f32 / sr * 1_000.0 * core::f32::consts::TAU).sin();
+                let y = f.process(x);
+                if i > 4_800 {
+                    e += y * y;
+                }
+            }
+            e
+        };
+        assert!(gain_at(3.5) > gain_at(0.0) * 4.0);
     }
 
     #[test]
