@@ -416,7 +416,6 @@ pub struct Engine {
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen)]
 impl Engine {
-
     pub fn new(sample_rate: f32) -> Self {
         let sr = if sample_rate > 0.0 {
             sample_rate
@@ -952,7 +951,6 @@ impl Engine {
             c.vol = vol.clamp(0.0, 1.0);
         }
     }
-
 }
 
 /// Existing Rust API ------------------------------------------------------
@@ -1021,7 +1019,6 @@ impl Engine {
         out[..n].copy_from_slice(&self.levels[..n]);
     }
 
-
     pub fn set_output_gain_wasm(&mut self, gain: f32) {
         self.set_output_gain(gain);
     }
@@ -1049,7 +1046,6 @@ mod tests {
         t.kick[12] = 1.0;
         t
     }
-
 
     /// The handover has to be scheduled the distance ahead it asks for.
     ///
@@ -1103,7 +1099,10 @@ mod tests {
         let (left, quarter, centre, right) = (spread(0.0), spread(0.25), spread(0.5), spread(1.0));
         assert!(left < 1e-4, "left end should be mono, spread {left}");
         assert!(right < 1e-4, "right end should be mono, spread {right}");
-        assert!(centre > 0.05, "centre should leave the channels apart, spread {centre}");
+        assert!(
+            centre > 0.05,
+            "centre should leave the channels apart, spread {centre}"
+        );
         // And it opens smoothly rather than switching.
         assert!(
             left < quarter && quarter < centre,
@@ -1447,7 +1446,6 @@ mod tests {
         assert!(e.ring.take(1.35, 48_000.0).is_none());
     }
 
-
     #[test]
     fn loop_wraps_the_sequence() {
         let mut e = Engine::new(48_000.0);
@@ -1539,4 +1537,3 @@ mod tests {
         }
     }
 }
-

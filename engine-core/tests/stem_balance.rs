@@ -33,7 +33,12 @@ fn track() -> Track {
             None
         };
         t.stab[s] = if s % 8 == 7 {
-            Some(NoteEvent::new(vec![57.0, 60.0, 64.0], 1.0, 0.55, s % 16 == 7))
+            Some(NoteEvent::new(
+                vec![57.0, 60.0, 64.0],
+                1.0,
+                0.55,
+                s % 16 == 7,
+            ))
         } else {
             None
         };
@@ -57,13 +62,20 @@ fn track() -> Track {
 }
 
 fn db(v: f32) -> f32 {
-    if v <= 1e-9 { -120.0 } else { 20.0 * v.log10() }
+    if v <= 1e-9 {
+        -120.0
+    } else {
+        20.0 * v.log10()
+    }
 }
 
 #[test]
 fn stem_levels_are_reported() {
     let sr = 48_000.0;
-    println!("\n{:<6} {:>9} {:>9} {:>9} {:>9}", "stem", "fader", "peak dB", "rms dB", "sub%");
+    println!(
+        "\n{:<6} {:>9} {:>9} {:>9} {:>9}",
+        "stem", "fader", "peak dB", "rms dB", "sub%"
+    );
     println!("{}", "-".repeat(48));
 
     let mut peaks = Vec::new();
@@ -99,15 +111,27 @@ fn stem_levels_are_reported() {
         }
         let rms = (sum / n as f32).sqrt();
         peaks.push((name, peak, rms));
-        println!("{:<6} {:>9.2} {:>9.1} {:>9.1}", name, track().fader(stem), db(peak), db(rms));
+        println!(
+            "{:<6} {:>9.2} {:>9.1} {:>9.1}",
+            name,
+            track().fader(stem),
+            db(peak),
+            db(rms)
+        );
     }
 
     // The loudest and quietest stems should sit within a sensible window of each
     // other. A stem 40 dB down is inaudible and reads as "that stem is broken".
     let loudest = peaks.iter().map(|(_, p, _)| *p).fold(0.0f32, f32::max);
-    let quietest = peaks.iter().map(|(_, p, _)| *p).fold(f32::INFINITY, f32::min);
+    let quietest = peaks
+        .iter()
+        .map(|(_, p, _)| *p)
+        .fold(f32::INFINITY, f32::min);
     let spread_db = db(loudest) - db(quietest);
-    println!("\nspread: {:.1} dB between the loudest and quietest stem", spread_db);
+    println!(
+        "\nspread: {:.1} dB between the loudest and quietest stem",
+        spread_db
+    );
     assert!(
         spread_db < 30.0,
         "stems are {:.1} dB apart — a stem is effectively inaudible or dominating",
@@ -116,6 +140,10 @@ fn stem_levels_are_reported() {
 
     // Nothing should be silently missing.
     for (name, peak, _) in &peaks {
-        assert!(db(*peak) > -45.0, "stem {name} is effectively silent at {} dBFS", db(*peak));
+        assert!(
+            db(*peak) > -45.0,
+            "stem {name} is effectively silent at {} dBFS",
+            db(*peak)
+        );
     }
 }

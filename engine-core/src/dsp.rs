@@ -223,7 +223,6 @@ impl Adsr {
         self.hold_end
     }
 
-
     pub fn process(&mut self) -> f32 {
         self.elapsed += 1.0;
         self.level = match self.stage {

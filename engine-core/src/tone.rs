@@ -112,7 +112,10 @@ fn bass_voicing(kind: TrackKind, ev: &NoteEvent, freq: f32) -> Voicing {
             f_attack: 0.018,
             wide: false,
             unison: 1,
-            hold: Hold::Shortened { floor: 0.05, scale: 0.85 },
+            hold: Hold::Shortened {
+                floor: 0.05,
+                scale: 0.85,
+            },
         },
         TrackKind::Lofi => Voicing {
             wave: Wave::Sine,
@@ -178,12 +181,7 @@ fn bass_voicing(kind: TrackKind, ev: &NoteEvent, freq: f32) -> Voicing {
 /// `vel * 0.28` against the pad's own `vel * 0.075`, arriving instantly against the
 /// pad's 0.4 s attack, which is a resonant transient roughly 300x the level of the
 /// note it was supposed to be reinforcing.
-pub fn bass_sub_layer(
-    stem: Stem,
-    kind: TrackKind,
-    ev: &NoteEvent,
-    freq: f32,
-) -> Option<Voicing> {
+pub fn bass_sub_layer(stem: Stem, kind: TrackKind, ev: &NoteEvent, freq: f32) -> Option<Voicing> {
     if stem != Stem::Bass {
         return None;
     }
@@ -372,9 +370,7 @@ fn pad_voicing(kind: TrackKind, ev: &NoteEvent) -> Voicing {
         // The original passes `notes.flatMap(() => [-9, 11])`, so the cents
         // alternate down the whole bank: 2N entries for an N-note chord, with
         // anything past the end of the list falling back to its last value.
-        detune: (0..ev.notes.len())
-            .flat_map(|_| [-9.0_f32, 11.0])
-            .collect(),
+        detune: (0..ev.notes.len()).flat_map(|_| [-9.0_f32, 11.0]).collect(),
         // Lo-fi and acid pads sit at 0.1; the brighter flavours pull back so the
         // pad does not fight the lead for space.
         peak: ev.vel
@@ -446,7 +442,10 @@ fn arp_voicing(kind: TrackKind, ev: &NoteEvent) -> Voicing {
         f_attack: 0.012,
         wide: false,
         unison: 1,
-        hold: Hold::Shortened { floor: 0.05, scale: 1.0 },
+        hold: Hold::Shortened {
+            floor: 0.05,
+            scale: 1.0,
+        },
     }
 }
 
@@ -648,8 +647,7 @@ impl ToneVoice {
                 if self.filt_t >= attack {
                     // How long the closing sweep should take: from the end of the
                     // attack to the point the amplitude envelope releases.
-                    self.filt_ramp =
-                        (self.env.release_starts_at() - self.filt_t).max(1.0);
+                    self.filt_ramp = (self.env.release_starts_at() - self.filt_t).max(1.0);
                     self.filt_t = 0.0;
                     self.filt_stage = 2;
                 }

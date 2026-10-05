@@ -78,7 +78,11 @@ fn every_stem_sounds_on_every_track() {
         print!("{:<10}", id);
         for (stem, name) in STEMS {
             let (peak, _) = measure(track, stem);
-            let db = if peak <= 1e-9 { -120.0 } else { 20.0 * peak.log10() };
+            let db = if peak <= 1e-9 {
+                -120.0
+            } else {
+                20.0 * peak.log10()
+            };
             print!("{:>9}", format!("{db:.0}"));
             if db < -50.0 {
                 dead.push(format!("{id}/{name} ({db:.0} dBFS)"));
@@ -135,7 +139,13 @@ fn each_stem_has_its_own_fader() {
         let up = render(1.0);
         let down = render(0.0);
 
-        assert!(up > 0.02, "{name}: soloed at unity it is inaudible (peak {up:.4})");
-        assert_eq!(down, 0.0, "{name}: its own fader at zero did not silence it ({down:.6})");
+        assert!(
+            up > 0.02,
+            "{name}: soloed at unity it is inaudible (peak {up:.4})"
+        );
+        assert_eq!(
+            down, 0.0,
+            "{name}: its own fader at zero did not silence it ({down:.6})"
+        );
     }
 }

@@ -364,7 +364,6 @@ impl Master {
         l *= self.gain;
         r *= self.gain;
 
-
         // Collapse toward one channel or the other. Below centre the right channel is
         // pulled toward the left, above it the left is pulled toward the right, so the
         // ends are mono and the middle is untouched stereo.
@@ -486,7 +485,7 @@ impl Ducker {
 
 #[cfg(test)]
 mod tests {
-use super::*;
+    use super::*;
     /// The echo has to arrive where the tempo says it does.
     ///
     /// This is measured through the real call pattern — several stems feeding sends
@@ -668,10 +667,7 @@ use super::*;
             peaks[0] > 1e-4,
             "the room should still be sounding after the input stops: {peaks:?}"
         );
-        assert!(
-            peaks[11] < peaks[0],
-            "the tail should decay: {peaks:?}"
-        );
+        assert!(peaks[11] < peaks[0], "the tail should decay: {peaks:?}");
     }
 
     #[test]

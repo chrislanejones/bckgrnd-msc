@@ -197,7 +197,10 @@ fn output_gain_scales_cleanly_at_every_rate() {
                 muted_peak = muted_peak.max(v.abs());
             }
         }
-        assert_eq!(muted_peak, 0.0, "zero output gain was not silent at {rate} Hz");
+        assert_eq!(
+            muted_peak, 0.0,
+            "zero output gain was not silent at {rate} Hz"
+        );
 
         let mut e = Engine::new(rate);
         e.load_track(loaded_track());
@@ -212,6 +215,9 @@ fn output_gain_scales_cleanly_at_every_rate() {
                 peak = peak.max(v.abs());
             }
         }
-        assert!(peak > 0.02, "unity output gain silenced the signal at {rate} Hz");
+        assert!(
+            peak > 0.02,
+            "unity output gain silenced the signal at {rate} Hz"
+        );
     }
 }

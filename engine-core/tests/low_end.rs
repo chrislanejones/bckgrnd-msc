@@ -104,7 +104,10 @@ fn the_bass_stem_is_low_band_dominant() {
     let above = energy(track, ABOVE, Some(Stem::Bass));
     let share = low / (low + above).max(1e-12);
     for f in LOW.iter().chain(ABOVE.iter()) {
-        println!("  {f:>6.1} Hz  {:e}", magnitude(track, *f, Some(Stem::Bass)));
+        println!(
+            "  {f:>6.1} Hz  {:e}",
+            magnitude(track, *f, Some(Stem::Bass))
+        );
     }
 
     // Not 100%, and not expected to be, for two independent reasons:
@@ -188,7 +191,10 @@ fn every_track_has_a_bass_in_the_bass_register() {
         );
 
         // Audible on its own, somewhere in the octave a bass occupies.
-        let audible = LOW.iter().map(|f| magnitude(track, *f, Some(Stem::Bass))).fold(0.0f32, f32::max);
+        let audible = LOW
+            .iter()
+            .map(|f| magnitude(track, *f, Some(Stem::Bass)))
+            .fold(0.0f32, f32::max);
         assert!(
             audible > 1e-5,
             "{id}: the bass stem is inaudible across the whole 40-120 Hz octave"
