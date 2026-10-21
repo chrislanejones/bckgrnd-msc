@@ -58,6 +58,12 @@ netlify deploy --dir dist --no-build --prod
 static host should serve into `dist/`. Saved presets need Laravel, so they aren't
 available on the live site. Nothing in the UI uses them yet.
 
+The Netlify response headers block framing the app (clickjacking), embedded
+plugin objects and cross-origin base URLs. The policy leaves JavaScript,
+WebAssembly and AudioWorklet loading unchanged. These headers apply on the next
+Netlify deployment; the local Laravel and static development servers do not
+read `netlify.toml`.
+
 ## The library
 
 Three sections, each split into styles. Every track badge shows its bpm.
