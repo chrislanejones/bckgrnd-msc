@@ -105,3 +105,14 @@ not. Things to settle before or while building it:
 - **Layout.** The phone layout works in a narrow browser; recheck it at real phone sizes
   with the system's safe areas (notch, home bar).
 
+
+## Found in the package update (10-21-2026)
+
+- **`php artisan test` can't run.** There is no `phpunit.xml.dist`, and `tests/Unit` and
+  `tests/Feature` are empty. This was already true before the update, so the PHP side has
+  no gate. The song form (`app/Support/Music`) is the part worth covering first.
+- **`nativephp/electron` and `nativephp/laravel` are abandoned.** Composer says to move to
+  `nativephp/desktop`. This matters for the mobile app plan above.
+- **Major versions held back:** TypeScript 7, Vite 8 (plus `@vitejs/plugin-react` 6),
+  esbuild 0.28, lucide-react 1.x, concurrently 10, Laravel 13, tinker 3, PHPUnit 13.
+  Each one is its own session.

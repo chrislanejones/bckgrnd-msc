@@ -2,7 +2,7 @@
   "name": "bckgrnd-msc",
   "private": true,
   "type": "module",
-  "description": "bckgrnd-msc \u2014 stem machine UI. Vite + React, rendering into the NativePHP webview.",
+  "description": "bckgrnd-msc — stem machine UI. Vite + React, rendering into the NativePHP webview.",
   "packageManager": "pnpm@10.26.0",
   "engines": {
     "node": ">=20"
@@ -25,20 +25,20 @@
   },
   "dependencies": {
     "lucide-react": "^0.510.0",
-    "react": "^19.2.0",
-    "react-dom": "^19.2.0"
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1"
   },
   "devDependencies": {
-    "@tailwindcss/vite": "^4.3.0",
-    "@types/react": "^19.2.0",
-    "@types/react-dom": "^19.2.0",
+    "@tailwindcss/vite": "^4.3.3",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^5.2.0",
-    "esbuild": "^0.25.0",
-    "playwright": "^1.62.0",
-    "tailwindcss": "^4.3.0",
-    "typescript": "^5.7.0",
-    "vite": "^7.0.0",
-    "concurrently": "^9.1.0"
+    "concurrently": "^9.2.5",
+    "esbuild": "^0.25.12",
+    "playwright": "^1.64.1",
+    "tailwindcss": "^4.3.3",
+    "typescript": "^5.9.3",
+    "vite": "^7.3.7"
   },
   "pnpm": {
     "onlyBuiltDependencies": [
