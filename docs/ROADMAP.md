@@ -48,6 +48,8 @@ works. iOS/Android packaging and mobile audio behavior are their own work (see
 layout; keyboard focus is clear; narrow screens stay usable; the design rules are
 written down.
 
+**Status:** done 11-03-2026.
+
 ## Night 2: knobs, mixer, effects
 
 - A `Knob` shell: drag vertically, fine adjustment with Shift, arrow keys, double-click
@@ -62,9 +64,22 @@ written down.
   `contracts/parameters.json` first.
 - A stretch goal, only if the master rack is solid: per-stem sends (delay on the lead
   without the kick).
-- A compact and an expanded mixer.
+- A compact and an expanded mixer. *Moved to Night 3*, where performance mode
+  decides what the compact view needs.
+
+**Status:** done 11-03-2026. One `Knob` (stable lighting, 270° sweep, vertical and
+circular drag, Shift fine, keyboard, typed values, double-click and Reset, every
+state), built on a native range for screen readers. Smoothing in the engine for every
+user-moved gain, tested at waveform peaks (ADR-013). New DSP controls, each wired and
+tested before it was shown: filter resonance, echo feedback and return, room mix and
+decay, stereo width, per-stem echo sends. Faders kept for stem volume, now larger,
+with double-click/Delete to the track's level. Messages are coalesced per frame,
+controls are memoized, and a gesture is one edit. Not done: testing with touch
+screen readers on a device (checklist in DESIGN_PHILOSOPHY.md).
 
 ## Night 3: performance mode, scenes, transitions
+
+- A compact and an expanded mixer (moved from Night 2).
 
 - Quantized performance controls: trigger a break, a build or a drop on the next bar;
   a fill at the end of a phrase; momentary filter sweep, echo throw and stutter while

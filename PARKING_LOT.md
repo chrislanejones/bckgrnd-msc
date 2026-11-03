@@ -5,7 +5,7 @@ each one is likely to be heard.
 
 | # | Where | What's wrong | Audible effect |
 |---|---|---|---|
-| 1 | `mixer.rs`, `lib.rs` | No gain smoothing on mute, solo, faders, master or EQ. The reference uses `setTargetAtTime` (12–20 ms). | A click on every stem toggle, which is the main thing the app does. |
+| ~~1~~ | `mixer.rs`, `lib.rs` | ~~No gain smoothing on mute, solo, faders, master or EQ.~~ **Fixed 11-03-2026 (Night 2):** every user-moved gain glides in the engine (12 ms channels, 15–30 ms master, filter and EQ), tested in `engine-core/tests/smoothing.rs`. | — |
 | 2 | `dsp.rs` `Adsr` | Release starts `attack` seconds late. `hold_end` is measured from note-on, but `elapsed` is re-based when the attack ends. | Pads sustain up to 0.7 s too long. `release_starts_at()` disagrees, so the filter sweep closes early. |
 | 3 | `drums.rs:141` | Kick click decays with `*= 0.86` per sample, not over 15 ms. | About 13x too short, and it changes with the sample rate. The kick loses its beater. |
 | 4 | `drums.rs:200,206` | The clap tail's 18 ms offset is counted twice, as a delay and as an attack. | The clap peaks at 36 ms instead of 18, and smears behind the backbeat. |
@@ -142,3 +142,20 @@ not. Things to settle before or while building it:
   optimized). Release builds must come from a machine where `wasm-opt` runs.
 - **NativePHP can't open a window:** `config/nativephp.php` names
   `App\Providers\NativeAppServiceProvider`, which doesn't exist. Night 6, first item.
+
+## Found on Night 2 (11-03-2026)
+
+- ~~**The filter's Q jumped from 0.85 to 0.45 as the cutoff passed 97%.**~~ — fixed: it
+  now blends over the last tenth of the travel, so a sweep through the top is smooth.
+- ~~**The filter recomputed its coefficients every sample**~~ (a `powf`, a `sin` and a
+  `cos` per sample, for a glide that moves far slower than that) — fixed: the filter
+  and EQ step at control rate, every 16 samples, and only while they are moving.
+- ~~**A cut sent just before Play let the first hit through.**~~ — found while adding
+  the smoothing, fixed before it shipped: a stem's gain jumps to its target while its
+  bus is silent, so a stem cut before anything sounds is silent from the first sample.
+- **Touch screen readers have not been tried on a device.** The knobs are built on a
+  native range input so VoiceOver and TalkBack can adjust them as platform sliders,
+  and the touch-drag path is tested with real touch events in Chromium, but nobody
+  has run the checklist in [docs/DESIGN_PHILOSOPHY.md](docs/DESIGN_PHILOSOPHY.md) on
+  an iPhone or an Android phone yet. Do it with the mobile compatibility check.
+

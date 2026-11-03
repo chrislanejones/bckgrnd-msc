@@ -141,6 +141,45 @@ controls are built from these and don't restyle them locally.
 | `PerformancePad` | A raised, pressable pad, momentary or latching, with an optional "held" state. |
 | `StemStrip` | One stem: spine, status, meter, bar pattern, fader, Solo and Cut. |
 | `StatusIndicator` | A dot plus words for one of the states above. |
+| `Knob` | Every continuous control that turns. One implementation, in [`frontend/ui/Knob.tsx`](../frontend/ui/Knob.tsx). |
+| `Fader` | Stem volumes, which stay faders: a row of eight faders reads as a mixer at a glance. |
+
+## Knobs
+
+- **It turns.** A 270° sweep. The indicator's angle comes from the real value
+  through the parameter's mapping ([`frontend/lib/mappings.ts`](../frontend/lib/mappings.ts)),
+  so the knob shows what the engine has.
+- **The light doesn't move.** Only the indicator rotates. The face, its highlight,
+  the ticks and the arc track stay fixed.
+- **Each parameter has its own curve.** Frequencies are exponential and read in
+  Hz/kHz. Gains are laid out in dB. Isolators put unity at twelve o'clock. Times are
+  logarithmic. Discrete choices (echo divisions, loop lengths) are stepped buttons,
+  never a knob.
+- **Units that mean something:** 2.4 kHz, −6.0 dB, 35%, 0.32 s, 1/8., Open, Kill, Mono.
+- **States:** default, focused (a ring round the dial), dragging (the arc and pointer
+  brighten), disabled (dimmed, with a note saying why), modified (the label lights and
+  Reset appears), and changed from outside (the readout flashes briefly).
+- **No control without an effect.** If a control can't change the sound in the
+  current state, it's disabled and says why ("Echo is off"), rather than moving a
+  number nobody hears.
+- **One edit per gesture.** A drag, a held key, a reset or a typed value is one entry
+  in the edit log, never one per intermediate value.
+
+## Testing controls with touch screen readers
+
+Custom sliders often work with a desktop keyboard and fail with VoiceOver on iOS or
+TalkBack on Android, whose swipe-to-adjust gestures send no key events. The knob's
+accessible control is therefore a native `<input type="range">`, which both platforms
+adjust as a slider. That is a design choice, not proof. The checklist below has
+**not yet been run on a device**; it belongs to the mobile compatibility check.
+
+- [ ] VoiceOver (iOS Safari): swipe to a knob. It reads the label and the value in
+      words ("Cutoff, Open, 18 kilohertz, adjustable").
+- [ ] Swipe up and down adjusts it, and the sound follows.
+- [ ] Double-tap and hold, then drag, doesn't leave it stuck after letting go.
+- [ ] TalkBack (Android Chrome): the same three.
+- [ ] The value button reads as "Type a value" and opens the field.
+- [ ] A disabled knob reads as dimmed and its note is read.
 
 ## Architecture boundaries
 

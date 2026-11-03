@@ -76,7 +76,7 @@ read `netlify.toml`.
 | Transport (top, always visible) | Play/stop, the track, the song part and bar, the tempo, the master meter with a clip light, and whether the mix differs from the track as written. Nothing is saved yet, so it says so. |
 | Library (left) | Tracks by section and style, with a star to keep favorites (stored in this browser only). On narrower screens it opens from the button in the transport. |
 | Performance area (middle) | The two decks, the stems, the jog wheel and pads, loop, and mixing to the next track. |
-| Inspector (right) | **Master**: tempo, swing, the isolators, filter, echo time, stereo and master level. Select a stem's name to see that stem instead. |
+| Inspector (right) | **Master**: the effects rack, all knobs except the echo's note divisions. Select a stem's name to see that stem instead: its fader, its echo send, Solo and Cut. |
 | Pattern drawer (bottom) | Opened from **Pattern** or the inspector. One stem's pattern across all 16 bars, with the playhead. Read-only for now. Escape closes it. |
 
 On a phone the same panels show one view at a time: **Perform**, **Mix** and
@@ -176,21 +176,40 @@ The label turns at 33⅓ rpm while the deck plays, except under reduced motion.
 
 ## Controls
 
+The continuous controls in the inspector are knobs. Each one:
+
+| Gesture | What it does |
+|---|---|
+| Drag up / down | Turns it. A full sweep is 180 px. Hold **Shift** for ten times finer. |
+| Drag round | Turns it with the hand instead, when **Knobs turn by dragging** is set to **Round** (at the bottom of the inspector, remembered in this browser). |
+| Double-click / double-tap | Back to its default. So does the **Reset** badge, which appears once it has moved. |
+| Click the value | Type one: `1.2k`, `-6 dB`, `35%`, `kill`, `open`. Enter sets it, Escape leaves it. |
+| Keyboard | Arrows step 1% (Shift 0.1%), Page Up/Down 10%, Home/End the ends, Delete resets, Enter types a value. |
+
 | Control | What it does |
 |---|---|
 | Loop | 1, 2, 4, 8 or 16 bars, snapped to a bar boundary. Click the lit one to turn it off. |
-| Echo time | 1/16, 1/8T, 1/8, 1/8. (default), 1/4, 1/4. — the stem echo's delay. Click the lit one to turn the echo off; what's already in it rings out. |
-| Low / Mid / High | Isolators: low shelf 180 Hz, mid bell 1 kHz, high shelf 3.2 kHz. |
-| Filter | One tape-style lowpass sweep, 240 Hz to 18 kHz, exponential under the finger. |
-| Stereo | A balance fader. Left end is mono-left, the middle is full stereo, the right end is mono-right. |
-| Tempo | Retimes the grid, the duck recovery and the delay together. |
+| Tempo | Retimes the grid, the duck recovery and the delay together. Whole BPM, 60–180. |
 | Swing | Pushes every other sixteenth late. |
-| Master | Output level. |
+| Cutoff | One tape-style lowpass sweep, 240 Hz to 18 kHz, exponential under the hand. Reads **Open** at the top. |
+| Resonance | The filter's Q as it closes, 0.5 to 6. It fades out over the last tenth of the cutoff's travel, so an open filter stays transparent. |
+| Low / Mid / High | Isolators: low shelf 180 Hz, mid bell 1 kHz, high shelf 3.2 kHz. Unity at twelve o'clock, **Kill** at the bottom, +2.9 dB at the top. |
+| Echo time | 1/16, 1/8T, 1/8, 1/8. (default), 1/4, 1/4. — the stem echo's delay. Click the lit one to turn the echo off; what's already in it rings out. |
+| Feedback | How long the echo keeps repeating, 0–90%. |
+| Return | How loud the echo comes back. The echo throw holds feedback and return open while it is on and gives them back after. With the echo off, both are disabled: they have nothing to act on. |
+| Room mix / Decay | The room under the mix: 0–50%, and 0.2 to 2.5 s. |
+| Width | 0% is mono, 100% as mixed, up to 150%. |
+| Balance | Left end is mono-left, the middle is full stereo, the right end is mono-right. |
+| Master | Output level, in dB. |
+| Stem fader | The stem's level. Double-click it, or press Delete on it, to go back to the track's own level. |
+| Echo send (per stem) | How much of the stem feeds the echo. Each stem starts at its own amount and goes back there with a new track. |
 | Master meter | Left and right peak of what leaves the engine, in the transport. Turns amber near the limiter. The **Clip** light holds for two seconds after any sample goes past full scale, which can only happen while a crossfade adds two decks together. |
-| Reset | Every fader in this table has one. Tempo and swing go back to the track's own values; the rest to their defaults. Disabled when it's already there. |
 | Space | Play / stop. |
 
-The stem faders don't have a Reset badge.
+Nothing moves the sound in a step. Every fader, cut, solo, send and knob glides
+over 12–30 ms in the engine, so cutting a stem mid-note, slamming a fader or
+hammering Cut doesn't click (`engine-core/tests/smoothing.rs`). A whole drag, a held
+arrow key or a typed value is one edit, which is what undo will step through.
 
 ## Mixing
 
