@@ -667,8 +667,77 @@ impl Delay {
 }
 
 /// Coefficient for a `setTargetAtTime`-style exponential approach.
-fn glide_coef(time_constant: f32, sr: f32) -> f32 {
+pub(crate) fn glide_coef(time_constant: f32, sr: f32) -> f32 {
     1.0 - (-1.0 / (time_constant.max(1e-4) * sr)).exp()
+}
+
+/// One step of a `setTargetAtTime`-style approach, landing exactly on the target once
+/// it is within a millionth of it, so a settled value stops moving and compares equal.
+#[inline]
+pub(crate) fn approach(value: f32, target: f32, coef: f32) -> f32 {
+    let next = value + (target - value) * coef;
+    if (target - next).abs() < 1e-6 {
+        target
+    } else {
+        next
+    }
+}
+
+/// A parameter that glides toward its target instead of jumping to it.
+///
+/// Every gain the user can move is one of these. A gain that jumps from one sample to
+/// the next puts a step into the waveform, and a step is heard as a click; gliding over
+/// a time constant of 10-20 ms (the `setTargetAtTime` the browser original used) is
+/// below what reads as a fade but long enough that no sample-to-sample jump is left.
+///
+/// `rate` is the rate `next()` is called at: the sample rate for per-sample values, or
+/// a fraction of it for values stepped at control rate (filter coefficients).
+#[derive(Clone, Copy, Debug)]
+pub struct Smoothed {
+    value: f32,
+    target: f32,
+    coef: f32,
+}
+
+impl Smoothed {
+    /// Start settled at `value`.
+    pub fn new(value: f32, time_constant: f32, rate: f32) -> Self {
+        Self {
+            value,
+            target: value,
+            coef: glide_coef(time_constant, rate),
+        }
+    }
+
+    pub fn set(&mut self, target: f32) {
+        if target.is_finite() {
+            self.target = target;
+        }
+    }
+
+    /// Advance one step and return the new value.
+    #[inline]
+    pub fn next(&mut self) -> f32 {
+        if self.value != self.target {
+            self.value = approach(self.value, self.target, self.coef);
+        }
+        self.value
+    }
+
+    #[cfg(test)]
+    pub fn value(&self) -> f32 {
+        self.value
+    }
+
+    #[inline]
+    pub fn target(&self) -> f32 {
+        self.target
+    }
+
+    #[inline]
+    pub fn settled(&self) -> bool {
+        self.value == self.target
+    }
 }
 
 /// Normalised `tanh` saturator, matching the waveshaper curve used for glue.
@@ -1222,6 +1291,9 @@ struct Comb {
     size: usize,
     idx: usize,
     feedback: f32,
+    /// The comb's nominal delay in seconds, which sets how much feedback a given
+    /// decay time needs.
+    seconds: f32,
 }
 
 impl Comb {
@@ -1232,7 +1304,16 @@ impl Comb {
             size,
             idx: 0,
             feedback,
+            seconds: ms / 1000.0,
         }
+    }
+
+    /// Feedback for a decay of `rt60` seconds: a comb multiplies by `g` every
+    /// `seconds`, so it falls 60 dB (1000x) in `3 * seconds / ln(1/g)`.
+    fn feedback_for(seconds: f32, rt60: f32) -> f32 {
+        (-3.0 * seconds / rt60.max(0.01))
+            .exp()
+            .clamp(0.0, ROOM_MAX_FEEDBACK)
     }
 
     /// Write the input plus a recirculated copy of what leaves the line, and return
@@ -1307,8 +1388,15 @@ pub struct Reverb {
 }
 
 /// RT60 of the original impulse response: `(1 - i/len)^2.8` reaches -60 dB about 91%
-/// of the way through 0.35 s, so roughly 0.32 s.
-const ROOM_RT60: f32 = 0.32;
+/// of the way through 0.35 s, so roughly 0.32 s. It is the room's default decay.
+pub const ROOM_RT60: f32 = 0.32;
+/// The comb feedback ceiling. With the longest comb (43.7 ms) this allows a decay of
+/// about 2.5 s, which is where a four-comb room stops sounding like a room and starts
+/// ringing at its comb pitches.
+const ROOM_MAX_FEEDBACK: f32 = 0.95;
+/// The decay range the room offers, in seconds.
+pub const ROOM_RT60_MIN: f32 = 0.2;
+pub const ROOM_RT60_MAX: f32 = 2.5;
 
 impl Reverb {
     /// Comb delays in milliseconds. Prime-ish and mutually non-harmonic, so the
@@ -1332,8 +1420,7 @@ impl Reverb {
             // (Sample rate does not appear: `seconds` is already the delay in seconds,
             // and dividing by `sr` here would drive the gain to ~1.0 and the room would
             // never die.)
-            let seconds = ms / 1000.0;
-            let feedback = (-3.0 * seconds / ROOM_RT60).exp().clamp(0.0, 0.95);
+            let feedback = Comb::feedback_for(ms / 1000.0, ROOM_RT60);
             combs_l.push(Comb::new(sample_rate, ms, feedback, 0));
             combs_r.push(Comb::new(sample_rate, ms, feedback, offset));
         }
@@ -1372,6 +1459,21 @@ impl Reverb {
         let l = Self::voice(&mut self.combs_l, &mut self.allpass_l, left);
         let r = Self::voice(&mut self.combs_r, &mut self.allpass_r, right);
         (l, r)
+    }
+
+    /// Retune every comb for a decay of `rt60` seconds, clamped to the room's range.
+    ///
+    /// Only the feedback changes, never the delay lengths, so nothing in the lines
+    /// jumps: the tail already ringing simply starts dying at the new rate.
+    pub fn set_rt60(&mut self, rt60: f32) {
+        let rt = if rt60.is_finite() {
+            rt60.clamp(ROOM_RT60_MIN, ROOM_RT60_MAX)
+        } else {
+            ROOM_RT60
+        };
+        for c in self.combs_l.iter_mut().chain(self.combs_r.iter_mut()) {
+            c.feedback = Comb::feedback_for(c.seconds, rt);
+        }
     }
 
     pub fn reset(&mut self) {

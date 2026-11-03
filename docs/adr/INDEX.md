@@ -26,3 +26,4 @@ and is marked `(backfilled)`.
 | [010](010-fixed-asset-names-with-query-cache-busting.md) | Assets keep fixed names and are cache-busted with `?v=` (file date, build stamp, `__BUILD_ID__`) | accepted | 2026-10-05 (backfilled) |
 | [011](011-no-vinyl-crackle-or-tape-hiss-under-lofi.md) | No synthesized vinyl crackle or tape hiss under lo-fi: built, read as rain, removed | accepted | 2026-10-05 (backfilled) |
 | [012](012-one-parameter-registry-and-a-versioned-project-format.md) | One parameter registry and a versioned project format, shared by UI, PHP and MCP; telemetry is never saved | draft | 2026-11-03 |
+| [013](013-parameter-smoothing-lives-in-the-engine.md) | Parameter smoothing lives in the engine, per parameter, with control-rate filter/EQ and a snap on silence | draft | 2026-11-03 |

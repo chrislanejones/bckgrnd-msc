@@ -4,7 +4,7 @@
 //! instantly at the fader without touching the voices, and so send levels stay
 //! independent of fader position.
 
-use crate::dsp::{soft_clip, Compressor, Delay, Limiter, Reverb, StereoBiquad};
+use crate::dsp::{approach, soft_clip, Compressor, Delay, Limiter, Reverb, Smoothed, StereoBiquad};
 use crate::track::{Stem, TrackKind};
 
 /// Stereo accumulators for one stem.
@@ -23,9 +23,18 @@ pub struct Channel {
     pub duck: f32,
     pub muted: bool,
     pub solo: bool,
+    /// Echo send target, 0..1.
     pub send: f32,
     /// Post-fader metering level, smoothed for display.
     pub level: f32,
+    /// The fader gain actually applied, gliding toward `vol` (or to zero when the stem
+    /// is cut or another stem is soloed). Mute, solo and the fader used to switch the
+    /// gain in one sample, which clicked on every toggle.
+    pub gain_now: f32,
+    /// The send actually applied, gliding toward `send` for the same reason.
+    pub send_now: f32,
+    /// Whether the bus was silent on the previous sample.
+    was_silent: bool,
 }
 
 impl Default for Channel {
@@ -38,6 +47,9 @@ impl Default for Channel {
             solo: false,
             send: 0.0,
             level: 0.0,
+            gain_now: 0.0,
+            send_now: 0.0,
+            was_silent: true,
         }
     }
 }
@@ -55,6 +67,41 @@ impl Channel {
         } else {
             0.0
         }
+    }
+
+    /// Advance the fader and send glides one sample and return the gain to apply,
+    /// including the duck. `coef` is the per-sample glide coefficient.
+    ///
+    /// The duck is deliberately not smoothed: it is the pump, a musical envelope with
+    /// its own shape, not a control change.
+    ///
+    /// A gain change can only click if there is signal for it to step. While the
+    /// stem's bus is silent, and on the first sample of sound after silence, the gain
+    /// and send jump straight to their targets: a note that starts after a change
+    /// starts at the new gain. So a stem cut before anything plays is cut from its very
+    /// first sample, rather than letting the first hit through on the tail of a glide.
+    #[inline]
+    pub fn step_gain(&mut self, any_solo: bool, coef: f32) -> f32 {
+        let target = if self.audible(any_solo) {
+            self.vol
+        } else {
+            0.0
+        };
+        let silent = self.bus.left == 0.0 && self.bus.right == 0.0;
+        let snap = silent || self.was_silent;
+        self.was_silent = silent;
+        if snap {
+            self.gain_now = target;
+            self.send_now = self.send;
+        } else {
+            if self.gain_now != target {
+                self.gain_now = approach(self.gain_now, target, coef);
+            }
+            if self.send_now != self.send {
+                self.send_now = approach(self.send_now, self.send, coef);
+            }
+        }
+        self.gain_now * self.duck
     }
 
     /// Post-fader peak for metering, decayed between blocks so meters fall smoothly.
@@ -100,24 +147,33 @@ pub struct Master {
     pub high: StereoBiquad,
     pub sweep: StereoBiquad,
     pub delay: Delay,
-    pub gain: f32,
+    /// Output level, gliding.
+    gain: Smoothed,
     /// Where the output sits between the two channels, 0 = mono-left, 0.5 = stereo,
     /// 1 = mono-right.
     ///
-    /// Continuous rather than a three-way switch so the UI can offer a fader. The
+    /// Continuous rather than a three-way switch so the UI can offer a control. The
     /// three old positions are exactly its 0, 0.5 and 1, so `set_stereo_mode` still
     /// means what it did.
-    pub balance: f32,
+    balance: Smoothed,
+    /// Stereo width: 0 mono, 1 as mixed, up to 1.5 wider, by scaling the side signal.
+    width: Smoothed,
     pub scope: [u8; 256],
     sample_rate: f32,
     scope_t: f32,
-    sweep_open: f32,
+    /// The tape filter's position, 0..1, stepped at control rate.
+    sweep_open: Smoothed,
+    /// The tape filter's resonance (Q) while it is closing, stepped at control rate.
+    sweep_q: Smoothed,
+    /// The isolators' gains in dB (low, mid, high), stepped at control rate.
+    eq_db: [Smoothed; 3],
+    /// Samples until the filter and EQ coefficients are next recomputed.
+    control: u32,
     /// Echo time in beats. 0.75 (a dotted eighth) unless the UI picks another.
     delay_beats: f32,
     /// Whether the per-stem sends reach the echo. Off by choosing echo time 0; the
     /// echo throw is a separate feed and still works.
     sends_on: bool,
-    sweep_target: f32,
     filter_gain: f32,
     /// Rumble filter on the sum, before the dynamics stage.
     hp: StereoBiquad,
@@ -128,16 +184,20 @@ pub struct Master {
     /// filter and `echo_hp` were the two that the original conversion missed.
     verb_pre: StereoBiquad,
     verb: Reverb,
-    verb_wet: f32,
+    verb_wet: Smoothed,
     /// Highpass on the echo throw, keeping the delay out of the sub band. Stereo for
     /// the same reason as `verb_pre`.
     echo_hp: StereoBiquad,
-    dry: f32,
-    wet: f32,
+    dry: Smoothed,
+    wet: Smoothed,
     /// Extra send into the delay when the echo throw is engaged. Zero when off, so
     /// the per-stem sends pass straight through untouched.
-    throw: f32,
+    throw: Smoothed,
     echo_on: bool,
+    /// The echo's feedback and return level as the user set them. The echo throw
+    /// overrides both while it is held and puts these back when it lets go.
+    echo_feedback: f32,
+    echo_return: f32,
     /// Previous input to the saturator, for the 2x oversampled curve, one per
     /// channel. A single shared value (as this was) built the right channel's
     /// interpolated midpoint from the current *left* sample, leaking left into right.
@@ -150,7 +210,35 @@ pub struct Master {
 }
 
 /// The reverb's wet level, and the highpasses either side of the send.
-const VERB_WET: f32 = 0.07;
+pub const VERB_WET: f32 = 0.07;
+/// The most room the mix control allows. Past this the room swamps the dry signal.
+pub const VERB_WET_MAX: f32 = 0.5;
+/// The echo's default feedback and return level (the values it always had).
+pub const ECHO_FEEDBACK: f32 = 0.3;
+pub const ECHO_RETURN: f32 = 0.24;
+/// The highest feedback the user can set. The delay line itself caps at 0.95.
+pub const ECHO_FEEDBACK_MAX: f32 = 0.9;
+/// What the echo throw opens the feedback to, unless the user already set it higher.
+const THROW_FEEDBACK: f32 = 0.78;
+/// The tape filter's default resonance while closing, and its range.
+pub const FILTER_Q: f32 = 0.85;
+pub const FILTER_Q_MIN: f32 = 0.5;
+pub const FILTER_Q_MAX: f32 = 6.0;
+/// The Q the filter settles to when fully open, so an open filter is transparent at
+/// any resonance setting.
+const FILTER_OPEN_Q: f32 = 0.45;
+/// The widest the stereo width goes.
+pub const WIDTH_MAX: f32 = 1.5;
+/// How often, in samples, the filter and EQ coefficients may be recomputed while they
+/// move. Recomputing them every sample cost a `powf`, a `sin` and a `cos` per sample
+/// for no audible gain; at this rate and these glide times each step is far below a
+/// tenth of a dB.
+const CONTROL_EVERY: u32 = 16;
+/// Glide times, in seconds.
+const GAIN_GLIDE: f32 = 0.015;
+const BALANCE_GLIDE: f32 = 0.02;
+const FILTER_GLIDE: f32 = 0.03;
+const EQ_GLIDE: f32 = 0.02;
 const VERB_PRE_HZ: f32 = 380.0;
 const ECHO_HP_HZ: f32 = 240.0;
 const RUMBLE_HP_HZ: f32 = 28.0;
@@ -177,7 +265,7 @@ impl Master {
         let mut sweep = StereoBiquad::new();
         sweep.lowpass(sample_rate, 18_000.0, 0.45);
         let mut delay = Delay::new(sample_rate, 1.5);
-        delay.set_feedback(0.3);
+        delay.set_feedback(ECHO_FEEDBACK);
 
         let mut hp = StereoBiquad::new();
         hp.highpass(sample_rate, RUMBLE_HP_HZ, 0.7);
@@ -186,21 +274,25 @@ impl Master {
         let mut echo_hp = StereoBiquad::new();
         echo_hp.highpass(sample_rate, ECHO_HP_HZ, 0.7);
 
+        let control_rate = sample_rate / CONTROL_EVERY as f32;
         Self {
             low,
             mid,
             high,
             sweep,
             delay,
-            gain: 0.78,
-            balance: 0.5,
+            gain: Smoothed::new(0.78, GAIN_GLIDE, sample_rate),
+            balance: Smoothed::new(0.5, BALANCE_GLIDE, sample_rate),
+            width: Smoothed::new(1.0, BALANCE_GLIDE, sample_rate),
             scope: [128; 256],
             sample_rate,
             scope_t: 0.0,
-            sweep_open: 1.0,
+            sweep_open: Smoothed::new(1.0, FILTER_GLIDE, control_rate),
+            sweep_q: Smoothed::new(FILTER_Q, FILTER_GLIDE, control_rate),
+            eq_db: [Smoothed::new(0.0, EQ_GLIDE, control_rate); 3],
+            control: 0,
             delay_beats: DELAY_BEATS_DEFAULT,
             sends_on: true,
-            sweep_target: 1.0,
             filter_gain: 1.0,
             hp,
             // The dynamics stage's settings are the load-bearing part of this chain, so
@@ -208,12 +300,14 @@ impl Master {
             comp: Compressor::new(sample_rate, -12.0, 8.0, 2.6, 0.008, 0.2),
             verb_pre,
             verb: Reverb::new(sample_rate),
-            verb_wet: VERB_WET,
+            verb_wet: Smoothed::new(VERB_WET, GAIN_GLIDE, sample_rate),
             echo_hp,
-            dry: 1.0,
-            wet: 0.24,
-            throw: 0.0,
+            dry: Smoothed::new(1.0, GAIN_GLIDE, sample_rate),
+            wet: Smoothed::new(ECHO_RETURN, GAIN_GLIDE, sample_rate),
+            throw: Smoothed::new(0.0, GAIN_GLIDE, sample_rate),
             echo_on: false,
+            echo_feedback: ECHO_FEEDBACK,
+            echo_return: ECHO_RETURN,
             shaper_prev: [0.0; 2],
             send_acc: 0.0,
             limiter: Limiter::new(sample_rate, LIMIT_KNEE_DB, LIMIT_CEILING_DB, LIMIT_RELEASE),
@@ -267,12 +361,14 @@ impl Master {
         1.0
     }
 
+    /// The dry level the chain is heading for.
     pub fn mix_dry(&self) -> f32 {
-        self.dry
+        self.dry.target()
     }
 
+    /// The echo return level the chain is heading for.
     pub fn mix_wet(&self) -> f32 {
-        self.wet
+        self.wet.target()
     }
 
     /// Convert a 0..1 filter position to a cutoff, exponentially from 240 Hz to
@@ -283,13 +379,111 @@ impl Master {
     }
 
     pub fn set_filter(&mut self, open: f32) {
-        self.sweep_target = open.clamp(0.0, 1.0);
+        if open.is_finite() {
+            self.sweep_open.set(open.clamp(0.0, 1.0));
+        }
+    }
+
+    /// The filter's resonance while it closes, as a Q from 0.5 to 6. Opening the
+    /// filter all the way still fades it to a transparent 0.45, whatever this is.
+    pub fn set_filter_q(&mut self, q: f32) {
+        if q.is_finite() {
+            self.sweep_q.set(q.clamp(FILTER_Q_MIN, FILTER_Q_MAX));
+        }
+    }
+
+    /// The Q the tape filter actually uses at `open` with resonance `q`.
+    ///
+    /// It used to switch from 0.85 to 0.45 the moment the filter passed 97% open,
+    /// which put a step into the coefficients on every sweep through the top. It now
+    /// blends across the last tenth of the travel instead.
+    pub fn sweep_q_at(open: f32, q: f32) -> f32 {
+        let t = ((open - 0.9) / 0.1).clamp(0.0, 1.0);
+        let blend = t * t * (3.0 - 2.0 * t);
+        q + (FILTER_OPEN_Q - q) * blend
     }
 
     pub fn set_eq(&mut self, low_db: f32, mid_db: f32, high_db: f32) {
-        self.low.low_shelf(self.sample_rate, 180.0, low_db);
-        self.mid.peaking(self.sample_rate, 1000.0, 0.7, mid_db);
-        self.high.high_shelf(self.sample_rate, 3200.0, high_db);
+        for (band, db) in self.eq_db.iter_mut().zip([low_db, mid_db, high_db]) {
+            band.set(db);
+        }
+    }
+
+    /// Step the filter and EQ glides and recompute whichever coefficients moved.
+    /// Called every `CONTROL_EVERY` samples.
+    fn control_tick(&mut self) {
+        if !self.sweep_open.settled() || !self.sweep_q.settled() {
+            let open = self.sweep_open.next();
+            let q = self.sweep_q.next();
+            self.sweep.lowpass(
+                self.sample_rate,
+                Self::filter_freq(open),
+                Self::sweep_q_at(open, q),
+            );
+        }
+        if !self.eq_db[0].settled() {
+            let db = self.eq_db[0].next();
+            self.low.low_shelf(self.sample_rate, 180.0, db);
+        }
+        if !self.eq_db[1].settled() {
+            let db = self.eq_db[1].next();
+            self.mid.peaking(self.sample_rate, 1000.0, 0.7, db);
+        }
+        if !self.eq_db[2].settled() {
+            let db = self.eq_db[2].next();
+            self.high.high_shelf(self.sample_rate, 3200.0, db);
+        }
+    }
+
+    /// The echo's feedback, 0 to 0.9. The echo throw lifts it to 0.78 while held if
+    /// this is lower, and puts it back after.
+    pub fn set_echo_feedback(&mut self, amount: f32) {
+        if !amount.is_finite() {
+            return;
+        }
+        self.echo_feedback = amount.clamp(0.0, ECHO_FEEDBACK_MAX);
+        self.delay.set_feedback(if self.echo_on {
+            self.echo_feedback.max(THROW_FEEDBACK)
+        } else {
+            self.echo_feedback
+        });
+    }
+
+    /// How loud the echo comes back, 0 to 1. The echo throw overrides it while held.
+    pub fn set_echo_return(&mut self, amount: f32) {
+        if !amount.is_finite() {
+            return;
+        }
+        self.echo_return = amount.clamp(0.0, 1.0);
+        if !self.echo_on {
+            self.wet.set(self.echo_return);
+        }
+    }
+
+    /// How much room is mixed in, 0 to 0.5. The default is 0.07.
+    pub fn set_reverb_mix(&mut self, amount: f32) {
+        if amount.is_finite() {
+            self.verb_wet.set(amount.clamp(0.0, VERB_WET_MAX));
+        }
+    }
+
+    /// The room's decay time in seconds, 0.2 to 2.5. The default is 0.32.
+    pub fn set_reverb_decay(&mut self, seconds: f32) {
+        self.verb.set_rt60(seconds);
+    }
+
+    /// Stereo width: 0 mono, 1 as mixed, 1.5 wider.
+    pub fn set_width(&mut self, width: f32) {
+        if width.is_finite() {
+            self.width.set(width.clamp(0.0, WIDTH_MAX));
+        }
+    }
+
+    /// Output balance: 0 mono-left, 0.5 stereo, 1 mono-right.
+    pub fn set_balance(&mut self, balance: f32) {
+        if balance.is_finite() {
+            self.balance.set(balance.clamp(0.0, 1.0));
+        }
     }
 
     /// Beat-synced delay, `delay_beats` long (a dotted eighth by default).
@@ -330,15 +524,16 @@ impl Master {
     pub fn set_echo(&mut self, on: bool) {
         self.echo_on = on;
         if on {
-            self.throw = 0.9;
-            self.dry = 0.55;
-            self.wet = 0.95;
-            self.delay.set_feedback(0.78);
+            self.throw.set(0.9);
+            self.dry.set(0.55);
+            self.wet.set(0.95);
+            self.delay
+                .set_feedback(self.echo_feedback.max(THROW_FEEDBACK));
         } else {
-            self.throw = 0.0;
-            self.dry = 1.0;
-            self.wet = 0.24;
-            self.delay.set_feedback(0.3);
+            self.throw.set(0.0);
+            self.dry.set(1.0);
+            self.wet.set(self.echo_return);
+            self.delay.set_feedback(self.echo_feedback);
         }
     }
 
@@ -366,11 +561,12 @@ impl Master {
     /// summed stem buses. Per-stem sends must already have been pushed via
     /// [`Master::feed_send`] for this sample; the wet taps are read once here.
     pub fn process(&mut self, left: f32, right: f32) -> (f32, f32) {
-        // Glide the tape filter toward its target rather than jumping.
-        self.sweep_open += (self.sweep_target - self.sweep_open) * 0.0008;
-        let freq = Self::filter_freq(self.sweep_open);
-        let q = if self.sweep_open > 0.97 { 0.45 } else { 0.85 };
-        self.sweep.lowpass(self.sample_rate, freq, q);
+        // The filter and EQ glide at control rate; see `control_tick`.
+        if self.control == 0 {
+            self.control_tick();
+            self.control = CONTROL_EVERY;
+        }
+        self.control -= 1;
 
         // --- The delay line: exactly one write per sample, carrying the per-stem
         // sends accumulated for this sample plus the echo throw off the summed bus.
@@ -382,9 +578,10 @@ impl Master {
         // (the mono line put every repeat on both sides at full level).
         let (wet_l, wet_r) = self.delay.tap_stereo();
         let (wet_l, wet_r) = (wet_l * PING_PONG_GAIN, wet_r * PING_PONG_GAIN);
-        let throw = if self.throw > 0.0 {
+        let throw_gain = self.throw.next();
+        let throw = if throw_gain > 0.0 {
             let (t_l, t_r) = self.echo_hp.process(left, right);
-            0.5 * (t_l + t_r) * self.throw
+            0.5 * (t_l + t_r) * throw_gain
         } else {
             0.0
         };
@@ -396,9 +593,11 @@ impl Master {
         let (verb_l, verb_r) = self.verb.process(send_l, send_r);
 
         // --- Rumble filter, taking the sum and every wet return together.
+        let verb_wet = self.verb_wet.next();
+        let wet = self.wet.next();
         let (mut l, mut r) = self.hp.process(
-            left + verb_l * self.verb_wet + wet_l * self.wet,
-            right + verb_r * self.verb_wet + wet_r * self.wet,
+            left + verb_l * verb_wet + wet_l * wet,
+            right + verb_r * verb_wet + wet_r * wet,
         );
 
         // --- Dynamics, then the saturator, then the dry trim. Both sit *before* the EQ
@@ -406,8 +605,9 @@ impl Master {
         // already been shaped.
         // Stereo-linked: one detector step per sample, one gain for both sides.
         (l, r) = self.comp.process_stereo(l, r);
-        l *= self.dry;
-        r *= self.dry;
+        let dry = self.dry.next();
+        l *= dry;
+        r *= dry;
 
         l = self.saturate(0, l);
         r = self.saturate(1, r);
@@ -418,13 +618,23 @@ impl Master {
         (l, r) = self.high.process(l, r);
         (l, r) = self.sweep.process(l, r);
 
-        l *= self.gain;
-        r *= self.gain;
+        let gain = self.gain.next();
+        l *= gain;
+        r *= gain;
+
+        // Width, by scaling the side signal: 0 folds to mono, 1 leaves the mix alone.
+        let width = self.width.next();
+        if width != 1.0 {
+            let mid = 0.5 * (l + r);
+            let side = 0.5 * (l - r) * width;
+            l = mid + side;
+            r = mid - side;
+        }
 
         // Collapse toward one channel or the other. Below centre the right channel is
         // pulled toward the left, above it the left is pulled toward the right, so the
         // ends are mono and the middle is untouched stereo.
-        let b = self.balance.clamp(0.0, 1.0);
+        let b = self.balance.next();
         let (mut out_l, mut out_r) = if b < 0.5 {
             (l, l + (r - l) * (b * 2.0))
         } else {
@@ -453,7 +663,9 @@ impl Master {
     }
 
     pub fn set_master(&mut self, gain: f32) {
-        self.gain = gain.clamp(0.0, 1.0);
+        if gain.is_finite() {
+            self.gain.set(gain.clamp(0.0, 1.0));
+        }
     }
 }
 
@@ -904,9 +1116,15 @@ mod tests {
             let mut m = Master::new(sr);
             m.set_delay_time(150.0, 1.0);
             m.set_echo(echo);
-            // A short burst, then silence.
-            for _ in 0..(sr as usize) / 8 {
-                let (l, r) = m.process(0.5, 0.0);
+            // Let the throw's gains glide in before anything is sent.
+            for _ in 0..(sr as usize) / 10 {
+                m.process(0.0, 0.0);
+            }
+            // A short tone burst, then silence. A tone rather than a constant: the
+            // throw is high-passed at 240 Hz, so a constant only ever sent its onset.
+            for i in 0..(sr as usize) / 8 {
+                let v = 0.5 * (i as f32 / sr * 300.0 * core::f32::consts::TAU).sin();
+                let (l, r) = m.process(v, 0.0);
                 let _ = l + r;
             }
             let mut energy = 0.0;
@@ -943,7 +1161,7 @@ mod tests {
         // rather than six, and it is gain riding rather than distortion.
         let sr = 48_000.0;
         let mut m = Master::new(sr);
-        let uncompressed = m.gain * soft_clip(0.8, 1.35);
+        let uncompressed = m.gain.value() * soft_clip(0.8, 1.35);
         let mut peak = 0.0f32;
         for i in 0..(sr as usize) {
             let t = i as f32 / sr;
@@ -1054,11 +1272,18 @@ mod tests {
     fn stereo_modes_collapse_channels() {
         let sr = 48_000.0;
         let mut m = Master::new(sr);
-        m.balance = 0.0;
-        let (l, r) = m.process(0.5, -0.5);
+        // The balance glides, so give it a quarter second to arrive.
+        let settle = |m: &mut Master| {
+            for _ in 0..(sr as usize / 4) {
+                m.process(0.5, -0.5);
+            }
+            m.process(0.5, -0.5)
+        };
+        m.set_balance(0.0);
+        let (l, r) = settle(&mut m);
         assert!((l - r).abs() < 1e-6, "left mode not mono {l} {r}");
-        m.balance = 1.0;
-        let (l, r) = m.process(0.5, -0.5);
+        m.set_balance(1.0);
+        let (l, r) = settle(&mut m);
         assert!((l - r).abs() < 1e-6, "right mode not mono");
     }
 
@@ -1094,5 +1319,206 @@ mod tests {
         }
         let off_centre = m.scope.iter().filter(|b| **b != 128).count();
         assert!(off_centre < m.scope.len() / 4, "trace should recentre");
+    }
+
+    // --- The controls exposed on Night 2: each one changes the sound it says. ---
+
+    /// A tone at `freq`, `amp` peak, sample `i`.
+    fn tone(i: usize, sr: f32, freq: f32, amp: f32) -> f32 {
+        amp * (i as f32 / sr * freq * core::f32::consts::TAU).sin()
+    }
+
+    /// Run `m` for `n` samples of silence and return the energy of the output.
+    fn tail_energy(m: &mut Master, n: usize) -> f32 {
+        let mut e = 0.0;
+        for _ in 0..n {
+            let (l, r) = m.process(0.0, 0.0);
+            e += l * l + r * r;
+        }
+        e
+    }
+
+    #[test]
+    fn filter_resonance_lifts_the_cutoff() {
+        // A lowpass biquad's gain at its own cutoff is its Q, so a tone sat on the
+        // cutoff should come out louder with the resonance up.
+        let sr = 48_000.0;
+        let open = 0.45;
+        let freq = Master::filter_freq(open);
+        let peak_at = |q: f32| {
+            let mut m = Master::new(sr);
+            m.set_filter(open);
+            m.set_filter_q(q);
+            let mut peak = 0.0f32;
+            for i in 0..(sr as usize) {
+                let (l, _) = m.process(tone(i, sr, freq, 0.05), tone(i, sr, freq, 0.05));
+                if i > sr as usize / 2 {
+                    peak = peak.max(l.abs());
+                }
+            }
+            peak
+        };
+        let flat = peak_at(FILTER_Q);
+        let resonant = peak_at(FILTER_Q_MAX);
+        assert!(
+            resonant > flat * 3.0,
+            "resonance should lift the cutoff: {flat:.4} -> {resonant:.4}"
+        );
+    }
+
+    #[test]
+    fn the_filter_q_blends_rather_than_jumps_at_the_top() {
+        // Walking the position across the old 0.97 switch point in fine steps, the Q
+        // must never move by more than a small amount between neighbours.
+        let mut last = Master::sweep_q_at(0.85, FILTER_Q);
+        let mut worst = 0.0f32;
+        for i in 0..=1500 {
+            let open = 0.85 + 0.15 * i as f32 / 1500.0;
+            let q = Master::sweep_q_at(open, FILTER_Q);
+            worst = worst.max((q - last).abs());
+            last = q;
+        }
+        assert!(worst < 0.002, "Q stepped by {worst}");
+        assert!(
+            (Master::sweep_q_at(1.0, FILTER_Q_MAX) - 0.45).abs() < 1e-6,
+            "fully open is transparent"
+        );
+        assert!(
+            (Master::sweep_q_at(0.5, 2.0) - 2.0).abs() < 1e-6,
+            "closed uses the set resonance"
+        );
+    }
+
+    #[test]
+    fn echo_feedback_lengthens_the_repeats_and_the_throw_gives_it_back() {
+        let sr = 48_000.0;
+        let line_tail = |fb: f32, throw: bool| {
+            let mut m = Master::new(sr);
+            m.set_delay_time(120.0, 1.0);
+            m.set_echo_feedback(fb);
+            if throw {
+                m.set_echo(true);
+                m.set_echo(false);
+            }
+            for _ in 0..(sr as usize) / 10 {
+                m.process(0.0, 0.0);
+            }
+            for i in 0..(sr as usize) / 20 {
+                let v = tone(i, sr, 400.0, 0.4);
+                m.feed_send(v, v, 1.0);
+                m.process(0.0, 0.0);
+            }
+            // The late tail only, from one second on: the first repeats are the same
+            // at any feedback, and it is how long they keep going that feedback sets.
+            let mut energy = 0.0;
+            for i in 0..(sr as usize) * 3 {
+                m.process(0.0, 0.0);
+                if i >= sr as usize {
+                    let tap = m.delay.tap();
+                    energy += tap * tap;
+                }
+            }
+            energy
+        };
+        let short = line_tail(0.1, false);
+        let long = line_tail(0.85, false);
+        assert!(
+            long > short * 4.0,
+            "more feedback should ring longer: {short:.4} vs {long:.4}"
+        );
+        let after_throw = line_tail(0.1, true);
+        assert!(
+            (after_throw - short).abs() < short * 0.2,
+            "letting go of the throw restores the user's feedback: {short:.4} vs {after_throw:.4}"
+        );
+    }
+
+    #[test]
+    fn echo_return_at_zero_silences_the_repeats() {
+        let sr = 48_000.0;
+        let tail = |ret: f32| {
+            let mut m = Master::new(sr);
+            m.set_delay_time(120.0, 1.0);
+            m.set_reverb_mix(0.0);
+            m.set_echo_return(ret);
+            for _ in 0..(sr as usize) / 10 {
+                m.process(0.0, 0.0);
+            }
+            for i in 0..(sr as usize) / 20 {
+                let v = tone(i, sr, 400.0, 0.4);
+                m.feed_send(v, v, 1.0);
+                m.process(v, v);
+            }
+            // Skip the dry burst's own last milliseconds through the chain.
+            tail_energy(&mut m, sr as usize / 20);
+            tail_energy(&mut m, sr as usize)
+        };
+        let default = tail(ECHO_RETURN);
+        let none = tail(0.0);
+        assert!(
+            default > 1e-3,
+            "the default echo should be heard, {default}"
+        );
+        assert!(
+            none < default * 0.01,
+            "return 0 should silence it: {none} vs {default}"
+        );
+    }
+
+    #[test]
+    fn room_decay_and_mix_change_the_room() {
+        let sr = 48_000.0;
+        // A burst into the room alone (no echo send), then what is left 0.3 s later.
+        let tail = |mix: f32, decay: f32| {
+            let mut m = Master::new(sr);
+            m.set_echo_return(0.0);
+            m.set_reverb_mix(mix);
+            m.set_reverb_decay(decay);
+            for _ in 0..(sr as usize) / 10 {
+                m.process(0.0, 0.0);
+            }
+            for i in 0..(sr as usize) / 20 {
+                let v = tone(i, sr, 700.0, 0.4);
+                m.process(v, v);
+            }
+            tail_energy(&mut m, (sr * 0.3) as usize);
+            tail_energy(&mut m, sr as usize)
+        };
+        let short = tail(VERB_WET, crate::dsp::ROOM_RT60);
+        let long = tail(VERB_WET, 2.5);
+        let dry = tail(0.0, 2.5);
+        assert!(
+            long > short * 50.0,
+            "a longer decay should ring on: {short:.2e} vs {long:.2e}"
+        );
+        assert!(
+            dry < long * 1e-3,
+            "no room should leave no tail: {dry:.2e} vs {long:.2e}"
+        );
+    }
+
+    #[test]
+    fn width_folds_to_mono_and_widens() {
+        let sr = 48_000.0;
+        let spread = |width: f32| {
+            let mut m = Master::new(sr);
+            m.set_width(width);
+            let mut total = 0.0f32;
+            for i in 0..(sr as usize) {
+                let (l, r) = m.process(tone(i, sr, 300.0, 0.2), tone(i, sr, 300.0, 0.05));
+                if i > sr as usize / 4 {
+                    total += (l - r).abs();
+                }
+            }
+            total
+        };
+        let mono = spread(0.0);
+        let normal = spread(1.0);
+        let wide = spread(WIDTH_MAX);
+        assert!(mono < normal * 1e-4, "width 0 is mono: {mono} vs {normal}");
+        assert!(
+            wide > normal * 1.3,
+            "width 1.5 is wider: {wide} vs {normal}"
+        );
     }
 }

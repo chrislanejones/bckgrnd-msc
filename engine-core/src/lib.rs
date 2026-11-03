@@ -75,6 +75,16 @@ use drums::DrumVoice as _;
 
 pub use drums::PercKind;
 pub use mixer::{Bus, Channel, Ducker, Master};
+
+/// The engine's defaults and ranges for the parameters the UI exposes, so a test can
+/// hold them against `contracts/parameters.json`.
+pub mod limits {
+    pub use crate::dsp::{ROOM_RT60, ROOM_RT60_MAX, ROOM_RT60_MIN};
+    pub use crate::mixer::{
+        ECHO_FEEDBACK, ECHO_FEEDBACK_MAX, ECHO_RETURN, FILTER_Q, FILTER_Q_MAX, FILTER_Q_MIN,
+        VERB_WET, VERB_WET_MAX, WIDTH_MAX,
+    };
+}
 pub use track::{NoteEvent, Perc, Stem, Track, TrackKind, STEPS};
 pub use transport::Transport;
 
@@ -445,7 +455,14 @@ pub struct Engine {
     kick_root_hz: f32,
     /// Riser, crash and downsweep at the song's seams, summed into the master.
     transitions: transition::Transitions,
+    /// Per-sample glide coefficient for the channel faders, cuts, solos and sends.
+    channel_coef: f32,
 }
+
+/// How long a fader, a cut, a solo or a send takes to glide, in seconds. The browser
+/// original used `setTargetAtTime` with 12-20 ms; a cut still lands within a beat's
+/// sixteenth at any tempo (5 time constants is 60 ms).
+const CHANNEL_GLIDE: f32 = 0.012;
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen)]
 impl Engine {
@@ -479,6 +496,7 @@ impl Engine {
             output_gain: 1.0,
             kick_root_hz: track.kick_root_hz(),
             transitions: transition::Transitions::new(track.kind, sr),
+            channel_coef: dsp::glide_coef(CHANNEL_GLIDE, sr),
             track,
         }
     }
@@ -824,17 +842,47 @@ impl Engine {
 
     pub fn set_stereo_mode(&mut self, mode: u8) {
         // The three switch positions are the ends and the centre of the balance.
-        self.master.balance = match mode.min(2) {
+        self.master.set_balance(match mode.min(2) {
             0 => 0.0,
             2 => 1.0,
             _ => 0.5,
-        };
+        });
     }
 
     /// Where the output sits between the channels: 0 mono-left, 0.5 stereo, 1
     /// mono-right. The continuous form of [`Engine::set_stereo_mode`].
     pub fn set_stereo_balance(&mut self, balance: f32) {
-        self.master.balance = balance.clamp(0.0, 1.0);
+        self.master.set_balance(balance);
+    }
+
+    /// Stereo width: 0 mono, 1 as mixed (the default), up to 1.5 wider.
+    pub fn set_width(&mut self, width: f32) {
+        self.master.set_width(width);
+    }
+
+    /// The filter's resonance as it closes, a Q from 0.5 to 6 (default 0.85).
+    pub fn set_filter_q(&mut self, q: f32) {
+        self.master.set_filter_q(q);
+    }
+
+    /// The echo's feedback, 0 to 0.9 (default 0.3). The echo throw lifts it while held.
+    pub fn set_echo_feedback(&mut self, amount: f32) {
+        self.master.set_echo_feedback(amount);
+    }
+
+    /// How loud the echo returns, 0 to 1 (default 0.24). The throw overrides it while held.
+    pub fn set_echo_return(&mut self, amount: f32) {
+        self.master.set_echo_return(amount);
+    }
+
+    /// How much room is mixed in, 0 to 0.5 (default 0.07).
+    pub fn set_reverb_mix(&mut self, amount: f32) {
+        self.master.set_reverb_mix(amount);
+    }
+
+    /// The room's decay, 0.2 to 2.5 s (default 0.32 s).
+    pub fn set_reverb_decay(&mut self, seconds: f32) {
+        self.master.set_reverb_decay(seconds);
     }
 
     /// Render `out_l`/`out_r` in place. This is the audio callback's entry point and
@@ -929,14 +977,15 @@ impl Engine {
         let any_solo = Stem::ALL.iter().any(|s| self.channels[s.index()].solo);
         let mut sum_l = 0.0f32;
         let mut sum_r = 0.0f32;
+        let coef = self.channel_coef;
         for c in self.channels.iter_mut() {
-            let g = c.gain(any_solo) * self.music;
+            let g = c.step_gain(any_solo, coef) * self.music;
             c.bus.left *= g;
             c.bus.right *= g;
             // Sends tap post-fader so cutting a stem also cuts its echo. One call per
             // stem: the line advances once per sample, inside `Master::process`.
-            if c.send > 0.0 {
-                self.master.feed_send(c.bus.left, c.bus.right, c.send);
+            if c.send_now > 0.0 {
+                self.master.feed_send(c.bus.left, c.bus.right, c.send_now);
             }
             sum_l += c.bus.left;
             sum_r += c.bus.right;
@@ -1127,8 +1176,29 @@ impl Engine {
 
     pub fn set_volume(&mut self, stem: Stem, vol: f32) {
         if let Some(c) = self.channels.get_mut(stem.index()) {
-            c.vol = vol.clamp(0.0, 1.0);
+            if vol.is_finite() {
+                c.vol = vol.clamp(0.0, 1.0);
+            }
         }
+    }
+
+    /// A stem's echo send, 0 to 1. Each stem starts at its own amount
+    /// ([`Stem::send`]), and loading a track puts it back there.
+    pub fn set_send(&mut self, stem: Stem, amount: f32) {
+        if let Some(c) = self.channels.get_mut(stem.index()) {
+            if amount.is_finite() {
+                c.send = amount.clamp(0.0, 1.0);
+            }
+        }
+    }
+
+    /// Every stem's echo send, in stem order.
+    pub fn sends(&self) -> [f32; 8] {
+        let mut out = [0.0; 8];
+        for stem in Stem::ALL {
+            out[stem.index()] = self.channels[stem.index()].send;
+        }
+        out
     }
 }
 
@@ -1182,6 +1252,12 @@ impl Engine {
     pub fn set_volume_index(&mut self, index: usize, vol: f32) {
         if let Some(stem) = stem_from_index(index) {
             self.set_volume(stem, vol);
+        }
+    }
+
+    pub fn set_send_index(&mut self, index: usize, amount: f32) {
+        if let Some(stem) = stem_from_index(index) {
+            self.set_send(stem, amount);
         }
     }
 
@@ -1264,10 +1340,16 @@ mod tests {
         let spread = |balance: f32| -> f32 {
             let sr = 48_000.0;
             let mut m = mixer::Master::new(sr);
-            m.balance = balance;
+            m.set_balance(balance);
+            // The balance glides; let it arrive before measuring.
+            let warm = sr as usize / 4;
+            for i in 0..warm {
+                let v = 0.4 * (i as f32 / sr * 220.0 * std::f32::consts::TAU).sin();
+                m.process(v, -v);
+            }
             let mut total = 0.0f32;
             let n = sr as usize;
-            for i in 0..n {
+            for i in warm..warm + n {
                 let v = 0.4 * (i as f32 / sr * 220.0 * std::f32::consts::TAU).sin();
                 let (l, r) = m.process(v, -v);
                 total += (l - r).abs();
