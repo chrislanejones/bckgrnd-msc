@@ -1,0 +1,16 @@
+{
+  "format": "bckgrnd-msc/project",
+  "version": 1,
+  "name": "",
+  "trackId": "warehouse",
+  "params": {
+    "transport.bpm": 500,
+    "transport.swing": -0.5,
+    "master.level": 2,
+    "fx.low": -1,
+    "fx.echoTime": 0.7,
+    "fx.stereo": "left"
+  },
+  "stems": { "bass": { "volume": 3 }, "arp": { "volume": -1, "solo": true } },
+  "patterns": {}
+}

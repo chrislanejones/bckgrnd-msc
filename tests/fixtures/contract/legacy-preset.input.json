@@ -1,0 +1,11 @@
+{
+  "id": "kept",
+  "name": "Kept",
+  "trackId": "acid",
+  "bpm": 131,
+  "swing": 0.1,
+  "mix": { "kick": 0.9, "clap": 0.5, "hats": 0.36, "bass": 0.8, "stab": 0.38, "lead": 0.25, "pad": 0.3, "arp": 0.32 },
+  "muted": { "kick": true, "clap": false, "hats": false, "bass": false, "stab": false, "lead": false, "pad": false, "arp": false },
+  "solo": { "kick": false, "clap": false, "hats": false, "bass": true, "stab": false, "lead": false, "pad": false, "arp": false },
+  "updatedAt": "2026-10-21T12:00:00+00:00"
+}

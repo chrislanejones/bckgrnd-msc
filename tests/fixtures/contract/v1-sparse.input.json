@@ -1,0 +1,9 @@
+{
+  "format": "bckgrnd-msc/project",
+  "version": 1,
+  "name": "Sparse",
+  "trackId": "rain",
+  "params": { "fx.filter": 0.4 },
+  "stems": { "kick": { "muted": true } },
+  "patterns": {}
+}

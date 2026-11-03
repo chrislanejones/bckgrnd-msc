@@ -1,0 +1,62 @@
+{
+    "format": "bckgrnd-msc/project",
+    "version": 1,
+    "id": "kept",
+    "name": "Kept",
+    "updatedAt": "2026-10-21T12:00:00+00:00",
+    "trackId": "acid",
+    "params": {
+        "transport.bpm": 131,
+        "transport.swing": 0.1,
+        "master.level": 0.78,
+        "fx.low": 1,
+        "fx.mid": 1,
+        "fx.high": 1,
+        "fx.filter": 1,
+        "fx.stereo": 0.5,
+        "fx.echoTime": 0.75
+    },
+    "stems": {
+        "kick": {
+            "volume": 0.9,
+            "muted": true,
+            "solo": false
+        },
+        "clap": {
+            "volume": 0.5,
+            "muted": false,
+            "solo": false
+        },
+        "hats": {
+            "volume": 0.36,
+            "muted": false,
+            "solo": false
+        },
+        "bass": {
+            "volume": 0.8,
+            "muted": false,
+            "solo": true
+        },
+        "stab": {
+            "volume": 0.38,
+            "muted": false,
+            "solo": false
+        },
+        "lead": {
+            "volume": 0.25,
+            "muted": false,
+            "solo": false
+        },
+        "pad": {
+            "volume": 0.3,
+            "muted": false,
+            "solo": false
+        },
+        "arp": {
+            "volume": 0.32,
+            "muted": false,
+            "solo": false
+        }
+    },
+    "patterns": {}
+}

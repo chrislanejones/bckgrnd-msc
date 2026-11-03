@@ -1,0 +1,60 @@
+{
+    "format": "bckgrnd-msc/project",
+    "version": 1,
+    "name": "Sparse",
+    "trackId": "rain",
+    "params": {
+        "transport.bpm": 84,
+        "transport.swing": 0.52,
+        "master.level": 0.78,
+        "fx.low": 1,
+        "fx.mid": 1,
+        "fx.high": 1,
+        "fx.filter": 0.4,
+        "fx.stereo": 0.5,
+        "fx.echoTime": 0.75
+    },
+    "stems": {
+        "kick": {
+            "volume": 0.72,
+            "muted": true,
+            "solo": false
+        },
+        "clap": {
+            "volume": 0.44,
+            "muted": false,
+            "solo": false
+        },
+        "hats": {
+            "volume": 0.3,
+            "muted": false,
+            "solo": false
+        },
+        "bass": {
+            "volume": 0.68,
+            "muted": false,
+            "solo": false
+        },
+        "stab": {
+            "volume": 0.46,
+            "muted": false,
+            "solo": false
+        },
+        "lead": {
+            "volume": 0.4,
+            "muted": false,
+            "solo": false
+        },
+        "pad": {
+            "volume": 0.52,
+            "muted": false,
+            "solo": false
+        },
+        "arp": {
+            "volume": 0.28,
+            "muted": false,
+            "solo": false
+        }
+    },
+    "patterns": {}
+}

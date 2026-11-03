@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://bckgrnd-msc.netlify.app/contracts/project.v1.schema.json",
+  "title": "bckgrnd-msc project, version 1",
+  "description": "Saved musical data only. Playback telemetry (meters, playhead, live deck) is never part of a project. Parameter ids and ranges come from contracts/parameters.json.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["format", "version", "name", "trackId", "params", "stems", "patterns"],
+  "properties": {
+    "format": { "const": "bckgrnd-msc/project" },
+    "version": { "const": 1 },
+    "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$" },
+    "name": { "type": "string", "minLength": 1, "maxLength": 80 },
+    "createdAt": { "type": "string", "format": "date-time" },
+    "updatedAt": { "type": "string", "format": "date-time" },
+    "trackId": { "type": "string", "pattern": "^[a-z0-9_-]+$" },
+    "params": {
+      "description": "Project-scoped parameters keyed by their id in parameters.json. A missing key means the parameter's default.",
+      "type": "object",
+      "propertyNames": { "pattern": "^(transport|master|fx)\\.[A-Za-z]+$" },
+      "additionalProperties": { "type": "number" }
+    },
+    "stems": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "kick": { "$ref": "#/$defs/stem" },
+        "clap": { "$ref": "#/$defs/stem" },
+        "hats": { "$ref": "#/$defs/stem" },
+        "bass": { "$ref": "#/$defs/stem" },
+        "stab": { "$ref": "#/$defs/stem" },
+        "lead": { "$ref": "#/$defs/stem" },
+        "pad": { "$ref": "#/$defs/stem" },
+        "arp": { "$ref": "#/$defs/stem" }
+      }
+    },
+    "patterns": {
+      "description": "Reserved for pattern edits (Night 4). Empty in version 1.",
+      "type": "object",
+      "maxProperties": 0
+    }
+  },
+  "$defs": {
+    "stem": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "volume": { "type": "number", "minimum": 0, "maximum": 1 },
+        "muted": { "type": "boolean" },
+        "solo": { "type": "boolean" }
+      }
+    }
+  }
+}
