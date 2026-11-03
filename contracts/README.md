@@ -34,7 +34,10 @@ A parameter's `scope` says which side it is on:
   "kind": "continuous",      // continuous | enum | toggle
   "min": 0, "max": 1,        // what the engine accepts
   "control": { ... },        // optional narrower range the UI offers
-  "default": 1,              // a number, or "track" for the track's own value
+  "default": 1,              // a number; "track" for the track's own value; "stem"
+                             // for each stem's own (listed in "defaults")
+  "taper": "engine",         // how a control spreads the range: linear, log, db, or
+                             // the engine's own curve
   "scope": "project",
   "engine": "filter"         // the worklet message type
 }
@@ -51,7 +54,7 @@ Ids never change meaning. To change a parameter's meaning, add a new id and migr
   "name": "Warehouse, no drums",
   "trackId": "warehouse",
   "params": { "transport.bpm": 124, "fx.filter": 0.6 },
-  "stems": { "kick": { "volume": 0.9, "muted": true, "solo": false } },
+  "stems": { "kick": { "volume": 0.9, "send": 0, "muted": true, "solo": false } },
   "patterns": {}
 }
 ```
@@ -69,6 +72,9 @@ Ids never change meaning. To change a parameter's meaning, add a new id and migr
 |---|---|---|
 | Legacy preset (`PresetController`, no `format`) | v1 | `trackId`, `bpm`, `swing` → `transport.*`; `mix`/`muted`/`solo` → `stems`. Effects take their defaults, because legacy presets never stored them. |
 | MCP `MixSettings` (bckgrnd-msc-mcp `src/settings.ts`) | v1 (Night 6) | `track` → `trackId`; `cut[]` → `stems.*.muted`. Its loudness, ducking and fades are render settings for mixing under a voice, not musical data. They stay in the MCP's own presets. |
+
+The engine's own defaults and ranges are held against the registry too
+(`engine-core/tests/contract.rs`), so "default" on a knob is the engine's default.
 
 Both implementations live next to their readers: `migrateProject()` in
 `frontend/lib/contract.ts` and `Contract::migrate()` in

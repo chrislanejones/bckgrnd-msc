@@ -46,6 +46,7 @@
       "additionalProperties": false,
       "properties": {
         "volume": { "type": "number", "minimum": 0, "maximum": 1 },
+        "send": { "type": "number", "minimum": 0, "maximum": 1 },
         "muted": { "type": "boolean" },
         "solo": { "type": "boolean" }
       }

@@ -41,6 +41,14 @@ final class ContractTest extends TestCase
             if ($p['default'] === 'track') {
                 continue;
             }
+            if ($p['default'] === 'stem') {
+                $this->assertSame(Library::STEMS, array_keys($p['defaults']), $p['id']);
+                foreach ($p['defaults'] as $stem => $value) {
+                    $this->assertTrue($p['min'] <= $value && $value <= $p['max'], "{$p['id']}.{$stem}");
+                }
+
+                continue;
+            }
             match ($p['kind']) {
                 'continuous' => $this->assertTrue($p['min'] <= $p['default'] && $p['default'] <= $p['max'], $p['id']),
                 'enum' => $this->assertContains($p['default'], array_column($p['options'], 'value'), $p['id']),

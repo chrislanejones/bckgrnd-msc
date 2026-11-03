@@ -61,6 +61,22 @@ final class Contract
     }
 
     /**
+     * One per-stem parameter by id.
+     *
+     * @return array<string, mixed>
+     */
+    public static function stemParameter(string $id): array
+    {
+        foreach (self::registry()['stemParameters'] as $parameter) {
+            if ($parameter['id'] === $id) {
+                return $parameter;
+            }
+        }
+
+        throw new \LogicException("No stem parameter {$id}");
+    }
+
+    /**
      * The parameters a project saves.
      *
      * @return list<array<string, mixed>>
@@ -86,9 +102,11 @@ final class Contract
         }
 
         $stems = [];
+        $sends = self::stemParameter('send')['defaults'];
         foreach (Library::STEMS as $stem) {
             $stems[$stem] = [
                 'volume' => (float) ($track->mix[$stem] ?? 0.8),
+                'send' => (float) $sends[$stem],
                 'muted' => false,
                 'solo' => false,
             ];
@@ -166,6 +184,7 @@ final class Contract
             $given = is_array($givenStems[$stem] ?? null) ? $givenStems[$stem] : [];
             $stems[$stem] = [
                 'volume' => max(0.0, min(1.0, (float) ($given['volume'] ?? $fresh['stems'][$stem]['volume']))),
+                'send' => max(0.0, min(1.0, is_numeric($given['send'] ?? null) ? (float) $given['send'] : $fresh['stems'][$stem]['send'])),
                 'muted' => (bool) ($given['muted'] ?? false),
                 'solo' => (bool) ($given['solo'] ?? false),
             ];

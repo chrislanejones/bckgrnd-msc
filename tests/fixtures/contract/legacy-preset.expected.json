@@ -14,46 +14,60 @@
         "fx.high": 1,
         "fx.filter": 1,
         "fx.stereo": 0.5,
+        "fx.filterQ": 0.85,
+        "fx.echoFeedback": 0.3,
+        "fx.echoReturn": 0.24,
+        "fx.reverbMix": 0.07,
+        "fx.reverbDecay": 0.32,
+        "fx.width": 1,
         "fx.echoTime": 0.75
     },
     "stems": {
         "kick": {
             "volume": 0.9,
+            "send": 0,
             "muted": true,
             "solo": false
         },
         "clap": {
             "volume": 0.5,
+            "send": 0.05,
             "muted": false,
             "solo": false
         },
         "hats": {
             "volume": 0.36,
+            "send": 0.06,
             "muted": false,
             "solo": false
         },
         "bass": {
             "volume": 0.8,
+            "send": 0,
             "muted": false,
             "solo": true
         },
         "stab": {
             "volume": 0.38,
+            "send": 0.16,
             "muted": false,
             "solo": false
         },
         "lead": {
             "volume": 0.25,
+            "send": 0.3,
             "muted": false,
             "solo": false
         },
         "pad": {
             "volume": 0.3,
+            "send": 0.2,
             "muted": false,
             "solo": false
         },
         "arp": {
             "volume": 0.32,
+            "send": 0.28,
             "muted": false,
             "solo": false
         }

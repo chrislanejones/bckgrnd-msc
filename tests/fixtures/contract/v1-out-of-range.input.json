@@ -11,6 +11,6 @@
     "fx.echoTime": 0.7,
     "fx.stereo": "left"
   },
-  "stems": { "bass": { "volume": 3 }, "arp": { "volume": -1, "solo": true } },
+  "stems": { "bass": { "volume": 3 }, "arp": { "volume": -1, "solo": true }, "lead": { "send": 2 } },
   "patterns": {}
 }

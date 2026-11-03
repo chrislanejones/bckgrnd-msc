@@ -28,7 +28,11 @@ export type ParameterSpec = {
   /** A narrower range the control offers than the engine accepts. */
   control?: { min: number; max: number };
   options?: Option[];
-  default: number | boolean | 'track';
+  default: number | boolean | 'track' | 'stem';
+  /** Per-stem defaults, for a stem parameter whose default is "stem". */
+  defaults?: Record<string, number>;
+  /** How a control should spread the range: linear, log, db, or the engine's own curve. */
+  taper?: 'linear' | 'log' | 'db' | 'engine';
   unit: string;
   scope: 'project' | 'performance';
   engine: string;
@@ -43,6 +47,12 @@ export type ParamId =
   | 'fx.high'
   | 'fx.filter'
   | 'fx.stereo'
+  | 'fx.filterQ'
+  | 'fx.echoFeedback'
+  | 'fx.echoReturn'
+  | 'fx.reverbMix'
+  | 'fx.reverbDecay'
+  | 'fx.width'
   | 'fx.echoTime';
 
 export const PARAMETERS = registry.parameters as ParameterSpec[];
@@ -69,11 +79,21 @@ export function controlRange(id: string): { min: number; max: number; step: numb
 
 const STEM_PARAMETERS = registry.stemParameters as ParameterSpec[];
 
-/** The range of a per-stem parameter (`volume`), from the registry's stemParameters. */
-export function stemRange(id: 'volume'): { min: number; max: number; step: number } {
+export function stemParam(id: 'volume' | 'send'): ParameterSpec {
   const spec = STEM_PARAMETERS.find((p) => p.id === id);
   if (!spec) throw new Error(`unknown stem parameter: ${id}`);
+  return spec;
+}
+
+/** The range of a per-stem parameter, from the registry's stemParameters. */
+export function stemRange(id: 'volume' | 'send'): { min: number; max: number; step: number } {
+  const spec = stemParam(id);
   return { min: spec.min ?? 0, max: spec.max ?? 1, step: spec.step ?? 0.01 };
+}
+
+/** A stem's own default echo send. */
+export function defaultSend(stem: StemId): number {
+  return stemParam('send').defaults?.[stem] ?? 0;
 }
 
 /** A fixed default. Throws for a track-relative parameter; use `trackDefault` for those. */
@@ -91,7 +111,7 @@ export function trackDefault(id: ParamId, track: TrackSummary): number {
   throw new Error(`no track default for ${id}`);
 }
 
-export type StemSettings = { volume: number; muted: boolean; solo: boolean };
+export type StemSettings = { volume: number; send: number; muted: boolean; solo: boolean };
 
 export type ProjectV1 = {
   format: typeof PROJECT_FORMAT;
@@ -114,7 +134,9 @@ export function projectFromTrack(track: TrackSummary | TrackArrangement): Projec
   const params = {} as Record<ParamId, number>;
   for (const id of PROJECT_PARAMS) params[id] = trackDefault(id, track);
   const stems = {} as Record<StemId, StemSettings>;
-  for (const id of STEMS) stems[id] = { volume: track.mix[id] ?? 0.8, muted: false, solo: false };
+  for (const id of STEMS) {
+    stems[id] = { volume: track.mix[id] ?? 0.8, send: defaultSend(id), muted: false, solo: false };
+  }
   return {
     format: PROJECT_FORMAT,
     version: PROJECT_VERSION,
@@ -183,8 +205,10 @@ export function migrateProject(
   for (const id of STEMS) {
     const g = isObj(givenStems[id]) ? (givenStems[id] as Loose) : {};
     const volume = typeof g.volume === 'number' ? g.volume : fresh.stems[id].volume;
+    const send = typeof g.send === 'number' && Number.isFinite(g.send) ? g.send : fresh.stems[id].send;
     stems[id] = {
       volume: Math.min(1, Math.max(0, volume)),
+      send: Math.min(1, Math.max(0, send)),
       muted: Boolean(g.muted ?? false),
       solo: Boolean(g.solo ?? false),
     };
@@ -253,7 +277,12 @@ export function sameMusic(a: ProjectV1, b: ProjectV1): boolean {
   for (const id of STEMS) {
     const x = a.stems[id];
     const y = b.stems[id];
-    if (Math.abs(x.volume - y.volume) > 1e-6 || x.muted !== y.muted || x.solo !== y.solo) {
+    if (
+      Math.abs(x.volume - y.volume) > 1e-6 ||
+      Math.abs(x.send - y.send) > 1e-6 ||
+      x.muted !== y.muted ||
+      x.solo !== y.solo
+    ) {
       return false;
     }
   }

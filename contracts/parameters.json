@@ -1,8 +1,17 @@
 {
-  "$comment": "The parameter registry. One entry per control the engine exposes. Read by the UI (frontend/lib/contract.ts), by PHP (App\\Support\\Project\\Contract) and, from Night 6, by bckgrnd-msc-mcp. Add a parameter here before adding its control. See contracts/README.md.",
+  "$comment": "The parameter registry. One entry per control the engine exposes. Read by the UI (frontend/lib/contract.ts), by PHP (App\\Support\\Project\\Contract) and, from Night 6, by bckgrnd-msc-mcp. Add a parameter here before adding its control. See contracts/README.md. `taper` says how a control should spread the range under the hand: linear, log (frequency-like and time-like), db (gain heard in decibels), or the parameter's own engine curve.",
   "contract": "bckgrnd-msc/parameters",
   "version": 1,
-  "stems": ["kick", "clap", "hats", "bass", "stab", "lead", "pad", "arp"],
+  "stems": [
+    "kick",
+    "clap",
+    "hats",
+    "bass",
+    "stab",
+    "lead",
+    "pad",
+    "arp"
+  ],
   "parameters": [
     {
       "id": "transport.bpm",
@@ -11,9 +20,13 @@
       "min": 40,
       "max": 200,
       "step": 1,
-      "control": { "min": 60, "max": 180 },
+      "control": {
+        "min": 60,
+        "max": 180
+      },
       "default": "track",
       "unit": "bpm",
+      "taper": "linear",
       "scope": "project",
       "engine": "bpm"
     },
@@ -26,6 +39,7 @@
       "step": 0.01,
       "default": "track",
       "unit": "ratio",
+      "taper": "linear",
       "scope": "project",
       "engine": "swing"
     },
@@ -38,6 +52,7 @@
       "step": 0.01,
       "default": 0.78,
       "unit": "gain",
+      "taper": "db",
       "scope": "project",
       "engine": "master"
     },
@@ -50,6 +65,7 @@
       "step": 0.01,
       "default": 1,
       "unit": "gain",
+      "taper": "db",
       "scope": "project",
       "engine": "bands"
     },
@@ -62,6 +78,7 @@
       "step": 0.01,
       "default": 1,
       "unit": "gain",
+      "taper": "db",
       "scope": "project",
       "engine": "bands"
     },
@@ -74,6 +91,7 @@
       "step": 0.01,
       "default": 1,
       "unit": "gain",
+      "taper": "db",
       "scope": "project",
       "engine": "bands"
     },
@@ -86,6 +104,7 @@
       "step": 0.01,
       "default": 1,
       "unit": "ratio",
+      "taper": "engine",
       "scope": "project",
       "engine": "filter"
     },
@@ -98,21 +117,121 @@
       "step": 0.01,
       "default": 0.5,
       "unit": "balance",
+      "taper": "linear",
       "scope": "project",
       "engine": "stereoBalance"
+    },
+    {
+      "id": "fx.filterQ",
+      "label": "Resonance",
+      "kind": "continuous",
+      "min": 0.5,
+      "max": 6,
+      "step": 0.01,
+      "default": 0.85,
+      "unit": "q",
+      "taper": "log",
+      "scope": "project",
+      "engine": "filterQ"
+    },
+    {
+      "id": "fx.echoFeedback",
+      "label": "Feedback",
+      "kind": "continuous",
+      "min": 0,
+      "max": 0.9,
+      "step": 0.01,
+      "default": 0.3,
+      "unit": "ratio",
+      "taper": "linear",
+      "scope": "project",
+      "engine": "echoFeedback"
+    },
+    {
+      "id": "fx.echoReturn",
+      "label": "Return",
+      "kind": "continuous",
+      "min": 0,
+      "max": 1,
+      "step": 0.01,
+      "default": 0.24,
+      "unit": "ratio",
+      "taper": "linear",
+      "scope": "project",
+      "engine": "echoReturn"
+    },
+    {
+      "id": "fx.reverbMix",
+      "label": "Room",
+      "kind": "continuous",
+      "min": 0,
+      "max": 0.5,
+      "step": 0.005,
+      "default": 0.07,
+      "unit": "ratio",
+      "taper": "linear",
+      "scope": "project",
+      "engine": "reverbMix"
+    },
+    {
+      "id": "fx.reverbDecay",
+      "label": "Decay",
+      "kind": "continuous",
+      "min": 0.2,
+      "max": 2.5,
+      "step": 0.01,
+      "default": 0.32,
+      "unit": "seconds",
+      "taper": "log",
+      "scope": "project",
+      "engine": "reverbDecay"
+    },
+    {
+      "id": "fx.width",
+      "label": "Width",
+      "kind": "continuous",
+      "min": 0,
+      "max": 1.5,
+      "step": 0.01,
+      "default": 1,
+      "unit": "ratio",
+      "taper": "linear",
+      "scope": "project",
+      "engine": "width"
     },
     {
       "id": "fx.echoTime",
       "label": "Echo time",
       "kind": "enum",
       "options": [
-        { "value": 0, "label": "Off" },
-        { "value": 0.25, "label": "1/16" },
-        { "value": 0.3333333333333333, "label": "1/8T" },
-        { "value": 0.5, "label": "1/8" },
-        { "value": 0.75, "label": "1/8." },
-        { "value": 1, "label": "1/4" },
-        { "value": 1.5, "label": "1/4." }
+        {
+          "value": 0,
+          "label": "Off"
+        },
+        {
+          "value": 0.25,
+          "label": "1/16"
+        },
+        {
+          "value": 0.3333333333333333,
+          "label": "1/8T"
+        },
+        {
+          "value": 0.5,
+          "label": "1/8"
+        },
+        {
+          "value": 0.75,
+          "label": "1/8."
+        },
+        {
+          "value": 1,
+          "label": "1/4"
+        },
+        {
+          "value": 1.5,
+          "label": "1/4."
+        }
       ],
       "default": 0.75,
       "unit": "beats",
@@ -124,12 +243,30 @@
       "label": "Loop",
       "kind": "enum",
       "options": [
-        { "value": 0, "label": "Off" },
-        { "value": 1, "label": "1" },
-        { "value": 2, "label": "2" },
-        { "value": 4, "label": "4" },
-        { "value": 8, "label": "8" },
-        { "value": 16, "label": "16" }
+        {
+          "value": 0,
+          "label": "Off"
+        },
+        {
+          "value": 1,
+          "label": "1"
+        },
+        {
+          "value": 2,
+          "label": "2"
+        },
+        {
+          "value": 4,
+          "label": "4"
+        },
+        {
+          "value": 8,
+          "label": "8"
+        },
+        {
+          "value": 16,
+          "label": "16"
+        }
       ],
       "default": 0,
       "unit": "bars",
@@ -156,8 +293,32 @@
       "step": 0.01,
       "default": "track",
       "unit": "gain",
+      "taper": "linear",
       "scope": "project",
       "engine": "volume"
+    },
+    {
+      "id": "send",
+      "label": "Echo send",
+      "kind": "continuous",
+      "min": 0,
+      "max": 1,
+      "step": 0.01,
+      "default": "stem",
+      "defaults": {
+        "kick": 0,
+        "clap": 0.05,
+        "hats": 0.06,
+        "bass": 0,
+        "stab": 0.16,
+        "lead": 0.3,
+        "pad": 0.2,
+        "arp": 0.28
+      },
+      "unit": "ratio",
+      "taper": "linear",
+      "scope": "project",
+      "engine": "send"
     },
     {
       "id": "muted",
