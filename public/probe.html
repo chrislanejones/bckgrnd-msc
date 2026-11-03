@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<!--
+  The native-shell audio probe.
+
+  Answers one question wherever this page is opened (a browser, the NativePHP dev
+  shell, a packaged desktop build, later a phone): can this shell run the engine and
+  get sound out of it? It boots the real worklet and wasm, plays Warehouse for a
+  moment, and reports the context, the secure-context status and the measured output.
+
+  Plain HTML and JS on purpose: no build step, no framework, so it works in any shell
+  the app is packaged into, before the app itself is known to work there.
+
+  Open /probe.html, press Run. Add ?auto=1 to run without a click (shells that allow
+  audio without a gesture, such as Electron). The result is also on
+  window.__PROBE_RESULT__ and the title becomes "probe: pass" or "probe: fail".
+-->
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>probe</title>
+    <style>
+        :root { color-scheme: dark; }
+        body { margin: 0; padding: 1.5rem; background: #090a0c; color: #f3efe6; font: 14px/1.5 ui-sans-serif, system-ui, sans-serif; }
+        h1 { margin: 0 0 0.5rem; font-size: 1.25rem; }
+        p { margin: 0 0 1rem; color: #8e939c; max-width: 40rem; }
+        button { min-height: 2.75rem; padding: 0 1.25rem; border: 0; border-radius: 999px; background: #c6f24d; color: #14180a; font: inherit; font-weight: 700; cursor: pointer; }
+        button:focus-visible { outline: 2px solid #c6f24d; outline-offset: 2px; }
+        table { margin-top: 1rem; border-collapse: collapse; }
+        td { padding: 0.25rem 1rem 0.25rem 0; border-bottom: 1px solid #2c313b; vertical-align: top; }
+        td:first-child { color: #8e939c; }
+        .ok { color: #c6f24d; }
+        .fail { color: #ff5f57; }
+    </style>
+</head>
+<body>
+    <h1>Audio probe</h1>
+    <p>Boots the engine in this shell, plays a second of Warehouse, and measures what comes out.</p>
+    <button id="run" type="button">Run</button>
+    <table><tbody id="out"></tbody></table>
+    <script type="module" src="/probe.js"></script>
+</body>
+</html>
