@@ -5,7 +5,7 @@
  * shows what will play, including the bars still ahead.
  */
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import type { PointerEvent as ReactPointerEvent } from 'react';
 import { engine } from '../lib/engine';
 import { PARTS, STEM_ORDER, STEPS } from '../lib/stems';
@@ -131,7 +131,7 @@ function useScrub(step: number, bpm: number, live: boolean) {
  * `AnalyserNode`: it shows what *will* play, including the bars that are still
  * ahead, which a live scope cannot.
  */
-export function DeckWave({
+export const DeckWave = memo(function DeckWave({
   side,
   track,
   step,
@@ -231,7 +231,7 @@ export function DeckWave({
       </div>
     </div>
   );
-}
+});
 
 /**
  * Three envelopes — low, mid and high — rendered as sine lobes.

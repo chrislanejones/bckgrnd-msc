@@ -11,12 +11,11 @@
  * file only decides where things go. React holds no audio state and no musical clock.
  */
 
-import { useEffect, useMemo, useState } from 'react';
-import { barActivity } from './lib/api';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useInstrument } from './lib/instrument';
 import { param } from './lib/contract';
 import { STEM_ORDER, soundingMap, stemState, stemStateLabel } from './lib/stems';
-import type { StemId } from './lib/types';
+import type { StemId, TrackSummary } from './lib/types';
 import { InstrumentPanel, PerformancePad, Segmented, cx } from './ui/controls';
 import { DeckWave } from './ui/Deck';
 import { Inspector, type InspectorTab } from './ui/Inspector';
@@ -83,10 +82,20 @@ export function App() {
     ) as Record<StemId, boolean>;
   }, [inst.muted, inst.solo]);
 
-  function selectStem(id: StemId) {
+  const closeLibrary = useCallback(() => setLibraryOpen(false), []);
+  const { selectTrack } = inst;
+  const pickTrack = useCallback(
+    (t: TrackSummary) => {
+      selectTrack(t);
+      if (!libraryDocked) setLibraryOpen(false);
+    },
+    [selectTrack, libraryDocked],
+  );
+
+  const selectStem = useCallback((id: StemId) => {
     setSelected(id);
     setInspectorTab('stem');
-  }
+  }, []);
 
   function openPattern(id?: StemId) {
     if (id) setSelected(id);
@@ -217,11 +226,8 @@ export function App() {
             tracks={inst.tracks}
             current={track.id}
             overlay={!libraryDocked}
-            onClose={() => setLibraryOpen(false)}
-            onPick={(t) => {
-              inst.selectTrack(t);
-              if (!libraryDocked) setLibraryOpen(false);
-            }}
+            onClose={closeLibrary}
+            onPick={pickTrack}
           />
         </aside>
 
@@ -285,13 +291,14 @@ export function App() {
                     volume={vols[meta.id]}
                     muted={inst.muted[meta.id]}
                     soloed={inst.solo[meta.id]}
-                    activity={barActivity(track, meta.id, bar)}
+                    track={track}
+                    bar={bar}
                     col={col}
                     selected={selected === meta.id && inspectorTab === 'stem'}
-                    onVolume={(v) => inst.setStemVolume(meta.id, v)}
-                    onCut={() => inst.toggleMute(meta.id)}
-                    onSolo={() => inst.toggleSolo(meta.id)}
-                    onSelect={() => selectStem(meta.id)}
+                    onVolume={inst.setStemVolume}
+                    onCut={inst.toggleMute}
+                    onSolo={inst.toggleSolo}
+                    onSelect={selectStem}
                   />
                 );
               })}

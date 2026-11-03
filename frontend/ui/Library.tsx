@@ -8,7 +8,7 @@
  * that looks broken.
  */
 
-import { useEffect, useMemo, useState } from 'react';
+import { memo, useEffect, useMemo, useState } from 'react';
 import { Star, X } from 'lucide-react';
 import type { TrackSummary } from '../lib/types';
 import { Segmented, cx } from './controls';
@@ -35,7 +35,7 @@ function writeFavorites(ids: Set<string>) {
 
 type Filter = 'all' | 'favorites';
 
-export function LibraryPanel({
+export const LibraryPanel = memo(function LibraryPanel({
   tracks,
   current,
   onPick,
@@ -159,4 +159,4 @@ export function LibraryPanel({
       </section>
     </div>
   );
-}
+});

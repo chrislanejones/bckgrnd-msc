@@ -129,7 +129,9 @@ export class EngineHost {
     // passing it explicitly keeps the two from disagreeing after a device change.
     this.post({ type: 'init', wasm, sampleRate: ctx.sampleRate }, [wasm]);
 
-    // Then everything the app said before there was anything to say it to, in order.
+    // Then everything the app said before there was anything to say it to, in order,
+    // and the latest value of every parameter moved since.
+    this.flushParams();
     const queued = this.pending;
     this.pending = [];
     for (const item of queued) this.post(item.message, item.transfer);
@@ -172,7 +174,57 @@ export class EngineHost {
    */
   private pending: Array<{ message: unknown; transfer: Transferable[] }> = [];
 
+  /**
+   * Parameter changes waiting for the next frame, keyed by parameter. Of several
+   * changes to one parameter within a frame only the last is sent: a fast drag or a
+   * held arrow key produces far more values than the audio thread can use, and every
+   * message is work in the worklet's message handler.
+   */
+  private queued = new Map<string, Record<string, unknown>>();
+  private flushScheduled = false;
+
+  /** The last message actually sent for each parameter, for diagnostics and tests. */
+  private sent: Record<string, unknown> = {};
+
+  private postParam(key: string, message: Record<string, unknown>): void {
+    this.queued.set(key, message);
+    if (this.flushScheduled || !this.node) return;
+    this.flushScheduled = true;
+    const flush = () => {
+      this.flushScheduled = false;
+      this.flushParams();
+    };
+    // A frame, while the page is visible; a timer when it is hidden, where frames stop.
+    if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
+      requestAnimationFrame(flush);
+    } else {
+      setTimeout(flush, 16);
+    }
+  }
+
+  private flushParams(): void {
+    if (this.queued.size === 0) return;
+    const messages = [...this.queued.entries()];
+    this.queued.clear();
+    for (const [key, message] of messages) {
+      this.sent[key] = message;
+      this.send(message, []);
+    }
+  }
+
+  /** The last message sent for each parameter, after coalescing. */
+  get lastSent(): Readonly<Record<string, unknown>> {
+    return this.sent;
+  }
+
   private post(message: unknown, transfer: Transferable[] = []): void {
+    // Anything not coalesced goes after every parameter change made before it, so
+    // order is kept: a fader moved and then a mix started arrive in that order.
+    this.flushParams();
+    this.send(message, transfer);
+  }
+
+  private send(message: unknown, transfer: Transferable[]): void {
     const node = this.node;
     if (!node) {
       // Bounded, so a page that never gets its gesture cannot grow this without end.
@@ -331,7 +383,12 @@ export class EngineHost {
   // -- Mixer ----------------------------------------------------------------
 
   setVolume(index: number, value: number): void {
-    this.post({ type: 'volume', index, value });
+    this.postParam(`volume:${index}`, { type: 'volume', index, value });
+  }
+
+  /** A stem's echo send, 0..1. */
+  setSend(index: number, value: number): void {
+    this.postParam(`send:${index}`, { type: 'send', index, value });
   }
 
   setMuted(index: number, value: boolean): void {
@@ -343,23 +400,53 @@ export class EngineHost {
   }
 
   setMaster(value: number): void {
-    this.post({ type: 'master', value });
+    this.postParam('master', { type: 'master', value });
   }
 
   setBpm(value: number): void {
-    this.post({ type: 'bpm', value });
+    this.postParam('bpm', { type: 'bpm', value });
   }
 
   setSwing(value: number): void {
-    this.post({ type: 'swing', value });
+    this.postParam('swing', { type: 'swing', value });
   }
 
   setBands(low: number, mid: number, high: number): void {
-    this.post({ type: 'bands', low, mid, high });
+    this.postParam('bands', { type: 'bands', low, mid, high });
   }
 
   setFilter(value: number): void {
-    this.post({ type: 'filter', value });
+    this.postParam('filter', { type: 'filter', value });
+  }
+
+  /** The filter's resonance as it closes, a Q from 0.5 to 6. */
+  setFilterQ(value: number): void {
+    this.postParam('filterQ', { type: 'filterQ', value });
+  }
+
+  /** The echo's feedback, 0..0.9. */
+  setEchoFeedback(value: number): void {
+    this.postParam('echoFeedback', { type: 'echoFeedback', value });
+  }
+
+  /** How loud the echo returns, 0..1. */
+  setEchoReturn(value: number): void {
+    this.postParam('echoReturn', { type: 'echoReturn', value });
+  }
+
+  /** How much room is mixed in, 0..0.5. */
+  setReverbMix(value: number): void {
+    this.postParam('reverbMix', { type: 'reverbMix', value });
+  }
+
+  /** The room's decay, 0.2..2.5 s. */
+  setReverbDecay(value: number): void {
+    this.postParam('reverbDecay', { type: 'reverbDecay', value });
+  }
+
+  /** Stereo width: 0 mono, 1 as mixed, 1.5 wider. */
+  setWidth(value: number): void {
+    this.postParam('width', { type: 'width', value });
   }
 
   setEcho(on: boolean): void {
@@ -372,7 +459,7 @@ export class EngineHost {
 
   /** Output balance, 0 mono-left through 0.5 stereo to 1 mono-right. */
   setStereoBalance(balance: number): void {
-    this.post({ type: 'stereoBalance', value: balance });
+    this.postParam('stereoBalance', { type: 'stereoBalance', value: balance });
   }
 
   /** Echo time in beats: 0.25 a sixteenth, 0.75 a dotted eighth (default), 1 a quarter; 0 is off. */

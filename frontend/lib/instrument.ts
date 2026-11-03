@@ -17,7 +17,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { engine } from './engine';
 import type { Deck as DeckId } from './engine';
 import { emptyFlags, fetchLibrary, fetchTrack } from './api';
-import { fixedDefault, projectFromTrack, sameMusic, type ProjectV1 } from './contract';
+import { defaultSend, fixedDefault, projectFromTrack, sameMusic, type ProjectV1 } from './contract';
 import { STEM_ORDER, STEPS } from './stems';
 import type { LibraryResponse, Mix, StemId, TrackArrangement, TrackSummary } from './types';
 
@@ -46,6 +46,60 @@ export type Mask = 'full' | 'nodrums' | 'nomusic' | 'custom';
 /** Off, or running with or without the stem swap. */
 export type ContinuousMode = 'off' | 'swap' | 'plain';
 export type Bands = { low: number; mid: number; high: number };
+
+/** The effect parameters added with the effects rack, by contract id. */
+export type Effects = {
+  'fx.filterQ': number;
+  'fx.echoFeedback': number;
+  'fx.echoReturn': number;
+  'fx.reverbMix': number;
+  'fx.reverbDecay': number;
+  'fx.width': number;
+};
+export type EffectId = keyof Effects;
+
+export const EFFECT_DEFAULTS: Effects = {
+  'fx.filterQ': fixedDefault('fx.filterQ'),
+  'fx.echoFeedback': fixedDefault('fx.echoFeedback'),
+  'fx.echoReturn': fixedDefault('fx.echoReturn'),
+  'fx.reverbMix': fixedDefault('fx.reverbMix'),
+  'fx.reverbDecay': fixedDefault('fx.reverbDecay'),
+  'fx.width': fixedDefault('fx.width'),
+};
+
+/** Each stem's own echo send, from the registry. */
+export function defaultSends(): Record<StemId, number> {
+  return Object.fromEntries(STEM_ORDER.map((id) => [id, defaultSend(id)])) as Record<StemId, number>;
+}
+
+/** Which engine message each effect parameter is sent as. */
+const EFFECT_SENDERS: Record<EffectId, (value: number) => void> = {
+  'fx.filterQ': (v) => engine.setFilterQ(v),
+  'fx.echoFeedback': (v) => engine.setEchoFeedback(v),
+  'fx.echoReturn': (v) => engine.setEchoReturn(v),
+  'fx.reverbMix': (v) => engine.setReverbMix(v),
+  'fx.reverbDecay': (v) => engine.setReverbDecay(v),
+  'fx.width': (v) => engine.setWidth(v),
+};
+
+/**
+ * Wrap a set of functions so each keeps one identity for the life of the component
+ * while always calling the latest version. Controls are memoized; a callback that
+ * changed identity on every render would re-render every one of them on every
+ * change anywhere, which during a knob drag is the whole interface sixty times a
+ * second.
+ */
+function useStable<T extends Record<string, (...args: never[]) => unknown>>(actions: T): T {
+  const latest = useRef(actions);
+  latest.current = actions;
+  return useMemo(() => {
+    const out = {} as Record<string, unknown>;
+    for (const key of Object.keys(latest.current)) {
+      out[key] = (...args: never[]) => latest.current[key]!(...args);
+    }
+    return out as T;
+  }, []);
+}
 
 /** The order a stem-swapping continuous mix steps the groups through. */
 const CONTINUOUS_MASKS: Mask[] = ['full', 'nodrums', 'nomusic'];
@@ -80,6 +134,9 @@ export function useInstrument() {
   const [echo, setEchoState] = useState(false);
   /** Output balance: 0 mono-left, 0.5 stereo, 1 mono-right. */
   const [stereo, setStereoState] = useState(0.5);
+  const [effects, setEffects] = useState<Effects>(EFFECT_DEFAULTS);
+  /** Each stem's echo send. A track change puts them back to the stems' own amounts. */
+  const [sends, setSends] = useState<Record<StemId, number>>(defaultSends);
   const [mixing, setMixing] = useState<string | null>(null);
   const [nextId, setNextId] = useState<string>('');
   /**
@@ -228,8 +285,13 @@ export function useInstrument() {
         setSwingState(arranged.swing);
         engine.setSwing(arranged.swing);
         setVols(arranged.mix);
+        // Loading a track puts the engine's sends back to the stems' own amounts;
+        // the screen and the worklet's memory of them follow.
+        const fresh = defaultSends();
+        setSends(fresh);
         for (let i = 0; i < STEM_ORDER.length; i += 1) {
           engine.setVolume(i, arranged.mix[STEM_ORDER[i]!]);
+          engine.setSend(i, fresh[STEM_ORDER[i]!]);
           engine.setMuted(i, false);
           engine.setSolo(i, false);
         }
@@ -299,8 +361,13 @@ export function useInstrument() {
           setSwingState(arranged.swing);
           engine.setSwing(arranged.swing);
           setVols(arranged.mix);
+          // Like the faders, the sends were carried across the crossfade and land on
+          // the new track's own amounts.
+          const fresh = defaultSends();
+          setSends(fresh);
           for (let i = 0; i < STEM_ORDER.length; i += 1) {
             engine.setVolume(i, arranged.mix[STEM_ORDER[i]!]);
+            engine.setSend(i, fresh[STEM_ORDER[i]!]);
             engine.setSolo(i, false);
           }
           setSolo(emptyFlags());
@@ -446,9 +513,21 @@ export function useInstrument() {
   }
 
   function setBand(id: keyof Bands, value: number) {
-    const next = { ...bands, [id]: value };
-    setBandsState(next);
-    engine.setBands(next.low, next.mid, next.high);
+    setBandsState((prev) => {
+      const next = { ...prev, [id]: value };
+      engine.setBands(next.low, next.mid, next.high);
+      return next;
+    });
+  }
+
+  function setEffect(id: EffectId, value: number) {
+    setEffects((prev) => ({ ...prev, [id]: value }));
+    EFFECT_SENDERS[id](value);
+  }
+
+  function setStemSend(id: StemId, value: number) {
+    setSends((prev) => ({ ...prev, [id]: value }));
+    engine.setSend(STEM_ORDER.indexOf(id), value);
   }
 
   function setFilter(value: number) {
@@ -513,11 +592,41 @@ export function useInstrument() {
     p.params['fx.filter'] = filter;
     p.params['fx.stereo'] = stereo;
     p.params['fx.echoTime'] = echoBeats;
-    for (const id of STEM_ORDER) p.stems[id] = { volume: vols[id], muted: muted[id], solo: solo[id] };
+    for (const id of Object.keys(effects) as EffectId[]) p.params[id] = effects[id];
+    for (const id of STEM_ORDER) {
+      p.stems[id] = { volume: vols[id], send: sends[id], muted: muted[id], solo: solo[id] };
+    }
     return p;
-  }, [track, vols, bpm, swing, master, bands, filter, stereo, echoBeats, muted, solo]);
+  }, [track, vols, sends, bpm, swing, master, bands, filter, stereo, effects, echoBeats, muted, solo]);
 
   const edited = project && track ? !sameMusic(project, projectFromTrack(track)) : false;
+
+  const actions = useStable({
+    togglePlay,
+    selectTrack,
+    cue,
+    setNextId,
+    autoMix,
+    setContinuous,
+    applyMask,
+    toggleMute,
+    toggleSolo,
+    setStemVolume,
+    setStemSend,
+    setBpm,
+    setSwing,
+    setMaster,
+    setBand,
+    setFilter,
+    setStereo,
+    setEffect,
+    pickEchoTime,
+    pickLoop,
+    toggleEchoThrow,
+    brake,
+    backspin,
+    nudge,
+  });
 
   return {
     // data
@@ -535,6 +644,7 @@ export function useInstrument() {
     continuous,
     // stems
     vols,
+    sends,
     muted,
     solo,
     mask,
@@ -545,35 +655,15 @@ export function useInstrument() {
     bands,
     filter,
     stereo,
+    effects,
     echoBeats,
     echo,
     loopBars,
     // project
     project,
     edited,
-    // intents
-    togglePlay,
-    selectTrack,
-    cue,
-    setNextId,
-    autoMix,
-    setContinuous,
-    applyMask,
-    toggleMute,
-    toggleSolo,
-    setStemVolume,
-    setBpm,
-    setSwing,
-    setMaster,
-    setBand,
-    setFilter,
-    setStereo,
-    pickEchoTime,
-    pickLoop,
-    toggleEchoThrow,
-    brake,
-    backspin,
-    nudge,
+    // intents, each with one identity for the life of the app
+    ...actions,
   };
 }
 

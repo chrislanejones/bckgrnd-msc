@@ -11,6 +11,7 @@
 import { useEffect, useId, useRef } from 'react';
 import type { ReactNode, PointerEvent as ReactPointerEvent } from 'react';
 import { engine } from '../lib/engine';
+import { editHistory } from '../lib/history';
 import type { StemState } from '../lib/stems';
 
 export function cx(...parts: Array<string | false | undefined | null>) {
@@ -324,6 +325,34 @@ export function Segmented<T extends string | number>({
       </div>
     </div>
   );
+}
+
+/**
+ * Gesture boundaries for a native range input, so a fader drag or a held arrow key is
+ * recorded as one edit rather than one per value.
+ */
+export function useRangeGesture(historyId: string, value: number) {
+  const from = useRef<number | null>(null);
+  const valueRef = useRef(value);
+  valueRef.current = value;
+  const start = () => {
+    if (from.current === null) from.current = valueRef.current;
+  };
+  const end = () => {
+    if (from.current === null) return;
+    const f = from.current;
+    from.current = null;
+    // The value lands after the last change event, so read it after this frame.
+    requestAnimationFrame(() => editHistory.record(historyId, f, valueRef.current));
+  };
+  return {
+    onPointerDown: start,
+    onPointerUp: end,
+    onPointerCancel: end,
+    onKeyDown: start,
+    onKeyUp: end,
+    onBlur: end,
+  };
 }
 
 /** One stem's level meter, written from telemetry without a React render. */

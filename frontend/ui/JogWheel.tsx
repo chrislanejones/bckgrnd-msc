@@ -2,7 +2,7 @@
  * The jog wheel. Moved from app.tsx unchanged in behavior.
  */
 
-import { useEffect, useRef, useState } from 'react';
+import { memo, useEffect, useRef, useState } from 'react';
 import type { PointerEvent as ReactPointerEvent } from 'react';
 import { engine } from '../lib/engine';
 import { cx } from './controls';
@@ -32,7 +32,7 @@ const JOG_FRICTION = 0.92;
  * idle spin is decoration and stops under reduced motion; the drag rotation is the
  * control itself and doesn't.
  */
-export function JogWheel({ spinning }: { spinning: boolean }) {
+export const JogWheel = memo(function JogWheel({ spinning }: { spinning: boolean }) {
   const discRef = useRef<HTMLDivElement>(null);
   const drag = useRef<{
     lastAngle: number;
@@ -197,4 +197,4 @@ export function JogWheel({ spinning }: { spinning: boolean }) {
       <span className="jog-caption">Wind back to backspin</span>
     </div>
   );
-}
+});

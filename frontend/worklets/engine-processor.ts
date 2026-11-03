@@ -35,6 +35,13 @@ type Inbound =
   | { type: 'loop'; bars: number }
   | { type: 'stereo'; mode: 0 | 1 | 2 }
   | { type: 'stereoBalance'; value: number }
+  | { type: 'width'; value: number }
+  | { type: 'filterQ'; value: number }
+  | { type: 'echoFeedback'; value: number }
+  | { type: 'echoReturn'; value: number }
+  | { type: 'reverbMix'; value: number }
+  | { type: 'reverbDecay'; value: number }
+  | { type: 'send'; index: number; value: number }
   | { type: 'volume'; index: number; value: number }
   | { type: 'mute'; index: number; value: boolean }
   | { type: 'solo'; index: number; value: boolean }
@@ -106,6 +113,12 @@ class EngineProcessor extends AudioWorkletProcessor {
    * getters, so the last value the app sent is tracked instead.
    */
   private stemVol = new Float32Array(8).fill(0.8);
+  /**
+   * The echo send per stem as the UI last set it, or NaN for "the stem's own default".
+   * A mix reloads the incoming deck, which puts its sends back to the defaults, so
+   * these are re-applied to it the way the faders are carried across.
+   */
+  private stemSend = new Float32Array(8).fill(Number.NaN);
   private filterOpen = 1;
 
   /** Accumulated sample clock, used to schedule the auto-mix handover. */
@@ -201,6 +214,38 @@ class EngineProcessor extends AudioWorkletProcessor {
 
       case 'stereoBalance':
         for (const engine of this.liveEngines()) engine.set_stereo_balance(message.value);
+        return;
+
+      case 'width':
+        for (const engine of this.liveEngines()) engine.set_width(message.value);
+        return;
+
+      case 'filterQ':
+        for (const engine of this.liveEngines()) engine.set_filter_q(message.value);
+        return;
+
+      case 'echoFeedback':
+        for (const engine of this.liveEngines()) engine.set_echo_feedback(message.value);
+        return;
+
+      case 'echoReturn':
+        for (const engine of this.liveEngines()) engine.set_echo_return(message.value);
+        return;
+
+      case 'reverbMix':
+        for (const engine of this.liveEngines()) engine.set_reverb_mix(message.value);
+        return;
+
+      case 'reverbDecay':
+        for (const engine of this.liveEngines()) engine.set_reverb_decay(message.value);
+        return;
+
+      case 'send':
+        if (message.index >= 0 && message.index < this.stemSend.length) {
+          this.stemSend[message.index] = message.value;
+        }
+        for (const engine of this.liveEngines())
+          engine.set_send_index(message.index, message.value);
         return;
 
       case 'loop':
@@ -319,6 +364,11 @@ class EngineProcessor extends AudioWorkletProcessor {
     to.set_volume_index(STEM_KICK, (this.stemVol[STEM_KICK] ?? 0.8) * MIX_ENTRY_KICK);
     to.set_filter(MIX_ENTRY_FILTER);
     to.set_echo(false);
+    // The reload put the incoming deck's sends back to their defaults; carry the
+    // user's across, as the faders are.
+    this.stemSend.forEach((value, index) => {
+      if (!Number.isNaN(value)) to.set_send_index(index, value);
+    });
     to.set_output_gain(0);
     // Deliberately *not* started here.
     //

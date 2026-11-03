@@ -1297,7 +1297,19 @@ body {
 }
 
 .stem-fader .fader {
-  height: 1.6rem;
+  height: var(--control-sm);
+}
+
+/* The stem faders' thumbs are a little larger than the inspector's, for a thumb. */
+.stem-fader .fader::-webkit-slider-thumb {
+  width: 1.3rem;
+  height: 1.3rem;
+  margin-top: -9px;
+}
+
+.stem-fader .fader::-moz-range-thumb {
+  width: 1.3rem;
+  height: 1.3rem;
 }
 
 .stem-actions {
@@ -1837,3 +1849,225 @@ body {
   }
 }
 
+
+/* ------------------------------------------------------------------------ */
+/* Knobs                                                                    */
+/* ------------------------------------------------------------------------ */
+
+/* While any control is being dragged, nothing can be text-selected underneath it. */
+html[data-control-drag="yes"],
+html[data-control-drag="yes"] * {
+  user-select: none !important;
+  -webkit-user-select: none !important;
+}
+
+.knob {
+  --knob: 3.5rem;
+  user-select: none;
+  -webkit-user-select: none;
+  display: grid;
+  justify-items: center;
+  gap: 0.15rem;
+  min-width: 0;
+}
+
+.knob-sm {
+  --knob: 3rem;
+}
+
+.knob-head {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.3rem;
+  width: 100%;
+  min-height: 1.35rem;
+}
+
+.knob-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The reset badge only appears once the knob has moved off its default, but keeps its
+   space so the label never shifts. */
+.knob-reset {
+  padding: 0.1rem 0.35rem;
+  font-size: 0.5625rem;
+}
+
+.knob-reset:disabled {
+  visibility: hidden;
+}
+
+.knob-dial {
+  position: relative;
+  width: var(--knob);
+  height: var(--knob);
+  border-radius: 999px;
+  cursor: ns-resize;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.knob-svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+/* The accessible control: a native range, visually hidden but present for keyboards
+   and screen readers, laid over the dial so a screen reader's focus box lands on it. */
+.knob-input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.knob-tick {
+  stroke: var(--color-line);
+  stroke-width: 1.4;
+  stroke-linecap: round;
+}
+
+.knob-track {
+  fill: none;
+  stroke: var(--color-line);
+  stroke-width: 3;
+  stroke-linecap: round;
+}
+
+.knob-arc {
+  fill: none;
+  stroke: var(--color-acid);
+  stroke-width: 3;
+  stroke-linecap: round;
+  filter: drop-shadow(0 0 2px color-mix(in srgb, var(--color-acid) 60%, transparent));
+}
+
+.knob-shadow {
+  fill: rgba(0, 0, 0, 0.55);
+  filter: blur(2px);
+}
+
+.knob-pointer line {
+  stroke: var(--color-fg);
+  stroke-width: 3.2;
+  stroke-linecap: round;
+}
+
+.knob-value {
+  min-width: 4.5rem;
+  min-height: 1.6rem;
+  padding: 0.1rem 0.4rem;
+  border: 1px solid transparent;
+  border-radius: 0.4rem;
+  background: transparent;
+  color: var(--color-fg);
+  font-size: var(--text-value);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.knob-value:hover:not(:disabled) {
+  border-color: var(--color-line);
+  cursor: text;
+}
+
+.knob-edit {
+  width: 4.5rem;
+  min-height: 1.6rem;
+  padding: 0.1rem 0.3rem;
+  border: 1px solid var(--color-acid);
+  border-radius: 0.4rem;
+  background: var(--color-bg);
+  color: var(--color-fg);
+  font: inherit;
+  font-size: var(--text-value);
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+.knob-edit[aria-invalid="true"] {
+  border-color: var(--color-danger);
+}
+
+.knob-note {
+  font-size: 0.625rem;
+  font-weight: 600;
+  line-height: 1.2;
+  color: var(--color-muted);
+  text-align: center;
+}
+
+.inspector-setting {
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--color-line);
+}
+
+/* Focused: the ring goes round the dial, where the eye is. */
+.knob-dial:has(.knob-input:focus-visible) {
+  outline: 2px solid var(--color-acid);
+  outline-offset: 3px;
+}
+
+/* Dragging: the arc and pointer brighten, and the cursor says so. */
+.knob[data-dragging="yes"] .knob-dial {
+  cursor: grabbing;
+}
+
+.knob[data-dragging="yes"] .knob-arc {
+  stroke-width: 3.6;
+  filter: drop-shadow(0 0 4px var(--color-acid));
+}
+
+.knob[data-dragging="yes"] .knob-pointer line {
+  stroke: var(--color-acid);
+}
+
+/* Modified: the label lights, so a glance down the rack shows what has been moved. */
+.knob[data-modified="yes"] .knob-label {
+  color: var(--color-fg);
+}
+
+/* Changed from outside (a reset elsewhere, a mix landing): a brief highlight. */
+.knob[data-updated="yes"] .knob-value {
+  border-color: color-mix(in srgb, var(--color-acid) 60%, transparent);
+  background: color-mix(in srgb, var(--color-acid) 12%, transparent);
+  transition: background 120ms ease-out;
+}
+
+.knob[data-disabled="yes"] {
+  opacity: 0.4;
+}
+
+.knob[data-disabled="yes"] .knob-dial {
+  cursor: not-allowed;
+}
+
+.knob[data-disabled="yes"] .knob-arc {
+  stroke: var(--color-muted);
+  filter: none;
+}
+
+/* A rack of knobs: three across in the inspector. */
+.knob-row {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-3) var(--space-2);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .knob[data-updated="yes"] .knob-value {
+    transition: none;
+  }
+}

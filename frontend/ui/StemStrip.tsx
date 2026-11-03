@@ -8,14 +8,22 @@
  * strength and says so, since nothing is wrong with it.
  */
 
+import { memo, useMemo } from 'react';
+import { barActivity } from '../lib/api';
 import { stemRange } from '../lib/contract';
 import { ICONS, isSilenced, type StemState } from '../lib/stems';
-import type { StemMeta } from '../lib/types';
-import { StatusIndicator, StemMeter, cx } from './controls';
+import type { StemId, StemMeta, TrackArrangement } from '../lib/types';
+import { editHistory } from '../lib/history';
+import { StatusIndicator, StemMeter, cx, useRangeGesture } from './controls';
 
 const VOLUME = stemRange('volume');
 
-export function StemStrip({
+/**
+ * Memoized, with callbacks that take the stem's id, so a strip re-renders only when
+ * something about it changes: its own fader, its state, or the playhead moving a step.
+ * A knob turning elsewhere no longer re-renders all eight.
+ */
+export const StemStrip = memo(function StemStrip({
   meta,
   index,
   state,
@@ -23,7 +31,8 @@ export function StemStrip({
   volume,
   muted,
   soloed,
-  activity,
+  track,
+  bar,
   col,
   selected,
   onVolume,
@@ -38,17 +47,27 @@ export function StemStrip({
   volume: number;
   muted: boolean;
   soloed: boolean;
-  /** Which of the current bar's sixteen steps have a hit or a note. */
-  activity: boolean[];
+  track: TrackArrangement;
+  /** The bar playing now, whose pattern the step row shows. */
+  bar: number;
   /** The step sounding now within the bar, or -1. */
   col: number;
   selected: boolean;
-  onVolume: (value: number) => void;
-  onCut: () => void;
-  onSolo: () => void;
-  onSelect: () => void;
+  onVolume: (id: StemId, value: number) => void;
+  onCut: (id: StemId) => void;
+  onSolo: (id: StemId) => void;
+  onSelect: (id: StemId) => void;
 }) {
   const Icon = ICONS[meta.id];
+  const activity = useMemo(() => barActivity(track, meta.id, bar), [track, meta.id, bar]);
+  const gesture = useRangeGesture(`stem.${meta.id}.volume`, volume);
+  /** Back to the track's own level for this stem, as one edit. */
+  const resetVolume = () => {
+    const home = track.mix[meta.id];
+    if (Math.abs(home - volume) < 1e-6) return;
+    editHistory.record(`stem.${meta.id}.volume`, volume, home);
+    onVolume(meta.id, home);
+  };
   const silenced = isSilenced(state);
   const headingId = `stem-${meta.id}`;
   return (
@@ -62,7 +81,7 @@ export function StemStrip({
         className="stem-spine"
         aria-pressed={selected}
         aria-label={`Inspect ${meta.name}`}
-        onClick={onSelect}
+        onClick={() => onSelect(meta.id)}
       >
         <Icon className="size-4 shrink-0" strokeWidth={2.2} aria-hidden />
         <span id={headingId} className="stem-name" role="heading" aria-level={3}>
@@ -87,7 +106,19 @@ export function StemStrip({
             {...VOLUME}
             value={volume}
             aria-valuetext={`${Math.round(volume * 100)}%`}
-            onChange={(event) => onVolume(Number(event.target.value))}
+            aria-keyshortcuts="Delete"
+            title="Double-click or Delete for the track's own level"
+            onChange={(event) => onVolume(meta.id, Number(event.target.value))}
+            {...gesture}
+            onDoubleClick={resetVolume}
+            onKeyDown={(event) => {
+              if (event.key === 'Delete' || event.key === 'Backspace') {
+                event.preventDefault();
+                resetVolume();
+                return;
+              }
+              gesture.onKeyDown();
+            }}
           />
         </label>
       </div>
@@ -99,7 +130,7 @@ export function StemStrip({
           className="badge stem-badge tap"
           aria-pressed={soloed}
           aria-label={`Solo ${meta.name}`}
-          onClick={onSolo}
+          onClick={() => onSolo(meta.id)}
         >
           Solo
         </button>
@@ -109,11 +140,11 @@ export function StemStrip({
           aria-pressed={muted}
           aria-label={`${muted ? 'Bring in' : 'Cut'} ${meta.name}`}
           aria-keyshortcuts={meta.keys}
-          onClick={onCut}
+          onClick={() => onCut(meta.id)}
         >
           {muted ? 'In' : 'Cut'}
         </button>
       </div>
     </article>
   );
-}
+});

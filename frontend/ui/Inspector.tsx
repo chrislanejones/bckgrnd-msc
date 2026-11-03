@@ -1,29 +1,42 @@
 /**
- * The inspector: the detailed controls for the selected stem, or for the master.
+ * The inspector: the effects rack for the master, or the selected stem.
  *
  * Detail lives here rather than on the first screen (docs/DESIGN_PHILOSOPHY.md,
- * "Progressive complexity"). Every range and default comes from the parameter
- * registry in contracts/parameters.json.
+ * "Progressive complexity"). Continuous parameters are knobs; the echo's note
+ * divisions stay a stepped row, because a division is a choice, not a position.
+ * Every control here is wired to a parameter the engine has and tested
+ * (engine-core/tests, tools/verify-audio.mjs); ranges and defaults come from
+ * contracts/parameters.json.
+ *
+ * A control with no audible effect in the current state says so: with the echo
+ * off, its feedback and return have nothing to act on and are disabled.
  */
 
-import { controlRange, param, stemRange } from '../lib/contract';
+import { defaultSend, param, stemRange } from '../lib/contract';
 import type { Instrument } from '../lib/instrument';
-import { MASTER_DEFAULT } from '../lib/instrument';
+import { EFFECT_DEFAULTS, MASTER_DEFAULT } from '../lib/instrument';
+import {
+  BALANCE,
+  DECAY,
+  FEEDBACK,
+  FILTER,
+  ISOLATOR,
+  LEVEL,
+  RESONANCE,
+  RETURN,
+  ROOM,
+  SEND,
+  SWING,
+  TEMPO,
+  WIDTH,
+} from '../lib/mappings';
 import { STEM_NAMES, type StemState } from '../lib/stems';
 import type { StemId, StemMeta } from '../lib/types';
-import { ControlLabel, Fader, PerformancePad, Segmented, StatusIndicator } from './controls';
+import { ControlLabel, Fader, PerformancePad, Segmented, StatusIndicator, useRangeGesture } from './controls';
+import { Knob } from './Knob';
+import { useKnobDragSetting, type KnobDrag } from './knobPrefs';
 
 export type InspectorTab = 'master' | 'stem';
-
-/** The balance reads in words: the useful positions are the ends and the middle. */
-export function stereoLabel(balance: number): string {
-  if (balance <= 0.02) return 'Left';
-  if (balance >= 0.98) return 'Right';
-  if (Math.abs(balance - 0.5) <= 0.02) return 'Stereo';
-  return balance < 0.5
-    ? `Left ${Math.round((0.5 - balance) * 200)}%`
-    : `Right ${Math.round((balance - 0.5) * 200)}%`;
-}
 
 const ECHO_NAMES: Record<string, string> = {
   '1/16': 'sixteenth',
@@ -33,6 +46,10 @@ const ECHO_NAMES: Record<string, string> = {
   '1/4': 'quarter',
   '1/4.': 'dotted quarter',
 };
+
+const ECHO_OPTIONS = (param('fx.echoTime').options ?? [])
+  .filter((o) => o.value !== 0)
+  .map((o) => ({ value: o.value, label: o.label, aria: `Echo every ${ECHO_NAMES[o.label] ?? o.label}` }));
 
 export function Inspector({
   tab,
@@ -66,7 +83,7 @@ export function Inspector({
         ]}
       />
       {tab === 'master' ? (
-        <MasterControls inst={inst} />
+        <MasterRack inst={inst} />
       ) : (
         <StemControls
           stem={stem}
@@ -77,113 +94,175 @@ export function Inspector({
           onShowPattern={onShowPattern}
         />
       )}
+      <KnobDragSetting />
     </div>
   );
 }
 
-function MasterControls({ inst }: { inst: Instrument }) {
-  const { track } = inst;
-  const tempo = controlRange('transport.bpm');
-  const swing = controlRange('transport.swing');
-  const level = controlRange('master.level');
-  const band = controlRange('fx.low');
-  const filter = controlRange('fx.filter');
-  const stereo = controlRange('fx.stereo');
-  const echoOptions = (param('fx.echoTime').options ?? []).filter((o) => o.value !== 0);
+/** Whether anything reaches the echo line: the stem sends (echo time on) or the throw. */
+function echoLive(inst: Instrument): boolean {
+  return inst.echoBeats > 0 || inst.echo;
+}
+
+function MasterRack({ inst }: { inst: Instrument }) {
+  const { track, effects, setEffect } = inst;
+  const echoOn = echoLive(inst);
+  const echoNote = !echoOn ? 'Echo is off' : inst.echo ? 'Held open by the throw' : undefined;
 
   return (
     <>
       <fieldset className="inspector-group">
         <legend className="inspector-legend">Tempo and feel</legend>
-        <Fader
-          label="Tempo"
-          display={inst.bpm}
-          unit="BPM"
-          value={inst.bpm}
-          {...tempo}
-          atDefault={!track || inst.bpm === track.bpm}
-          onChange={inst.setBpm}
-          onReset={() => track && inst.setBpm(track.bpm)}
-        />
-        <Fader
-          label="Swing"
-          display={Math.round(inst.swing * 100)}
-          value={inst.swing}
-          {...swing}
-          atDefault={!track || inst.swing === track.swing}
-          onChange={inst.setSwing}
-          onReset={() => track && inst.setSwing(track.swing)}
-        />
-      </fieldset>
-
-      <fieldset className="inspector-group">
-        <legend className="inspector-legend">Tone</legend>
-        {(
-          [
-            ['low', 'Low'],
-            ['mid', 'Mid'],
-            ['high', 'High'],
-          ] as const
-        ).map(([id, label]) => (
-          <Fader
-            key={id}
-            label={label}
-            display={Math.round(inst.bands[id] * 100)}
-            value={inst.bands[id]}
-            {...band}
-            atDefault={inst.bands[id] === 1}
-            onChange={(v) => inst.setBand(id, v)}
-            onReset={() => inst.setBand(id, 1)}
-            valueText={`${label} isolator ${Math.round(inst.bands[id] * 100)}%`}
+        <div className="knob-row">
+          <Knob
+            label="Tempo"
+            historyId="transport.bpm"
+            value={inst.bpm}
+            mapping={TEMPO}
+            defaultValue={track?.bpm ?? inst.bpm}
+            onChange={inst.setBpm}
           />
-        ))}
-        <Fader
-          label="Filter"
-          display={Math.round(inst.filter * 100)}
-          value={inst.filter}
-          {...filter}
-          atDefault={inst.filter === 1}
-          onChange={inst.setFilter}
-          onReset={() => inst.setFilter(1)}
-        />
+          <Knob
+            label="Swing"
+            historyId="transport.swing"
+            value={inst.swing}
+            mapping={SWING}
+            defaultValue={track?.swing ?? inst.swing}
+            onChange={inst.setSwing}
+          />
+        </div>
       </fieldset>
 
       <fieldset className="inspector-group">
-        <legend className="inspector-legend">Space</legend>
+        <legend className="inspector-legend">Filter</legend>
+        <div className="knob-row">
+          <Knob
+            label="Cutoff"
+            historyId="fx.filter"
+            value={inst.filter}
+            mapping={FILTER}
+            defaultValue={1}
+            onChange={inst.setFilter}
+          />
+          <Knob
+            label="Resonance"
+            historyId="fx.filterQ"
+            value={effects['fx.filterQ']}
+            mapping={RESONANCE}
+            defaultValue={EFFECT_DEFAULTS['fx.filterQ']}
+            onChange={(v) => setEffect('fx.filterQ', v)}
+            note={inst.filter >= 0.999 ? 'Heard as it closes' : undefined}
+          />
+        </div>
+      </fieldset>
+
+      <fieldset className="inspector-group">
+        <legend className="inspector-legend">Isolators</legend>
+        <div className="knob-row">
+          {(
+            [
+              ['low', 'Low', 'fx.low'],
+              ['mid', 'Mid', 'fx.mid'],
+              ['high', 'High', 'fx.high'],
+            ] as const
+          ).map(([id, label, historyId]) => (
+            <Knob
+              key={id}
+              label={label}
+              historyId={historyId}
+              value={inst.bands[id]}
+              mapping={ISOLATOR}
+              defaultValue={1}
+              onChange={(v) => inst.setBand(id, v)}
+            />
+          ))}
+        </div>
+      </fieldset>
+
+      <fieldset className="inspector-group">
+        <legend className="inspector-legend">Echo</legend>
         <Segmented<number>
-          label={inst.echoBeats === 0 ? 'Echo time · off' : 'Echo time'}
+          label={inst.echoBeats === 0 ? 'Time · off' : 'Time'}
           value={inst.echoBeats}
           onPick={inst.pickEchoTime}
-          options={echoOptions.map((o) => ({
-            value: o.value,
-            label: o.label,
-            aria: `Echo every ${ECHO_NAMES[o.label] ?? o.label}`,
-          }))}
+          options={ECHO_OPTIONS}
         />
-        <Fader
-          label="Stereo"
-          display={stereoLabel(inst.stereo)}
-          value={inst.stereo}
-          {...stereo}
-          atDefault={inst.stereo === 0.5}
-          onChange={inst.setStereo}
-          onReset={() => inst.setStereo(0.5)}
-          valueText={stereoLabel(inst.stereo)}
-          ends={['Left', 'Stereo', 'Right']}
-        />
+        <div className="knob-row">
+          <Knob
+            label="Feedback"
+            historyId="fx.echoFeedback"
+            value={effects['fx.echoFeedback']}
+            mapping={FEEDBACK}
+            defaultValue={EFFECT_DEFAULTS['fx.echoFeedback']}
+            onChange={(v) => setEffect('fx.echoFeedback', v)}
+            disabled={!echoOn}
+            note={echoNote}
+          />
+          <Knob
+            label="Return"
+            historyId="fx.echoReturn"
+            value={effects['fx.echoReturn']}
+            mapping={RETURN}
+            defaultValue={EFFECT_DEFAULTS['fx.echoReturn']}
+            onChange={(v) => setEffect('fx.echoReturn', v)}
+            disabled={!echoOn}
+            note={echoNote}
+          />
+        </div>
+      </fieldset>
+
+      <fieldset className="inspector-group">
+        <legend className="inspector-legend">Room</legend>
+        <div className="knob-row">
+          <Knob
+            label="Mix"
+            historyId="fx.reverbMix"
+            value={effects['fx.reverbMix']}
+            mapping={ROOM}
+            defaultValue={EFFECT_DEFAULTS['fx.reverbMix']}
+            onChange={(v) => setEffect('fx.reverbMix', v)}
+          />
+          <Knob
+            label="Decay"
+            historyId="fx.reverbDecay"
+            value={effects['fx.reverbDecay']}
+            mapping={DECAY}
+            defaultValue={EFFECT_DEFAULTS['fx.reverbDecay']}
+            onChange={(v) => setEffect('fx.reverbDecay', v)}
+            disabled={effects['fx.reverbMix'] <= 0}
+            note={effects['fx.reverbMix'] <= 0 ? 'Room is off' : undefined}
+          />
+        </div>
       </fieldset>
 
       <fieldset className="inspector-group">
         <legend className="inspector-legend">Output</legend>
-        <Fader
-          label="Master"
-          display={Math.round(inst.master * 100)}
-          value={inst.master}
-          {...level}
-          atDefault={inst.master === MASTER_DEFAULT}
-          onChange={inst.setMaster}
-          onReset={() => inst.setMaster(MASTER_DEFAULT)}
-        />
+        <div className="knob-row">
+          <Knob
+            label="Width"
+            historyId="fx.width"
+            value={effects['fx.width']}
+            mapping={WIDTH}
+            defaultValue={EFFECT_DEFAULTS['fx.width']}
+            onChange={(v) => setEffect('fx.width', v)}
+          />
+          <Knob
+            label="Balance"
+            historyId="fx.stereo"
+            value={inst.stereo}
+            mapping={BALANCE}
+            defaultValue={0.5}
+            onChange={inst.setStereo}
+          />
+          <Knob
+            label="Master"
+            historyId="master.level"
+            value={inst.master}
+            mapping={LEVEL}
+            defaultValue={MASTER_DEFAULT}
+            onChange={inst.setMaster}
+          />
+        </div>
       </fieldset>
     </>
   );
@@ -205,6 +284,8 @@ function StemControls({
   onShowPattern: () => void;
 }) {
   const volume = inst.vols?.[stem] ?? 0;
+  const gesture = useRangeGesture(`stem.${stem}.volume`, volume);
+  const sendsOn = inst.echoBeats > 0;
   return (
     <>
       <div className="inspector-stem-head">
@@ -214,14 +295,28 @@ function StemControls({
         </div>
         <StatusIndicator state={state} label={stateLabel} />
       </div>
-      <Fader
-        label="Volume"
-        display={Math.round(volume * 100)}
-        unit="%"
-        value={volume}
-        {...stemRange('volume')}
-        onChange={(v) => inst.setStemVolume(stem, v)}
-      />
+      <div {...gesture}>
+        <Fader
+          label="Volume"
+          display={Math.round(volume * 100)}
+          unit="%"
+          value={volume}
+          {...stemRange('volume')}
+          onChange={(v) => inst.setStemVolume(stem, v)}
+        />
+      </div>
+      <div className="knob-row">
+        <Knob
+          label="Echo send"
+          historyId={`stem.${stem}.send`}
+          value={inst.sends[stem]}
+          mapping={SEND}
+          defaultValue={defaultSend(stem)}
+          onChange={(v) => inst.setStemSend(stem, v)}
+          disabled={!sendsOn}
+          note={sendsOn ? undefined : 'Echo time is off'}
+        />
+      </div>
       <div className="inspector-pads">
         <PerformancePad
           size="md"
@@ -246,5 +341,22 @@ function StemControls({
         </button>
       </div>
     </>
+  );
+}
+
+function KnobDragSetting() {
+  const { mode, setMode } = useKnobDragSetting();
+  return (
+    <div className="inspector-setting">
+      <Segmented<KnobDrag>
+        label="Knobs turn by dragging"
+        value={mode}
+        onPick={setMode}
+        options={[
+          { value: 'vertical', label: 'Up and down' },
+          { value: 'circular', label: 'Round' },
+        ]}
+      />
+    </div>
   );
 }

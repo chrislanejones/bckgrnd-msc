@@ -95,6 +95,10 @@ try {
       // Messages posted at `at` ms after play, and named spans whose peak is wanted.
       timeline = [],
       windows = [],
+      // Ignore the first `settleMs` for the L-R difference and RMS, so glides land first.
+      settleMs = 250,
+      // Average the spectrum over the settled window, for checks about one band.
+      spectrum = false,
     } = {}) {
       const ctx = new AudioContext({ latencyHint: 'interactive' });
       await ctx.audioWorklet.addModule('/build/engine-worklet.js');
@@ -138,6 +142,18 @@ try {
       node.connect(splitter);
       splitter.connect(analyserL, 0);
       splitter.connect(analyserR, 1);
+      // L - R, formed inside the graph so the two channels are sample-aligned. Reading
+      // two analysers one after the other can straddle a render quantum, which made an
+      // exactly mono output look 128 samples out of step with itself.
+      const side = ctx.createGain();
+      const invert = ctx.createGain();
+      invert.gain.value = -1;
+      splitter.connect(side, 0);
+      splitter.connect(invert, 1);
+      invert.connect(side);
+      const analyserD = ctx.createAnalyser();
+      analyserD.fftSize = 2048;
+      side.connect(analyserD);
       // A muted sink: headless Chrome has no output device, and some builds will
       // not run a graph whose destination is silent.
       const sink = ctx.createGain();
@@ -166,6 +182,13 @@ try {
       let peakL = 0;
       let peakR = 0;
       let nonFinite = 0;
+      let maxDiff = 0;
+      let sumSq = 0;
+      let count = 0;
+      const bufD = new Float32Array(analyserD.fftSize);
+      const freqBuf = new Float32Array(analyserL.frequencyBinCount);
+      const power = new Float64Array(analyserL.frequencyBinCount);
+      let spectra = 0;
 
       const deadline = performance.now() + ms;
       while (performance.now() < deadline) {
@@ -181,6 +204,19 @@ try {
           if (Math.abs(r) > peakR) peakR = Math.abs(r);
         }
         const now = performance.now() - t0;
+        if (now >= settleMs) {
+          analyserD.getFloatTimeDomainData(bufD);
+          for (let i = 0; i < bufL.length; i += 1) {
+            maxDiff = Math.max(maxDiff, Math.abs(bufD[i]));
+            sumSq += bufL[i] * bufL[i] + bufR[i] * bufR[i];
+            count += 2;
+          }
+          if (spectrum) {
+            analyserL.getFloatFrequencyData(freqBuf);
+            for (let i = 0; i < freqBuf.length; i += 1) power[i] += 10 ** (freqBuf[i] / 10);
+            spectra += 1;
+          }
+        }
         for (const w of windows) {
           if (now < w.from || now > w.to) continue;
           for (let i = 0; i < bufL.length; i += 1) {
@@ -195,6 +231,11 @@ try {
         peakL,
         peakR,
         nonFinite,
+        maxDiff,
+        rms: count ? Math.sqrt(sumSq / count) : 0,
+        // Mean power per bin, and the bin width in Hz, when asked for.
+        power: spectrum ? Array.from(power, (p) => p / Math.max(1, spectra)) : null,
+        binHz: ctx.sampleRate / analyserL.fftSize,
         errors,
         windowPeak,
         stepLog,
@@ -274,6 +315,46 @@ try {
         { type: 'stereo', mode: 2 },
       ],
     });
+
+    // 5b. The effects rack's messages each reach the engine and change the sound.
+    //     The DSP itself is tested in Rust; this proves the worklet plumbing.
+    const fx = (commands) => measure({ ms: 1500, commands });
+    out.fxDefault = await fx([]);
+    out.fxMono = await fx([{ type: 'width', value: 0 }]);
+    // Resonance is a peak at the cutoff, so it is measured there: the power in a band
+    // around the cutoff with the filter closed to 0.3 (240 * 75^0.3, about 876 Hz).
+    out.fxResonance = await measure({
+      ms: 1500,
+      spectrum: true,
+      commands: [
+        { type: 'filter', value: 0.3 },
+        { type: 'filterQ', value: 6 },
+      ],
+    });
+    out.fxDark = await measure({ ms: 1500, spectrum: true, commands: [{ type: 'filter', value: 0.3 }] });
+    // The room is heard as what rings on after the music stops feeding it: cut every
+    // stem at 0.9 s and measure what is left a quarter second later.
+    const roomRun = (commands) =>
+      measure({
+        ms: 1550,
+        commands,
+        timeline: Array.from({ length: 8 }, (_, index) => ({
+          at: 900,
+          message: { type: 'mute', index, value: true },
+        })),
+        windows: [{ name: 'tail', from: 1150, to: 1500 }],
+      });
+    out.fxRoomDefault = await roomRun([]);
+    out.fxRoom = await roomRun([
+      { type: 'reverbMix', value: 0.5 },
+      { type: 'reverbDecay', value: 2.5 },
+    ]);
+    out.fxEcho = await fx([
+      { type: 'echoFeedback', value: 0.9 },
+      { type: 'echoReturn', value: 1 },
+      { type: 'send', index: 0, value: 1 },
+      { type: 'send', index: 1, value: 1 },
+    ]);
 
     // 6. Scratch: grab at 1.5 s, drag back at normal speed, let go at step 64.
     out.scratch = await measure({
@@ -359,6 +440,52 @@ try {
     result.tempo.peak > 0.01 && result.tempo.errors.length === 0,
     `peak ${result.tempo.peak.toFixed(4)}${result.tempo.errors.length ? ` errors: ${result.tempo.errors.join('; ')}` : ''}`,
   );
+
+  {
+    const d = result.fxDefault;
+    const differs = (name, r, threshold = 0.05) => {
+      const change = Math.abs(r.rms - d.rms) / d.rms;
+      check(
+        `${name} changes the sound`,
+        change > threshold && r.errors.length === 0 && r.nonFinite === 0,
+        `rms ${d.rms.toFixed(4)} -> ${r.rms.toFixed(4)} (${(change * 100).toFixed(1)}%)${r.errors.length ? ` errors: ${r.errors.join('; ')}` : ''}`,
+      );
+    };
+    check(
+      'width 0 folds the output to mono',
+      result.fxMono.maxDiff < 1e-4 && d.maxDiff > 0.01 && result.fxMono.errors.length === 0,
+      `max |L-R| ${result.fxMono.maxDiff.toExponential(2)} (default ${d.maxDiff.toFixed(3)})`,
+    );
+    {
+      const band = (r, lo, hi) => {
+        let sum = 0;
+        r.power.forEach((p, i) => {
+          const f = i * r.binHz;
+          if (f >= lo && f <= hi) sum += p;
+        });
+        return sum;
+      };
+      const cutoff = 240 * 75 ** 0.3;
+      const flat = band(result.fxDark, cutoff * 0.85, cutoff * 1.15);
+      const peaked = band(result.fxResonance, cutoff * 0.85, cutoff * 1.15);
+      const db = 10 * Math.log10(peaked / flat);
+      check(
+        'filter resonance lifts the band at the cutoff',
+        db > 3 && result.fxResonance.errors.length === 0,
+        `${db.toFixed(1)} dB around ${Math.round(cutoff)} Hz`,
+      );
+    }
+    {
+      const before = result.fxRoomDefault.windowPeak.tail;
+      const after = result.fxRoom.windowPeak.tail;
+      check(
+        'room mix and decay ring on after the music stops',
+        after > before * 3 && after > 1e-3 && result.fxRoom.errors.length === 0,
+        `tail peak ${before.toExponential(2)} -> ${after.toExponential(2)}`,
+      );
+    }
+    differs('echo feedback, return and stem sends', result.fxEcho);
+  }
 
   {
     const r = result.scratch;
