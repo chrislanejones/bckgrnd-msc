@@ -38,3 +38,7 @@
 /dist
 .netlify
 /public/index.html
+
+# PHPUnit
+/.phpunit.result.cache
+/.phpunit.cache

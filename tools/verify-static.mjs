@@ -20,6 +20,10 @@ import { join } from 'node:path';
 const baseUrl = process.argv[2] ?? 'http://127.0.0.1:8090';
 
 function findChromium() {
+  // An explicit path wins: CI images and sandboxes put Chromium in their own places.
+  if (process.env.PLAYWRIGHT_CHROMIUM && existsSync(process.env.PLAYWRIGHT_CHROMIUM)) {
+    return process.env.PLAYWRIGHT_CHROMIUM;
+  }
   const cache = join(homedir(), '.cache', 'ms-playwright');
   let entries = [];
   try {

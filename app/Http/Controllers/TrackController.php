@@ -37,7 +37,6 @@ class TrackController extends Controller
                 'bpm' => $track->bpm,
                 'swing' => $track->swing,
                 'mix' => $track->mix,
-                'parts' => Library::PARTS,
             ];
         }
 
@@ -55,6 +54,10 @@ class TrackController extends Controller
             'drums' => Library::DRUMS,
             'music' => Library::MUSIC,
             'tracks' => $tracks,
+            // The song parts, once for the whole library. This used to sit inside
+            // every track, so the API and the static export (and `LibraryResponse`
+            // in types.ts) disagreed on where it lived.
+            'parts' => Library::PARTS,
         ]);
     }
 

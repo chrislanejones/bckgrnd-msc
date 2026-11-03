@@ -60,6 +60,11 @@ stale() {
   [ -n "$(find "$@" -type f -newer "$out" -print -quit 2>/dev/null)" ]
 }
 
+# Laravel's runtime directories are gitignored, so a fresh clone has none of them, and
+# the page then fails with "Please provide a valid cache path" (the API still works,
+# which makes it look like a frontend problem).
+mkdir -p storage/framework/views storage/framework/cache storage/framework/sessions storage/logs
+
 if stale vendor/autoload.php composer.json composer.lock; then
   echo "==> composer install"
   composer install --no-interaction

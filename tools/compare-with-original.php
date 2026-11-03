@@ -52,11 +52,30 @@ $fields = ['id', 'name', 'kind', 'bpm', 'swing', 'mix'];
 const GROOVE_START = 4 * 16;
 const GROOVE_END = 8 * 16;
 
+/**
+ * Tracks that deliberately no longer match the original, and why.
+ *
+ * Parity proves the port is faithful. A track that was rewritten on purpose after the
+ * port is not a transcription error, and failing on it left `composer test` red for
+ * every run, which trains everyone to ignore the gate. Listing it here keeps the
+ * departure visible and reviewed, and every other track is still checked exactly.
+ */
+const REWRITTEN = [
+    'kettle' => 'rewritten 10-05-2026: the original had F maj7 over a B-flat bass',
+];
+
 $problems = [];
 $checked = 0;
 $divergences = [];
+$skipped = [];
 
 foreach ($reference as $id => $expected) {
+    if (isset(REWRITTEN[$id])) {
+        $skipped[] = "{$id}: ".REWRITTEN[$id];
+
+        continue;
+    }
+
     $track = Library::find((string) $id);
 
     if ($track === null) {
@@ -105,10 +124,9 @@ foreach ($reference as $id => $expected) {
     }
 }
 
-$extra = array_diff(array_keys(Library::all()), array_keys($reference));
-foreach ($extra as $id) {
-    $problems[] = "{$id}: present in PHP but not in the reference";
-}
+// Tracks added after the port (the Breaks section) have no original to match.
+// They are reported, not failed; the arrangement tests cover them.
+$extra = array_values(array_diff(array_keys(Library::all()), array_keys($reference)));
 
 if ($problems !== []) {
     fwrite(STDERR, sprintf("%d mismatches out of %d checks:\n", count($problems), $checked));
@@ -122,8 +140,16 @@ if ($problems !== []) {
 printf(
     "OK: %d checks across %d tracks — metadata and groove sections match the original exactly.\n",
     $checked,
-    count($reference),
+    count($reference) - count($skipped),
 );
+
+if ($skipped !== []) {
+    printf("Not compared, rewritten on purpose: %s\n", implode('; ', $skipped));
+}
+
+if ($extra !== []) {
+    printf("Not in the original, so not compared: %s\n", implode(', ', $extra));
+}
 
 if ($divergences !== []) {
     printf(
