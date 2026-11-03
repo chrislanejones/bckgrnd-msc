@@ -46,6 +46,11 @@ export type TrackArrangement = TrackSummary & {
   lead: (NoteEvent | null)[];
   pad: (NoteEvent | null)[];
   arp: (NoteEvent | null)[];
+  /**
+   * Hand percussion on the hats stem, velocity lanes keyed by instrument (`shaker`,
+   * `rim`, `congaHi`, `congaLo`). Only lanes with hits are sent.
+   */
+  perc?: Record<string, number[]>;
 };
 
 export type LibraryResponse = {

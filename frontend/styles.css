@@ -1,6 +1,10 @@
 @import "tailwindcss";
 
-
+/*
+ * Tokens. The rules for using them are in docs/DESIGN_PHILOSOPHY.md: color explains
+ * state (acid for on, warn for "needs attention", danger for broken), surfaces stay
+ * neutral, and every control is built from the shells in frontend/ui/controls.tsx.
+ */
 @theme {
   --color-bg: #090a0c;
   --color-surface: #14161b;
@@ -10,8 +14,28 @@
   --color-muted: #8e939c;
   --color-acid: #c6f24d;
   --color-acid-ink: #14180a;
+  --color-warn: #f2b84d;
+  --color-danger: #ff5f57;
+  --color-deck-b: #8eb7ff;
   --font-display: "Syne", "Avenir Next", "Segoe UI", ui-sans-serif, system-ui, sans-serif;
   --font-sans: "Outfit", "Segoe UI", ui-sans-serif, system-ui, sans-serif;
+}
+
+:root {
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-6: 1.5rem;
+  --control-sm: 2rem;
+  --control-md: 2.75rem;
+  --control-lg: 3.25rem;
+  --radius-control: 0.875rem;
+  --text-label: 0.6875rem;
+  --text-value: 0.8125rem;
+  --transport-h: 4.25rem;
+  --raised: linear-gradient(var(--color-raised), var(--color-surface));
+  --raised-shadow: inset 0 1px 0 rgba(243, 239, 230, 0.06), 0 2px 0 #000;
 }
 
 html {
@@ -40,31 +64,1532 @@ body {
     touch-action: manipulation;
   }
 
+  /* One focus treatment everywhere: never removed, never recolored. */
   :focus-visible {
     outline: 2px solid var(--color-acid);
     outline-offset: 2px;
   }
+
+  fieldset {
+    margin: 0;
+    padding: 0;
+    border: 0;
+    min-width: 0;
+  }
 }
 
-.scope {
+.text-deck-b {
+  color: var(--color-deck-b);
+}
+
+/* ------------------------------------------------------------------------ */
+/* Layout                                                                   */
+/* ------------------------------------------------------------------------ */
+
+.app {
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+}
+
+.workspace {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 16rem minmax(0, 1fr) 20rem;
+  align-items: start;
+  gap: var(--space-4);
+  width: 100%;
+  max-width: 100rem;
+  margin: 0 auto;
+  padding: var(--space-4);
+}
+
+.perform-area {
+  display: grid;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+.library-panel,
+.inspector {
+  position: sticky;
+  top: calc(var(--transport-h) + var(--space-4));
+  max-height: calc(100dvh - var(--transport-h) - 2 * var(--space-4));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+}
+
+/* Tablet: the library becomes an overlay opened from the transport. */
+@media (max-width: 1179.98px) {
+  .workspace {
+    grid-template-columns: minmax(0, 1fr) 19rem;
+  }
+
+  .library-panel {
+    position: fixed;
+    top: var(--transport-h);
+    left: 0;
+    bottom: 0;
+    z-index: 40;
+    width: min(20rem, 88vw);
+    max-height: none;
+    padding: var(--space-4);
+    background: var(--color-bg);
+    border-right: 1px solid var(--color-line);
+    box-shadow: 1rem 0 3rem rgba(0, 0, 0, 0.6);
+    transform: translateX(-102%);
+    visibility: hidden;
+    transition:
+      transform 220ms cubic-bezier(0.2, 0, 0, 1),
+      visibility 0s linear 220ms;
+  }
+
+  .app[data-library="open"] .library-panel {
+    transform: none;
+    visibility: visible;
+    transition: transform 220ms cubic-bezier(0.2, 0, 0, 1);
+  }
+
+  .scrim {
+    position: fixed;
+    inset: var(--transport-h) 0 0 0;
+    z-index: 35;
+    border: 0;
+    background: rgba(0, 0, 0, 0.5);
+  }
+}
+
+/* Phone: one view at a time — Perform, Mix or Edit — with the transport pinned. */
+@media (max-width: 899.98px) {
+  :root {
+    --transport-h: 6.75rem;
+  }
+
+  .workspace {
+    grid-template-columns: minmax(0, 1fr);
+    padding: var(--space-3) var(--space-4) calc(var(--control-md) + 2.5rem + env(safe-area-inset-bottom));
+  }
+
+  .inspector {
+    position: static;
+    max-height: none;
+    overflow: visible;
+  }
+
+  /* The library sheet stops above the view tabs rather than running under them. */
+  .library-panel {
+    bottom: calc(var(--control-md) + 1rem + env(safe-area-inset-bottom));
+  }
+
+  .scrim {
+    bottom: calc(var(--control-md) + 1rem + env(safe-area-inset-bottom));
+  }
+
+  .app[data-view="perform"] [data-views]:not([data-views~="perform"]),
+  .app[data-view="mix"] [data-views]:not([data-views~="mix"]),
+  .app[data-view="edit"] [data-views]:not([data-views~="edit"]) {
+    display: none;
+  }
+}
+
+/* ------------------------------------------------------------------------ */
+/* Transport                                                                */
+/* ------------------------------------------------------------------------ */
+
+.transport {
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  display: grid;
+  grid-template-columns: auto auto minmax(8rem, 1fr) auto auto auto auto;
+  align-items: center;
+  gap: var(--space-4);
+  min-height: var(--transport-h);
+  padding: var(--space-2) var(--space-4);
+  padding-top: max(var(--space-2), env(safe-area-inset-top));
+  border-bottom: 1px solid var(--color-line);
+  background: color-mix(in srgb, var(--color-bg) 92%, transparent);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+
+.transport-brand {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.wordmark {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 1.125rem;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+}
+
+.play {
+  display: grid;
+  place-items: center;
+  width: var(--control-lg);
+  height: var(--control-lg);
+  border: 0;
+  border-radius: 999px;
+  background: var(--color-acid);
+  color: var(--color-acid-ink);
+  box-shadow: 0 2px 0 #000, 0 0 0 0 transparent;
+}
+
+.app[data-playing="yes"] .play {
+  box-shadow: 0 2px 0 #000, 0 0 1.25rem color-mix(in srgb, var(--color-acid) 35%, transparent);
+}
+
+.now-playing {
+  min-width: 0;
+}
+
+.now-title {
+  display: flex;
+  gap: 0.35rem;
+  min-width: 0;
+  margin: 0;
+  font-size: 0.9375rem;
+  font-weight: 700;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.now-title .truncate {
+  min-width: 0;
+}
+
+.now-sub {
+  margin: 0;
+  overflow: hidden;
+  font-size: 0.75rem;
+  color: var(--color-muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.song-position {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.part-chips {
+  display: flex;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.part-chip {
+  padding: 0.2rem 0.5rem;
+  border: 1px solid var(--color-line);
+  font-size: 0.625rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  line-height: 1.2;
+  text-transform: uppercase;
+  color: var(--color-muted);
+}
+
+.part-chip:first-child {
+  border-radius: 999px 0 0 999px;
+}
+
+.part-chip:last-child {
+  border-radius: 0 999px 999px 0;
+}
+
+.part-chip.is-on {
+  border-color: var(--color-acid);
+  background: var(--color-acid);
+  color: var(--color-acid-ink);
+}
+
+.bar-readout,
+.tempo-readout {
+  margin: 0;
+  font-size: var(--text-value);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.bar-readout {
+  min-width: 4.75rem;
+}
+
+.tempo-readout {
+  font-size: 1rem;
+  font-weight: 700;
+}
+
+.save-status {
+  justify-self: end;
+}
+
+/* Master meter: two thin bars, a peak-hold tick, a numeric peak, and a clip light. */
+.master-meter {
+  display: grid;
+  grid-template-columns: 8rem auto auto;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.master-meter-bars {
+  display: grid;
+  gap: 3px;
+}
+
+.master-meter-row {
+  display: grid;
+  grid-template-columns: 0.6rem 1fr;
+  align-items: center;
+  gap: 4px;
+}
+
+.master-meter-ch {
+  font-size: 0.5625rem;
+  font-weight: 700;
+  color: var(--color-muted);
+}
+
+.master-meter-well {
+  position: relative;
+  height: 0.3rem;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--color-line);
+}
+
+.master-meter-fill {
+  position: absolute;
+  inset: 0;
+  transform: scaleX(0);
+  transform-origin: left center;
+  background: var(--color-acid);
+}
+
+.master-meter-fill[data-hot="yes"] {
+  background: var(--color-warn);
+}
+
+.master-meter-tick {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 2px;
+  background: var(--color-fg);
+  opacity: 0.8;
+}
+
+.master-meter-readout {
+  min-width: 3.75rem;
+  font-size: 0.6875rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-muted);
+  text-align: right;
+}
+
+.clip-light {
+  padding: 0.15rem 0.4rem;
+  border: 1px solid var(--color-line);
+  border-radius: 0.3rem;
+  font-size: 0.5625rem;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--color-muted);
+}
+
+.clip-light.is-on {
+  border-color: var(--color-danger);
+  background: var(--color-danger);
+  color: #1a0605;
+}
+
+@media (max-width: 1379.98px) {
+  .master-meter-readout {
+    display: none;
+  }
+}
+
+@media (max-width: 1179.98px) {
+  .transport {
+    grid-template-columns: auto auto minmax(6rem, 1fr) auto auto auto auto;
+  }
+
+  .save-status .status-text {
+    display: none;
+  }
+
+  .master-meter {
+    grid-template-columns: 6rem auto;
+  }
+}
+
+@media (max-width: 899.98px) {
+  .transport {
+    grid-template-columns: auto auto minmax(0, 1fr) auto auto;
+    grid-template-areas:
+      "brand play now tempo save"
+      "pos pos pos meter meter";
+    row-gap: var(--space-2);
+    column-gap: var(--space-3);
+    padding: var(--space-2) var(--space-4);
+  }
+
+  .transport-brand { grid-area: brand; }
+  .play { grid-area: play; width: var(--control-md); height: var(--control-md); }
+  .now-playing { grid-area: now; }
+  .tempo-readout { grid-area: tempo; }
+  .song-position { grid-area: pos; gap: var(--space-2); }
+  .master-meter { grid-area: meter; grid-template-columns: 4rem auto; gap: 0.35rem; justify-self: end; }
+
+  /* The clip light keeps its color but loses its word, so the row fits a phone. */
+  .clip-light {
+    width: 0.7rem;
+    height: 0.7rem;
+    padding: 0;
+    overflow: hidden;
+    border-radius: 999px;
+    font-size: 0;
+  }
+
+  .bar-word {
+    display: none;
+  }
+  .save-status { grid-area: save; }
+
+  .wordmark {
+    font-size: 0;
+  }
+
+  .wordmark::before {
+    content: "b";
+    font-size: 1.25rem;
+    color: var(--color-acid);
+  }
+
+  .part-chip {
+    padding: 0.2rem 0.3rem;
+    font-size: 0.5625rem;
+    letter-spacing: 0.03em;
+  }
+
+  .bar-readout {
+    min-width: 0;
+  }
+}
+
+@media (max-width: 379.98px) {
+  .part-chip {
+    font-size: 0.5rem;
+  }
+}
+
+/* ------------------------------------------------------------------------ */
+/* Shells                                                                   */
+/* ------------------------------------------------------------------------ */
+
+.panel {
+  min-width: 0;
+  padding: var(--space-3) var(--space-4) var(--space-4);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-control);
+  background: color-mix(in srgb, var(--color-surface) 55%, var(--color-bg));
+}
+
+.panel-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2) var(--space-3);
+  margin-bottom: var(--space-3);
+}
+
+.panel-title {
+  margin: 0;
+  font-size: var(--text-label);
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--color-muted);
+}
+
+.panel-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.control-label {
+  display: block;
+  font-size: var(--text-label);
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  line-height: 1.2;
+  text-transform: uppercase;
+  color: var(--color-muted);
+}
+
+.value-readout {
+  font-size: var(--text-value);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-fg);
+}
+
+.value-unit {
+  font-size: 0.6875rem;
+  font-weight: 500;
+  color: var(--color-muted);
+}
+
+.hint-line {
+  margin: var(--space-3) 0 0;
+  font-size: 0.75rem;
+  color: var(--color-muted);
+}
+
+.empty-note {
+  margin: var(--space-2) 0;
+  font-size: 0.75rem;
+  line-height: 1.45;
+  color: var(--color-muted);
+}
+
+.icon-button {
+  display: grid;
+  place-items: center;
+  width: var(--control-sm);
+  height: var(--control-sm);
+  border: 1px solid var(--color-line);
+  border-radius: 999px;
+  background: var(--color-surface);
+  color: var(--color-fg);
+}
+
+.icon-button:hover {
+  border-color: color-mix(in srgb, var(--color-acid) 45%, var(--color-line));
+}
+
+.text-button {
+  min-height: var(--control-sm);
+  padding: 0.25rem 0.85rem;
+  border: 1px solid var(--color-line);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--color-fg);
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.text-button:hover,
+.text-button[aria-expanded="true"] {
+  border-color: var(--color-acid);
+}
+
+/* Badges: the small pill family (Solo, Cut, Reset). */
+.badge {
+  min-height: 1.6rem;
+  padding: 0.15rem 0;
+  border: 1px solid var(--color-line);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--color-muted);
+  font-size: var(--text-label);
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.badge[aria-pressed="true"] {
+  border-color: var(--color-acid);
+  background: var(--color-acid);
+  color: var(--color-acid-ink);
+}
+
+.badge-reset {
+  min-height: 1.35rem;
+  padding: 0.15rem 0.55rem;
+  font-size: 0.625rem;
+}
+
+.badge-reset:not(:disabled):hover {
+  border-color: var(--color-acid);
+  color: var(--color-fg);
+}
+
+.badge-reset:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.badge-static {
+  padding: 0.1rem 0.45rem;
+  border: 1px solid var(--color-line);
+  border-radius: 999px;
+  font-size: 0.5625rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--color-muted);
+}
+
+/* Segmented: mutually exclusive pills in one row. */
+.segmented-block {
+  display: grid;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.segmented {
+  display: grid;
+  gap: 3px;
+}
+
+.segment {
+  min-width: 0;
+  min-height: var(--control-sm);
+  padding: 0.3rem 0.5rem;
+  border: 1px solid var(--color-line);
+  border-radius: 999px;
+  background: var(--color-surface);
+  color: var(--color-fg);
+  font-size: 0.75rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.segment:hover {
+  border-color: color-mix(in srgb, var(--color-acid) 40%, var(--color-line));
+}
+
+.segment[aria-pressed="true"] {
+  border-color: var(--color-acid);
+  background: var(--color-acid);
+  color: var(--color-acid-ink);
+}
+
+/* Pads: raised, pressable, lit when latched. */
+.pad {
+  display: grid;
+  place-content: center;
+  gap: 0.1rem;
+  min-height: var(--control-lg);
+  padding: 0.25rem 0.5rem;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-control);
+  background: var(--raised);
+  box-shadow: var(--raised-shadow);
+  color: var(--color-fg);
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.pad-md {
+  min-height: var(--control-md);
+}
+
+.pad:hover {
+  border-color: color-mix(in srgb, var(--color-acid) 35%, var(--color-line));
+}
+
+.pad:active {
+  box-shadow: inset 0 1px 0 rgba(243, 239, 230, 0.04), 0 0 0 #000;
+  translate: 0 1px;
+}
+
+.pad[aria-pressed="true"] {
+  border-color: var(--color-acid);
+  background: var(--color-acid);
+  color: var(--color-acid-ink);
+  box-shadow: 0 0 1rem color-mix(in srgb, var(--color-acid) 35%, transparent);
+}
+
+.pad-label {
+  font-size: 0.8125rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  line-height: 1.1;
+}
+
+.pad-hint {
+  font-size: 0.5625rem;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  opacity: 0.6;
+}
+
+/* Status: a dot and words, one per state in the stem vocabulary. */
+.status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-width: 0;
+  font-size: 0.75rem;
+  font-weight: 600;
+  line-height: 1.2;
+  color: var(--color-fg);
+}
+
+.status-compact {
+  font-size: 0.6875rem;
+}
+
+.status-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.status-dot {
+  flex-shrink: 0;
+  width: 0.5rem;
+  height: 0.5rem;
+  border: 1.5px solid currentColor;
+  border-radius: 999px;
+}
+
+.status[data-state="playing"] .status-dot,
+.status[data-state="ok"] .status-dot {
+  border-color: var(--color-acid);
+  background: var(--color-acid);
+}
+
+.status[data-state="soloed"] .status-dot {
+  border-color: var(--color-acid);
+  background: var(--color-acid);
+  box-shadow: 0 0 0 2px var(--color-bg), 0 0 0 3.5px var(--color-acid);
+}
+
+.status[data-state="resting"],
+.status[data-state="ready"],
+.status[data-state="idle"] {
+  color: var(--color-muted);
+}
+
+.status[data-state="cut"] {
+  color: var(--color-muted);
+}
+
+.status[data-state="cut"] .status-dot {
+  border-color: var(--color-muted);
+  background: var(--color-muted);
+}
+
+.status[data-state="offBySolo"],
+.status[data-state="warn"] {
+  color: var(--color-warn);
+}
+
+.status[data-state="offBySolo"] .status-dot,
+.status[data-state="warn"] .status-dot {
+  background: var(--color-warn);
+}
+
+.status[data-state="error"] {
+  color: var(--color-danger);
+}
+
+.status[data-state="error"] .status-dot {
+  background: var(--color-danger);
+}
+
+.status[data-state="queued"] .status-dot {
+  border-color: var(--color-acid);
+  animation: queued 900ms ease-in-out infinite alternate;
+}
+
+@keyframes queued {
+  to {
+    background: var(--color-acid);
+  }
+}
+
+/* Faders. */
+.fader-block {
+  min-width: 0;
+}
+
+.fader-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  margin-bottom: 0.1rem;
+}
+
+.fader-head-right {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.fader {
+  -webkit-appearance: none;
+  appearance: none;
   display: block;
   width: 100%;
-  height: 2.75rem;
+  height: var(--control-sm);
+  margin: 0;
+  background: transparent;
+}
+
+.fader::-webkit-slider-runnable-track {
+  height: 3px;
+  border-radius: 999px;
+  background: var(--color-line);
+}
+
+.fader::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 1.1rem;
+  height: 1.1rem;
+  margin-top: -7.5px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--color-fg);
+  box-shadow: 0 1px 0 #000, 0 0 0 3px var(--color-bg);
+}
+
+.fader::-moz-range-track {
+  height: 3px;
+  border-radius: 999px;
+  background: var(--color-line);
+}
+
+.fader::-moz-range-thumb {
+  width: 1.1rem;
+  height: 1.1rem;
+  border: 0;
+  border-radius: 999px;
+  background: var(--color-fg);
+  box-shadow: 0 1px 0 #000, 0 0 0 3px var(--color-bg);
+}
+
+.fader:focus-visible {
+  outline-offset: 0;
+  border-radius: 0.4rem;
+}
+
+.fader-ends {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.625rem;
+  color: var(--color-muted);
+}
+
+/* ------------------------------------------------------------------------ */
+/* Library                                                                  */
+/* ------------------------------------------------------------------------ */
+
+.library {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.library-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: var(--control-sm);
+}
+
+/* A section's name runs up a rule on the left, like a record spine. */
+.lib-section {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  column-gap: var(--space-2);
+}
+
+.lib-section-title {
+  position: relative;
+  width: 1.25rem;
+  margin: 0;
+  border-left: 2px solid color-mix(in srgb, var(--color-acid) 55%, var(--color-line));
+}
+
+.lib-section-title > span {
+  position: absolute;
+  top: 50%;
+  left: 0.45rem;
+  translate: 0 -50%;
+  writing-mode: vertical-rl;
+  rotate: 180deg;
+  font-size: var(--text-label);
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  line-height: 1;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.lib-section-body {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.track-style {
+  margin: 0 0 0.3rem 0.6rem;
+  font-size: 0.625rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  line-height: 1;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--color-acid) 70%, var(--color-muted));
+}
+
+.track-list {
+  display: grid;
+  gap: 0.3rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.track-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+/* A track: a pill with the name on the left and its tempo pinned to the right. */
+.track-badge {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  width: 100%;
+  min-width: 0;
+  min-height: var(--control-sm);
+  padding: 0.25rem 0.35rem 0.25rem 0.8rem;
   border: 1px solid var(--color-line);
-  border-radius: 0.75rem;
+  border-radius: 999px;
+  background: var(--color-surface);
+  color: var(--color-fg);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  line-height: 1;
+}
+
+.track-badge:hover {
+  border-color: color-mix(in srgb, var(--color-acid) 45%, var(--color-line));
+}
+
+.track-bpm {
+  flex-shrink: 0;
+  min-width: 2.25rem;
+  padding: 0.2rem 0.45rem;
+  border-radius: 999px;
+  background: var(--color-raised);
+  color: var(--color-muted);
+  font-size: 0.6875rem;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+.track-badge[aria-pressed="true"] {
+  border-color: var(--color-acid);
+  background: var(--color-acid);
+  color: var(--color-acid-ink);
+}
+
+.track-badge[aria-pressed="true"] .track-bpm {
+  background: color-mix(in srgb, var(--color-acid-ink) 15%, transparent);
+  color: var(--color-acid-ink);
+}
+
+.fav {
+  display: grid;
+  place-items: center;
+  width: var(--control-sm);
+  height: var(--control-sm);
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: color-mix(in srgb, var(--color-muted) 60%, transparent);
+}
+
+.fav:hover {
+  color: var(--color-fg);
+}
+
+.fav.is-on {
+  color: var(--color-acid);
+}
+
+.fav.is-on svg {
+  fill: currentColor;
+}
+
+.lib-projects {
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--color-line);
+}
+
+/* ------------------------------------------------------------------------ */
+/* Performance area                                                         */
+/* ------------------------------------------------------------------------ */
+
+.decks {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.deck-panel {
+  container-type: inline-size;
+}
+
+/* The jog wheel beside its six pads in a 2 x 3 block, centered on the wheel. */
+.deck-row {
+  --jog: clamp(11rem, 30cqi, 16rem);
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-areas: "jog pads";
+  align-items: center;
+  gap: var(--space-6);
+  padding: var(--space-2) 0 var(--space-4);
+}
+
+.deck-pads {
+  grid-area: pads;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-2);
+}
+
+@container (max-width: 34rem) {
+  .deck-row {
+    --jog: min(70cqi, 16rem);
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas:
+      "jog"
+      "pads";
+  }
+}
+
+.next-row {
+  display: grid;
+  grid-template-columns: minmax(10rem, 1fr) auto auto auto;
+  align-items: end;
+  gap: var(--space-2);
+}
+
+.next-select {
+  display: grid;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+@media (max-width: 1379.98px) {
+  .next-row {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .next-select {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 559.98px) {
+  .next-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .next-row > .mix-action:first-of-type {
+    grid-column: 1 / -1;
+  }
+
+  .mix-action {
+    white-space: normal;
+  }
+}
+
+/* The native select arrow is a tiny system glyph that is nearly invisible here, so it
+   is drawn as a chevron in the muted text color instead. */
+.next-song {
+  width: 100%;
+  min-height: var(--control-md);
+  appearance: none;
+  -webkit-appearance: none;
+  padding: 0.55rem 2.4rem 0.55rem 0.9rem;
+  border: 1px solid var(--color-line);
+  border-radius: 999px;
+  background-color: var(--color-surface);
+  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 8' fill='none' stroke='%238e939c' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M1 1.5 6 6.5 11 1.5'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 1rem center;
+  background-size: 0.7rem;
+  color: var(--color-fg);
+  font: inherit;
+  font-size: 0.875rem;
+}
+
+.next-song:disabled {
+  opacity: 0.6;
+}
+
+.mix-action {
+  min-width: 0;
+  min-height: var(--control-md);
+  padding: 0.3rem 1rem;
+  border: 1px solid var(--color-line);
+  border-radius: 999px;
+  background: var(--color-surface);
+  color: var(--color-fg);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  line-height: 1.15;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.mix-action[aria-pressed="true"] {
+  border-color: var(--color-acid);
+  background: var(--color-acid);
+  color: var(--color-acid-ink);
+}
+
+.mix-action-note {
+  display: block;
+  overflow: hidden;
+  font-size: 0.6875rem;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  text-overflow: ellipsis;
+  opacity: 0.7;
+}
+
+/* ------------------------------------------------------------------------ */
+/* Stems                                                                    */
+/* ------------------------------------------------------------------------ */
+
+.stems {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 21rem), 1fr));
+  column-gap: var(--space-6);
+}
+
+.stem {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-3);
+  padding: 0.45rem 0;
+  border-bottom: 1px solid var(--color-line);
+}
+
+/* A silenced stem dims its controls but not its state: the words saying why it is
+   silent are the one thing that must stay readable. */
+.stem.is-cut .stem-spine,
+.stem.is-cut .meter,
+.stem.is-cut .step-row,
+.stem.is-cut .stem-fader {
+  opacity: 0.42;
+}
+
+/* The spine: an acid rule, the icon upright, the name reading up the rule. It is the
+   button that opens the stem in the inspector. */
+.stem-spine {
+  align-self: stretch;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  width: 1.9rem;
+  padding: 0.2rem 0 0.2rem 0.4rem;
+  border: 0;
+  border-left: 2px solid color-mix(in srgb, var(--color-acid) 55%, var(--color-line));
+  border-radius: 0 0.5rem 0.5rem 0;
+  background: transparent;
+  color: var(--color-fg);
+}
+
+.stem-spine > svg {
+  color: var(--color-acid);
+}
+
+.stem-spine:hover,
+.stem-spine[aria-pressed="true"] {
+  background: var(--color-surface);
+}
+
+.stem-spine[aria-pressed="true"] {
+  border-left-color: var(--color-acid);
+  border-left-width: 3px;
+}
+
+.stem-name {
+  writing-mode: vertical-rl;
+  rotate: 180deg;
+  font-size: 0.75rem;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  line-height: 1;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.stem-body {
+  display: grid;
+  gap: 0.3rem;
+  min-width: 0;
+}
+
+.stem-top {
+  display: grid;
+  grid-template-columns: minmax(0, 8.5rem) minmax(0, 1fr);
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.meter {
+  height: 0.35rem;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--color-line);
+}
+
+.meter > span {
+  display: block;
+  width: 100%;
+  height: 100%;
+  transform: scaleX(0.035);
+  transform-origin: left center;
+  background: var(--color-acid);
+}
+
+.step-row {
+  display: grid;
+  grid-template-columns: repeat(16, minmax(0, 1fr));
+  gap: 0.2rem;
+}
+
+.step {
+  height: 0.42rem;
+  border-radius: 999px;
+  background: var(--color-line);
+}
+
+.step.on {
+  background: var(--color-muted);
+}
+
+.step.now {
+  background: var(--color-acid);
+  transform: scaleY(1.35);
+}
+
+.stem-fader .fader {
+  height: 1.6rem;
+}
+
+.stem-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.stem-badge {
+  width: 4rem;
+  min-height: var(--control-sm);
+}
+
+/* A silenced stem lights its Cut badge, including when another stem's solo cuts it. */
+.stem-badge.is-cut {
+  border-color: var(--color-acid);
+  background: var(--color-acid);
+  color: var(--color-acid-ink);
+}
+
+/* ------------------------------------------------------------------------ */
+/* Inspector                                                                */
+/* ------------------------------------------------------------------------ */
+
+.inspector-body {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.inspector-group {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.inspector-legend {
+  margin-bottom: var(--space-1);
+  padding: 0;
+  font-size: var(--text-label);
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--color-fg);
+}
+
+.inspector-stem-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.inspector-stem-name {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 1.375rem;
+  font-weight: 800;
+  line-height: 1.1;
+}
+
+.inspector-pads {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-2);
+}
+
+/* ------------------------------------------------------------------------ */
+/* Pattern drawer                                                           */
+/* ------------------------------------------------------------------------ */
+
+.drawer {
+  display: none;
+}
+
+.drawer.is-open {
+  position: fixed;
+  right: var(--space-4);
+  bottom: 0;
+  left: var(--space-4);
+  z-index: 45;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: var(--space-3);
+  max-height: min(28rem, 55dvh);
+  padding: var(--space-3) var(--space-4) var(--space-4);
+  border: 1px solid var(--color-line);
+  border-bottom: 0;
+  border-radius: var(--radius-control) var(--radius-control) 0 0;
   background: var(--color-bg);
+  box-shadow: 0 -1rem 3rem rgba(0, 0, 0, 0.6);
 }
 
-.scope-axis {
-  stroke: rgba(243, 239, 230, 0.12);
-  stroke-width: 1;
+.drawer-head {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-3);
 }
 
-.scope-line {
-  stroke: var(--color-acid);
-  stroke-width: 1.6;
-  vector-effect: non-scaling-stroke;
+.drawer-title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
 }
+
+.drawer-head .segmented-block {
+  overflow-x: auto;
+}
+
+.pattern-grid {
+  display: grid;
+  gap: 3px;
+  overflow-y: auto;
+}
+
+.pattern-row {
+  display: grid;
+  grid-template-columns: 4.5rem minmax(0, 1fr);
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.pattern-row.is-phrase {
+  margin-top: var(--space-1);
+}
+
+.pattern-bar {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-1);
+  font-size: 0.625rem;
+  color: var(--color-muted);
+}
+
+.pattern-part {
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-fg);
+}
+
+.pattern-steps {
+  display: grid;
+  grid-template-columns: repeat(16, minmax(0, 1fr));
+  gap: 3px;
+}
+
+.pattern-cell {
+  height: 0.7rem;
+  border-radius: 3px;
+  background: var(--color-surface);
+}
+
+.pattern-cell.beat {
+  background: var(--color-raised);
+}
+
+.pattern-cell.on {
+  background: var(--color-fg);
+}
+
+.pattern-cell.now {
+  outline: 2px solid var(--color-acid);
+  outline-offset: 0;
+}
+
+@media (max-width: 899.98px) {
+  .app[data-view="edit"] .drawer {
+    display: grid;
+    position: static;
+    gap: var(--space-3);
+    max-height: none;
+    margin: 0 var(--space-4) calc(var(--control-md) + 2.5rem);
+    padding: var(--space-3) var(--space-4) var(--space-4);
+    border: 1px solid var(--color-line);
+    border-radius: var(--radius-control);
+    box-shadow: none;
+  }
+
+  .app[data-view="edit"] .drawer-close {
+    display: none;
+  }
+
+  .app[data-view="edit"] .workspace {
+    padding-bottom: var(--space-3);
+  }
+
+  .drawer-head {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .drawer-head .segmented-block {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+
+  .pattern-row {
+    grid-template-columns: 3.25rem minmax(0, 1fr);
+  }
+}
+
+/* ------------------------------------------------------------------------ */
+/* Phone view tabs                                                          */
+/* ------------------------------------------------------------------------ */
+
+.view-tabs {
+  position: fixed;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 50;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-4) max(var(--space-2), env(safe-area-inset-bottom));
+  border-top: 1px solid var(--color-line);
+  background: color-mix(in srgb, var(--color-bg) 94%, transparent);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+
+.view-tab {
+  min-height: var(--control-md);
+  border: 1px solid var(--color-line);
+  border-radius: 999px;
+  background: var(--color-surface);
+  color: var(--color-fg);
+  font-size: 0.8125rem;
+  font-weight: 700;
+}
+
+.view-tab[aria-pressed="true"] {
+  border-color: var(--color-acid);
+  background: var(--color-acid);
+  color: var(--color-acid-ink);
+}
+
+/* ------------------------------------------------------------------------ */
+/* Motion                                                                   */
+/* ------------------------------------------------------------------------ */
+
+.tap {
+  transition: scale 150ms ease-out;
+}
+
+.tap:active {
+  scale: 0.96;
+}
+
+.icon-swap {
+  grid-area: 1 / 1;
+  transition:
+    opacity 300ms cubic-bezier(0.2, 0, 0, 1),
+    scale 300ms cubic-bezier(0.2, 0, 0, 1),
+    filter 300ms cubic-bezier(0.2, 0, 0, 1);
+}
+
+.icon-swap[data-on="false"] {
+  opacity: 0;
+  scale: 0.25;
+  filter: blur(4px);
+}
+
+.icon-swap[data-on="true"] {
+  opacity: 1;
+  scale: 1;
+  filter: blur(0);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .icon-swap,
+  .tap,
+  .step,
+  .library-panel,
+  .status-dot {
+    animation: none !important;
+    transition: none !important;
+    transform: none;
+    filter: none;
+  }
+
+  .icon-swap[data-on="false"] {
+    opacity: 0;
+  }
+
+  .app[data-library="open"] .library-panel {
+    transform: none;
+  }
+}
+
+/* ------------------------------------------------------------------------ */
+/* Deck waveform (carried over unchanged)                                   */
+/* ------------------------------------------------------------------------ */
 
 .deck-wave {
   border: 1px solid var(--color-line);
@@ -199,537 +1724,9 @@ body {
   pointer-events: none;
 }
 
-/* The native select arrow renders as a tiny system glyph that doesn't match anything
-   else here and is nearly invisible on the dark surface. Drawn as a chevron instead,
-   in the muted text colour, with room reserved for it on the right. */
-.next-song {
-  width: 100%;
-  appearance: none;
-  -webkit-appearance: none;
-  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 8' fill='none' stroke='%238e939c' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M1 1.5 6 6.5 11 1.5'/%3E%3C/svg%3E");
-  background-repeat: no-repeat;
-  background-position: right 1rem center;
-  background-size: 0.7rem;
-  border: 1px solid var(--color-line);
-  border-radius: 999px;
-  background: var(--color-surface);
-  color: var(--color-fg);
-  padding: 0.55rem 2.4rem 0.55rem 0.9rem;
-  font: inherit;
-  font-size: 0.875rem;
-}
-
-.next-song:focus-visible {
-  outline: 2px solid var(--color-acid);
-  outline-offset: 2px;
-}
-
-.next-song:disabled {
-  opacity: 0.6;
-}
-
-/* The two buttons beside the Next dropdown. Matched to the select's pill height so
-   the three controls sit on one baseline, and sized to their own text so a long
-   track name in the dropdown never squeezes them. */
-.mix-action {
-  border: 1px solid var(--color-line);
-  border-radius: 999px;
-  padding: 0.3rem 1.05rem;
-  font-size: 0.8125rem;
-  font-weight: 600;
-  line-height: 1.15;
-  text-align: center;
-  white-space: nowrap;
-  min-width: 7.5rem;
-}
-
-.mix-action-note {
-  display: block;
-  font-size: 0.6875rem;
-  font-weight: 500;
-  opacity: 0.7;
-  letter-spacing: 0.01em;
-}
-
-.stem {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  gap: 0.75rem;
-  align-items: center;
-  padding: 0.45rem 0;
-  border-bottom: 1px solid var(--color-line);
-}
-
-.stem.is-cut .min-w-0,
-.stem.is-cut .stem-spine {
-  opacity: 0.42;
-}
-
-/* Each stem's spine, in the same language as the library's EDM / Lofi / Breaks:
-   an acid rule down the left, the icon upright at the top, the name reading
-   bottom to top beneath it. Stretched to the strip so every rule is one height. */
-.stem-spine {
-  align-self: stretch;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 0.4rem;
-  width: 1.75rem;
-  padding-left: 0.4rem;
-  border-left: 2px solid color-mix(in srgb, var(--color-acid) 55%, var(--color-line));
-  color: var(--color-fg);
-}
-
-.stem-spine > svg {
-  color: var(--color-acid);
-}
-
-.stem-name {
-  writing-mode: vertical-rl;
-  rotate: 180deg;
-  font-size: 0.75rem;
-  font-weight: 800;
-  letter-spacing: 0.1em;
-  line-height: 1;
-  text-transform: uppercase;
-  white-space: nowrap;
-}
-
-/* A badge, in the same family as CUT but sized for the stem header row it sits in.
-   Reads as a control whether or not it is engaged; as borderless text it was easy to
-   miss that it was a button at all. */
-.solo {
-  width: 3.5rem;
-  min-height: 1.6rem;
-  padding: 0.15rem 0;
-  border: 1px solid var(--color-line);
-  border-radius: 999px;
-  background: transparent;
-  color: var(--color-muted);
-  font-size: 0.6875rem;
-  font-weight: 700;
-  letter-spacing: 0.1em;
-  line-height: 1;
-  text-transform: uppercase;
-}
-
-.solo[aria-pressed="true"] {
-  border-color: var(--color-acid);
-  background: var(--color-acid);
-  color: var(--color-acid-ink);
-}
-
-/* The reset badge on a fader: the solo badge, narrower for the fader header, and
-   dimmed while the fader already sits at its default. */
-.solo.reset {
-  width: auto;
-  min-height: 1.35rem;
-  padding: 0.15rem 0.55rem;
-  font-size: 0.625rem;
-}
-
-.solo.reset:not(:disabled):hover {
-  border-color: var(--color-acid);
-  color: var(--color-fg);
-}
-
-.solo.reset:disabled {
-  opacity: 0.35;
-  cursor: default;
-}
-
-.solo:focus-visible {
-  outline: 2px solid var(--color-acid);
-  outline-offset: 2px;
-}
-
-/* The library: equal columns that run edge to edge. Each group holds six tracks,
-   so 6, 3 and 2 columns all fill their last row. */
-.track-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0.4rem;
-}
-
-@media (min-width: 640px) {
-  .track-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-}
-
-@media (min-width: 900px) {
-  .track-grid { grid-template-columns: repeat(6, minmax(0, 1fr)); }
-}
-
-/* A library section: its name runs up the left edge, beside a rule as tall as the
-   section, so EDM / Lofi / Breaks read as spines rather than three more headings
-   competing with the sub-genre titles. Read bottom to top, like a record spine. */
-.lib-section {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  column-gap: 0.75rem;
-  align-items: stretch;
-}
-
-.lib-section > .track-grid {
-  margin-top: 0;
-}
-
-/* The spine is positioned, not flowed, so a long name like BREAKS can never make a
-   one-row section taller than its badges: it centers on the rule and overflows
-   evenly if it must. */
-.lib-section-title {
-  position: relative;
-  width: 1.5rem;
-  border-left: 2px solid color-mix(in srgb, var(--color-acid) 55%, var(--color-line));
-}
-
-.lib-section-title > span {
-  position: absolute;
-  top: 50%;
-  left: 0.55rem;
-  translate: 0 -50%;
-  writing-mode: vertical-rl;
-  rotate: 180deg;
-  font-size: 0.6875rem;
-  font-weight: 800;
-  letter-spacing: 0.06em;
-  line-height: 1;
-  text-transform: uppercase;
-  color: var(--color-fg);
-  white-space: nowrap;
-}
-
-/* One grid cell: an optional sub-genre title over a badge. Cells sit on the row's
-   bottom edge, so a title only adds height to the rows that have one and the badges
-   in a row stay level whether or not a title sits above them. */
-.track-grid {
-  align-items: end;
-}
-
-.track-cell {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-}
-
-.track-style {
-  display: block;
-  margin: 0.3rem 0 0.3rem 0.8rem;
-  font-size: 0.625rem;
-  font-weight: 700;
-  letter-spacing: 0.1em;
-  line-height: 1;
-  text-transform: uppercase;
-  color: color-mix(in srgb, var(--color-acid) 70%, var(--color-muted));
-  white-space: nowrap;
-}
-
-/* A track in the library: a badge in the solo family, filling its grid cell, with
-   the name on the left and the track's tempo pinned to the right. */
-.track-badge {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.5rem;
-  width: 100%;
-  min-width: 0;
-  min-height: 2rem;
-  padding: 0.25rem 0.35rem 0.25rem 0.8rem;
-  border: 1px solid var(--color-line);
-  border-radius: 999px;
-  background: var(--color-surface);
-  color: var(--color-fg);
-  font-size: 0.8125rem;
-  font-weight: 600;
-  line-height: 1;
-}
-
-.track-badge:hover {
-  border-color: color-mix(in srgb, var(--color-acid) 45%, var(--color-line));
-}
-
-.track-bpm {
-  flex-shrink: 0;
-  min-width: 2.25rem;
-  text-align: center;
-  padding: 0.2rem 0.45rem;
-  border-radius: 999px;
-  background: var(--color-raised);
-  color: var(--color-muted);
-  font-size: 0.6875rem;
-  font-variant-numeric: tabular-nums;
-}
-
-.track-badge[aria-pressed="true"] {
-  border-color: var(--color-acid);
-  background: var(--color-acid);
-  color: var(--color-acid-ink);
-}
-
-.track-badge[aria-pressed="true"] .track-bpm {
-  background: color-mix(in srgb, var(--color-acid-ink) 15%, transparent);
-  color: var(--color-acid-ink);
-}
-
-.track-badge:focus-visible {
-  outline: 2px solid var(--color-acid);
-  outline-offset: 2px;
-}
-
-.meter {
-  height: 0.35rem;
-  flex: 1;
-  overflow: hidden;
-  border-radius: 999px;
-  background: var(--color-line);
-}
-
-.meter > span {
-  display: block;
-  width: 100%;
-  height: 100%;
-  transform: scaleX(0.035);
-  transform-origin: left center;
-  background: var(--color-acid);
-}
-
-.step-line {
-  display: flex;
-  align-items: center;
-  gap: 0.6rem;
-  margin-top: 0.35rem;
-}
-
-.step-row {
-  display: grid;
-  flex: 1;
-  min-width: 0;
-  grid-template-columns: repeat(16, minmax(0, 1fr));
-  gap: 0.2rem;
-}
-
-.step {
-  height: 0.42rem;
-  border-radius: 999px;
-  background: var(--color-line);
-}
-
-.step.on {
-  background: var(--color-muted);
-}
-
-.step.now {
-  background: var(--color-acid);
-  transform: scaleY(1.35);
-}
-
-/* Solo and Cut, stacked in one column at the end of each stem, both badges in
-   the solo family. Taller than the header-row badge so they are easy to hit. */
-.stem-actions {
-  display: flex;
-  flex-direction: column;
-  gap: 0.4rem;
-}
-
-.solo.stem-badge {
-  width: 4rem;
-  min-height: 2rem;
-  font-size: 0.6875rem;
-}
-
-/* A cut stem lights its Cut badge, including when another stem's solo cuts it. */
-.solo.stem-badge.is-cut {
-  border-color: var(--color-acid);
-  background: var(--color-acid);
-  color: var(--color-acid-ink);
-}
-
-.btn-cut {
-  min-width: 4.5rem;
-  min-height: 2.75rem;
-  padding: 0 0.85rem;
-  border: 1px solid var(--color-line);
-  border-radius: 999px;
-  background: transparent;
-  color: var(--color-fg);
-  font-size: 0.75rem;
-  font-weight: 700;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-}
-
-.btn-cut.is-cut {
-  border-color: var(--color-acid);
-  background: var(--color-acid);
-  color: var(--color-acid-ink);
-}
-
-.fader {
-  -webkit-appearance: none;
-  appearance: none;
-  width: 100%;
-  height: 2rem;
-  margin: 0;
-  background: transparent;
-}
-
-.fader::-webkit-slider-runnable-track {
-  height: 2px;
-  border-radius: 999px;
-  background: var(--color-line);
-}
-
-.fader::-webkit-slider-thumb {
-  -webkit-appearance: none;
-  width: 1rem;
-  height: 1rem;
-  margin-top: -7px;
-  border: 0;
-  border-radius: 999px;
-  background: var(--color-fg);
-}
-
-.fader::-moz-range-track {
-  height: 2px;
-  border-radius: 999px;
-  background: var(--color-line);
-}
-
-.fader::-moz-range-thumb {
-  width: 1rem;
-  height: 1rem;
-  border: 0;
-  border-radius: 999px;
-  background: var(--color-fg);
-}
-
-.tap {
-  transition: scale 150ms ease-out;
-}
-
-.tap:active {
-  scale: 0.96;
-}
-
-.icon-swap {
-  grid-area: 1 / 1;
-  transition:
-    opacity 300ms cubic-bezier(0.2, 0, 0, 1),
-    scale 300ms cubic-bezier(0.2, 0, 0, 1),
-    filter 300ms cubic-bezier(0.2, 0, 0, 1);
-}
-
-.icon-swap[data-on="false"] {
-  opacity: 0;
-  scale: 0.25;
-  filter: blur(4px);
-}
-
-.icon-swap[data-on="true"] {
-  opacity: 1;
-  scale: 1;
-  filter: blur(0);
-}
-
-@keyframes rise {
-  from {
-    opacity: 0;
-    transform: translateY(8px);
-  }
-  to {
-    opacity: 1;
-    transform: none;
-  }
-}
-
-.rise {
-  animation: rise 420ms cubic-bezier(0.2, 0, 0, 1) both;
-}
-
-.rise-2 { animation-delay: 70ms; }
-.rise-3 { animation-delay: 130ms; }
-.rise-4 { animation-delay: 180ms; }
-
-@media (prefers-reduced-motion: reduce) {
-  .rise,
-  .icon-swap,
-  .tap,
-  .step {
-    animation: none;
-    transition: none;
-    transform: none;
-    filter: none;
-  }
-
-  .icon-swap[data-on="false"] {
-    opacity: 0;
-  }
-}
-
-/* The deck: the jog wheel on the left, and its six pads in a 2 x 3 block to its
-   right. The block is centered against the wheel, so the wheel's height never
-   stretches a pad. */
-.deck-row {
-  --jog: clamp(13rem, 28vw, 18rem);
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) minmax(0, 1fr);
-  grid-template-areas: "jog left right";
-  align-items: center;
-  column-gap: 0.75rem;
-  padding: 1.25rem 0 0.5rem;
-}
-
-.deck-col {
-  display: grid;
-  gap: 0.6rem;
-}
-
-.jog-wrap { margin-right: 1.5rem; }
-.deck-col-left { grid-area: left; }
-.deck-col-right { grid-area: right; }
-
-.deck-pad {
-  height: 3.25rem;
-  border: 1px solid var(--color-line);
-  border-radius: 0.875rem;
-  background: linear-gradient(var(--color-raised), var(--color-surface));
-  box-shadow: inset 0 1px 0 rgba(243, 239, 230, 0.06), 0 2px 0 #000;
-  color: var(--color-fg);
-  font-size: 0.8125rem;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-}
-
-.deck-pad:hover {
-  border-color: color-mix(in srgb, var(--color-acid) 35%, var(--color-line));
-}
-
-.deck-pad[aria-pressed='true'] {
-  border-color: var(--color-acid);
-  background: var(--color-acid);
-  color: var(--color-acid-ink);
-  box-shadow: 0 0 1rem color-mix(in srgb, var(--color-acid) 35%, transparent);
-}
-
-.deck-pad:focus-visible {
-  outline: 2px solid var(--color-acid);
-  outline-offset: 2px;
-}
-
-@media (max-width: 560px) {
-  .deck-row {
-    --jog: min(80vw, 18rem);
-    grid-template-columns: 1fr 1fr;
-    grid-template-areas:
-      "jog jog"
-      "left right";
-    gap: 0.75rem;
-  }
-
-  .jog-wrap {
-    margin-right: 0;
-  }
-}
+/* ------------------------------------------------------------------------ */
+/* Jog wheel (carried over unchanged)                                       */
+/* ------------------------------------------------------------------------ */
 
 /* The jog wheel. `--turn` is written by the component on every pointer move, with
    no transition, so the disc tracks the hand instead of trailing it. */
@@ -840,11 +1837,3 @@ body {
   }
 }
 
-/* The three reference points under the balance fader. */
-.fader-ends {
-  display: flex;
-  justify-content: space-between;
-  margin-top: 0.2rem;
-  font-size: 0.625rem;
-  color: var(--color-muted);
-}

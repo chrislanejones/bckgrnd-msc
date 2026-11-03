@@ -21,7 +21,9 @@
     "verify:static": "node tools/verify-static.mjs",
     "serve": "php artisan serve --host=0.0.0.0 --port=8080",
     "serve:static": "php -S 0.0.0.0:8090 -t public",
-    "dev": "pnpm run build:worklet --watch & vite"
+    "dev": "pnpm run build:worklet --watch & vite",
+    "verify:ui": "node tools/verify-ui.mjs",
+    "check:contract": "node tools/check-contract.mjs"
   },
   "dependencies": {
     "lucide-react": "^0.510.0",

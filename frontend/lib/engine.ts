@@ -26,6 +26,10 @@ export type Telemetry = {
   deck: Deck;
   /** True while an auto-mix is crossfading. */
   mixing: boolean;
+  /** Master output peak per channel since the last frame, linear (1 is full scale). */
+  peak: [number, number];
+  /** Some output sample since the last frame went past full scale. */
+  clipped: boolean;
 };
 
 type WorkletMessage =
@@ -64,6 +68,8 @@ export class EngineHost {
     playing: false,
     deck: 'a',
     mixing: false,
+    peak: [0, 0],
+    clipped: false,
   };
 
   private booted: Promise<void> | null = null;
@@ -143,6 +149,8 @@ export class EngineHost {
         playing: f[9] === 1,
         deck: f[10] === 0 ? 'a' : 'b',
         mixing: f[11] === 1,
+        peak: [f[12] ?? 0, f[13] ?? 0],
+        clipped: f[14] === 1,
       };
       for (const listener of this.listeners) listener(this.telemetry);
       return;

@@ -54,10 +54,14 @@ type DeckId = 'a' | 'b';
  * Telemetry frame posted back to the UI.
  *
  * Layout: `[0..7]` stem levels, `[8]` visual step, `[9]` playing, `[10]` live deck
- * (0 = A, 1 = B). One array instead of an object because this crosses the thread
- * ~30 times a second and the meters are read every frame by React.
+ * (0 = A, 1 = B), `[11]` mixing, `[12]` / `[13]` master peak left / right since the
+ * last frame (linear, of what actually leaves the worklet), `[14]` 1 if any sample
+ * since the last frame went past full scale. One array instead of an object because
+ * this crosses the thread ~30 times a second and the meters are read every frame.
+ *
+ * Telemetry is transient: none of it is ever saved (contracts/README.md).
  */
-const TELEMETRY_LEN = 12;
+const TELEMETRY_LEN = 15;
 
 /** Stem indices, in the order of `Stem::ALL` in the engine. */
 const STEM_KICK = 0;
@@ -89,6 +93,10 @@ class EngineProcessor extends AudioWorkletProcessor {
   private mixRight = new Float32Array(128);
   private levels = new Float32Array(8);
   private telemetry = new Float32Array(TELEMETRY_LEN);
+
+  /** Highest absolute output sample per channel since the last telemetry frame. */
+  private peakL = 0;
+  private peakR = 0;
 
   /**
    * The app's intended fader positions and filter, mirrored here.
@@ -400,10 +408,23 @@ class EngineProcessor extends AudioWorkletProcessor {
       }
     }
 
+    // The master meter reads here, after both decks are summed, because that sum is
+    // what reaches the speaker. Each engine's own limiter holds it under -0.3 dBFS,
+    // but during a crossfade the two limited decks add, and only this point sees it.
+    let peakL = this.peakL;
+    let peakR = this.peakR;
     for (let i = 0; i < frames; i += 1) {
-      outL[i] = left[i];
-      outR[i] = right[i];
+      const l = left[i];
+      const r = right[i];
+      outL[i] = l;
+      outR[i] = r;
+      const al = l < 0 ? -l : l;
+      const ar = r < 0 ? -r : r;
+      if (al > peakL) peakL = al;
+      if (ar > peakR) peakR = ar;
     }
+    this.peakL = peakL;
+    this.peakR = peakR;
 
     this.frames += frames;
     this.publishTelemetry(live, frames);
@@ -515,6 +536,11 @@ class EngineProcessor extends AudioWorkletProcessor {
       this.telemetry[9] = live && live.is_playing() ? 1 : 0;
       this.telemetry[10] = this.live === 'a' ? 0 : 1;
       this.telemetry[11] = this.mix ? 1 : 0;
+      this.telemetry[12] = this.peakL;
+      this.telemetry[13] = this.peakR;
+      this.telemetry[14] = this.peakL > 1 || this.peakR > 1 ? 1 : 0;
+      this.peakL = 0;
+      this.peakR = 0;
       this.port.postMessage({ type: 'telemetry', frame: this.telemetry.slice() });
     }
   }

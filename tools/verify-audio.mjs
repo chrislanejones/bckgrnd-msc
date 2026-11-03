@@ -38,6 +38,10 @@ const baseUrl = process.argv[2] ?? 'http://127.0.0.1:8080';
  * browser that is actually on disk.
  */
 function findChromium() {
+  // An explicit path wins: CI images and sandboxes put Chromium in their own places.
+  if (process.env.PLAYWRIGHT_CHROMIUM && existsSync(process.env.PLAYWRIGHT_CHROMIUM)) {
+    return process.env.PLAYWRIGHT_CHROMIUM;
+  }
   const cache = join(homedir(), '.cache', 'ms-playwright');
   let entries = [];
   try {
@@ -107,7 +111,7 @@ try {
       // *move*, and it lands wherever the window happened to end.
       const stepLog = [];
       let t0 = performance.now();
-      const seen = { steps: new Set(), maxLevels: new Array(8).fill(0), sawPlaying: false, frames: 0 };
+      const seen = { steps: new Set(), maxLevels: new Array(8).fill(0), sawPlaying: false, frames: 0, masterPeak: 0, clipped: 0 };
       node.port.onmessage = (e) => {
         if (e.data.type === 'error') {
           errors.push(`${e.data.command}: ${e.data.message}`);
@@ -120,6 +124,9 @@ try {
         if (timeline.length) stepLog.push([performance.now() - t0, f[8]]);
         seen.sawPlaying ||= f[9] === 1;
         for (let i = 0; i < 8; i += 1) seen.maxLevels[i] = Math.max(seen.maxLevels[i], f[i]);
+        // [12] / [13] master peak left / right, [14] clipped (see engine-processor.ts).
+        seen.masterPeak = Math.max(seen.masterPeak, f[12] ?? 0, f[13] ?? 0);
+        if (f[14] === 1) seen.clipped += 1;
       };
 
       // Two analysers so left and right can be compared, proving real stereo.
@@ -199,6 +206,8 @@ try {
           maxStep: Math.max(...seen.steps),
           sawPlaying: seen.sawPlaying,
           maxLevels: seen.maxLevels.map((v) => +v.toFixed(4)),
+          masterPeak: seen.masterPeak,
+          clipped: seen.clipped,
         },
       };
 
@@ -303,6 +312,19 @@ try {
     result.full.telemetry.maxLevels.some((l) => l > 0.001),
     `peak levels ${JSON.stringify(result.full.telemetry.maxLevels)}`,
   );
+  {
+    const t = result.full.telemetry;
+    // The telemetry peak and the analyser tap measure the same output, so they should
+    // agree closely. Neither may reach full scale: a single deck is held at -0.3 dBFS.
+    check(
+      'master meter reports the output peak, without clipping',
+      t.masterPeak > 0.02 &&
+        Math.abs(t.masterPeak - result.full.peak) < 0.1 &&
+        t.masterPeak < 1 &&
+        t.clipped === 0,
+      `telemetry peak ${t.masterPeak.toFixed(4)} vs analyser ${result.full.peak.toFixed(4)}, ${t.clipped} clipped frames`,
+    );
+  }
   check(
     'output is stereo, not duplicated mono',
     result.full.peakL > 0 && result.full.peakR > 0 && result.full.peakL !== result.full.peakR,

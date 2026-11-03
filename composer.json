@@ -67,13 +67,17 @@
             "@test:rust",
             "@test:parity",
             "@test:arrangement",
-            "@test:audio"
+            "@test:contract",
+            "@test:audio",
+            "@test:ui"
         ],
         "test:php": "@php vendor/bin/phpunit",
         "test:rust": "cargo test --manifest-path engine-core/Cargo.toml",
         "test:parity": "@php tools/compare-with-original.php tools/reference.json",
         "test:audio": "pnpm run verify:audio",
+        "test:ui": "pnpm run verify:ui",
         "test:arrangement": "@php tools/check-arrangement.php",
+        "test:contract": "node tools/check-contract.mjs",
         "build:library": "@php tools/export-library.php public/library"
     },
     "extra": {
