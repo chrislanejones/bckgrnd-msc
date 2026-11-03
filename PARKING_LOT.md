@@ -21,9 +21,9 @@ the reference (instant drop, linear return).
 
 ## Still open from the restructure
 
-- `.env` and `.env.static` are still in `floor-desktop/`. Move them to the repo root.
-  `verify:static` fails until `.env.static` is there, because `vite build --mode static`
-  reads it from the project root.
+- ~~`.env` and `.env.static` are still in `floor-desktop/`~~ — stale, closed 11-03-2026.
+  `floor-desktop/` no longer exists, and `verify:static` passes without `.env.static`
+  because `build:app:static` sets `VITE_STATIC=1` itself.
 - ~~The Laravel `APP_KEY` was committed~~ — closed 10-05-2026. The app is stateless
   (no sessions, no encryption), so the key protected nothing; `floor-desktop/.env`
   and `.env.static` were also scrubbed from history on both remotes.
@@ -108,11 +108,37 @@ not. Things to settle before or while building it:
 
 ## Found in the package update (10-21-2026)
 
-- **`php artisan test` can't run.** There is no `phpunit.xml.dist`, and `tests/Unit` and
-  `tests/Feature` are empty. This was already true before the update, so the PHP side has
-  no gate. The song form (`app/Support/Music`) is the part worth covering first.
+- ~~**`php artisan test` can't run.**~~ — fixed 11-03-2026: `phpunit.xml.dist` plus
+  186 tests covering the song form for every track, the API, the static export, presets
+  and the project contract.
 - **`nativephp/electron` and `nativephp/laravel` are abandoned.** Composer says to move to
   `nativephp/desktop`. This matters for the mobile app plan above.
 - **Major versions held back:** TypeScript 7, Vite 8 (plus `@vitejs/plugin-react` 6),
   esbuild 0.28, lucide-react 1.x, concurrently 10, Laravel 13, tinker 3, PHPUnit 13.
   Each one is its own session.
+
+
+## Found on Night 1 (11-03-2026)
+
+- **`composer.json` says PHP `^8.3`, but `composer.lock` needs ≥ 8.4.1.** The 10-21
+  update resolved symfony 8.x, which requires PHP 8.4. On 8.3, `composer install`
+  refuses. (It does run with `--ignore-platform-req=php`, which is how Night 1 was
+  tested.) Settle on 8.4 in `composer.json` before packaging (see
+  [docs/NIGHT6_INVENTORY.md](docs/NIGHT6_INVENTORY.md)).
+- ~~**`composer test` was red on every run.**~~ — fixed: the parity check failed on
+  Kettle (rewritten on purpose 10-05) and on the six Breaks tracks (which have no
+  original). It now lists both as deliberate departures and still checks the other
+  eleven tracks exactly.
+- ~~**The API and the static export disagreed on `parts`.**~~ — fixed: the API repeated
+  it inside every track. It is now once at the top level, as the export and
+  `LibraryResponse` have it. A test compares the two.
+- ~~**A fresh clone serves a 500 on `/`.**~~ — fixed in `start.sh`: Laravel's gitignored
+  `storage/framework/views` didn't exist. The API still worked, so it looked like a
+  frontend problem.
+- ~~**Space on the focused jog wheel did two things**~~ — fixed: a backspin *and*
+  play/stop. Controls that use Space themselves now opt out of the global key.
+- **`wasm-pack` downloads `wasm-opt` from GitHub at build time.** Where that is
+  blocked the build stops after writing an unoptimized wasm (238 KB, against 201 KB
+  optimized). Release builds must come from a machine where `wasm-opt` runs.
+- **NativePHP can't open a window:** `config/nativephp.php` names
+  `App\Providers\NativeAppServiceProvider`, which doesn't exist. Night 6, first item.

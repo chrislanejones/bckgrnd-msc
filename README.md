@@ -1,6 +1,6 @@
 # bckgrnd-msc
 
-![bckgrnd-msc: two decks with song-part brackets, the track library in EDM, Lofi and Breaks, and the eight stems with Solo and Cut](screenshots/bckgrnd-msc.webp)
+![bckgrnd-msc: the transport with song parts and the master meter across the top, the library on the left, two decks and the eight stems with their states in the middle, and the master inspector on the right](screenshots/bckgrnd-msc.webp)
 
 A stem machine. Eighteen tracks, eight stems each. Cut any stem and the rest of the
 instrumental keeps playing, so you build the track yourself while it runs.
@@ -10,6 +10,11 @@ instrumental keeps playing, so you build the track yourself while it runs.
 The DSP is Rust compiled to WebAssembly, running inside an `AudioWorklet`. The music —
 song form, note grid, swing, stem mix — is PHP. React draws the meters and sends intent,
 and holds no audio state of its own.
+
+The design rules every screen follows are in
+**[docs/DESIGN_PHILOSOPHY.md](docs/DESIGN_PHILOSOPHY.md)**: music first, tactile
+controls, clear feedback, progressive complexity. The six-night plan is in
+**[docs/ROADMAP.md](docs/ROADMAP.md)**.
 
 Design decisions live in **[docs/adr/](docs/adr/INDEX.md)**. Superseded notes are kept
 in **[docs/archive/](docs/archive/README.md)** rather than deleted — each one says what
@@ -64,6 +69,19 @@ WebAssembly and AudioWorklet loading unchanged. These headers apply on the next
 Netlify deployment; the local Laravel and static development servers do not
 read `netlify.toml`.
 
+## The screen
+
+| Area | What's there |
+|---|---|
+| Transport (top, always visible) | Play/stop, the track, the song part and bar, the tempo, the master meter with a clip light, and whether the mix differs from the track as written. Nothing is saved yet, so it says so. |
+| Library (left) | Tracks by section and style, with a star to keep favorites (stored in this browser only). On narrower screens it opens from the button in the transport. |
+| Performance area (middle) | The two decks, the stems, the jog wheel and pads, loop, and mixing to the next track. |
+| Inspector (right) | **Master**: tempo, swing, the isolators, filter, echo time, stereo and master level. Select a stem's name to see that stem instead. |
+| Pattern drawer (bottom) | Opened from **Pattern** or the inspector. One stem's pattern across all 16 bars, with the playhead. Read-only for now. Escape closes it. |
+
+On a phone the same panels show one view at a time: **Perform**, **Mix** and
+**Edit**, from the tabs at the bottom. The transport stays at the top.
+
 ## The library
 
 Three sections, each split into styles. Every track badge shows its bpm.
@@ -101,10 +119,23 @@ Eight per track. Keys 1–8 cut them in this order.
 | 7 | Pad | |
 | 8 | Arp | |
 
-Each stem row has its icon and name up a spine on the left, a meter, the step pattern
-for the current bar, a fader, and one badge column: **Solo** over **Cut**. Cut lights when
-the stem is silent for any reason, including another stem's solo, and reads **In** while
-it's cut. Each stem has its own echo send, so cutting a stem cuts its echo with it.
+Each stem row has its icon and name up a spine on the left, its state in words, a
+meter, the step pattern for the current bar, a fader, and one badge column: **Solo**
+over **Cut**. Cut lights when the stem is silent for any reason, including another
+stem's solo, and reads **In** while it's cut. Each stem has its own echo send, so
+cutting a stem cuts its echo with it. Selecting the name opens the stem in the
+inspector.
+
+The state says why a stem is or isn't sounding:
+
+| State | Meaning |
+|---|---|
+| Ready | Stopped. |
+| Playing | Has notes in this bar. |
+| Rests this bar | In the mix, but the song leaves it out of this bar (the stab, lead and arp wait for bar 5). |
+| Cut | You cut it. |
+| Solo | You soloed it. |
+| Off: solo on Bass | Silent because another stem is soloed. |
 
 Three group buttons above the stems: **Full mix**, **No drums**, **No music**.
 
@@ -155,6 +186,7 @@ The label turns at 33⅓ rpm while the deck plays, except under reduced motion.
 | Tempo | Retimes the grid, the duck recovery and the delay together. |
 | Swing | Pushes every other sixteenth late. |
 | Master | Output level. |
+| Master meter | Left and right peak of what leaves the engine, in the transport. Turns amber near the limiter. The **Clip** light holds for two seconds after any sample goes past full scale, which can only happen while a crossfade adds two decks together. |
 | Reset | Every fader in this table has one. Tempo and swing go back to the track's own values; the rest to their defaults. Disabled when it's already there. |
 | Space | Play / stop. |
 
@@ -188,7 +220,11 @@ The line between the three languages is the one architectural decision worth kno
 |---|---|---|
 | PHP | The music: song form, note grid, swing, tempo, stem mix. The API serves arranged JSON. | `app/Support/Music/` |
 | Rust → wasm | All DSP: oscillators, envelopes, filters, drums, the master bus, scratch and transitions. Renders events it's handed and never decides a note sequence. | `engine-core/` |
-| React | Draws meters and sends intent. No audio state, no DSP. | `frontend/` |
+| React | Draws meters and sends intent. No audio state, no DSP, no musical clock. | `frontend/` |
+
+Saved musical data and playback telemetry are kept apart. The parameters and the
+project format that the UI, PHP and the MCP companion share are in
+**[contracts/](contracts/README.md)**.
 
 The DSP runs in an `AudioWorklet` rather than a `ScriptProcessorNode`, so the timing is
 sample-accurate and nothing depends on the main thread keeping up. The worklet holds two
@@ -206,7 +242,7 @@ files on disk ([ADR-002](docs/adr/002-laravel-runs-stateless.md)).
 | `pnpm run build:static` | The PHP-free shell, `public/index.html`. |
 | `pnpm run build:netlify` | Engine, app and static export, assembled into `dist/`. |
 | `pnpm run dev` | Vite dev server with the worklet on watch. |
-| `composer test` | PHPUnit, Rust tests, parity, arrangement and `verify:audio`. |
+| `composer test` | PHPUnit, Rust tests, parity, arrangement, the contract, `verify:audio` and `verify:ui`. The last two need the app running on `:8080`. |
 
 ## Checks
 
@@ -216,6 +252,9 @@ files on disk ([ADR-002](docs/adr/002-laravel-runs-stateless.md)).
 | `cargo clippy --all-targets --manifest-path engine-core/Cargo.toml -- -D warnings` | Must be clean. |
 | `cargo test --release --manifest-path engine-core/Cargo.toml` | The engine. |
 | `pnpm run typecheck` | `tsc --noEmit`. |
+| `composer test:php` | PHPUnit: the song form for every track, the API, the static export matching the API, presets, and the project contract. |
+| `pnpm run check:contract` | The UI's project reader against the same fixtures as PHP's. |
+| `pnpm run verify:ui` | The layout at five widths, keyboard focus, the stem states, the inspector, the drawer and the phone views. |
 | `pnpm run verify:audio` | Drives the real worklet in Chromium and asserts audio. |
 | `pnpm run verify:static` | The same, against the static build, plus no API calls. |
 | `php tools/check-arrangement.php` | The 16-bar form. |
@@ -227,6 +266,13 @@ see the audio thread's console — a throw inside `process()` is swallowed by th
 which is why there's an explicit error channel to the UI. It also can't jump the
 playhead, so the transitions and most of the percussion are covered by the Rust tests
 only.
+
+The browser checks look for Chromium in Playwright's cache. Set
+`PLAYWRIGHT_CHROMIUM=/path/to/chrome` to use another one.
+
+`/probe.html` is the audio probe for a new shell (a NativePHP window, a packaged
+build, a phone): it boots the engine, plays a moment of Warehouse, and reports
+whether sound came out. See [docs/NIGHT6_INVENTORY.md](docs/NIGHT6_INVENTORY.md).
 
 `window.__BCKGRND_DIAG__()` prints context state, sample rate, worklet availability,
 meters and the last error.
