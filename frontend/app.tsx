@@ -22,7 +22,7 @@ import { Inspector, type InspectorTab } from './ui/Inspector';
 import { JogWheel } from './ui/JogWheel';
 import { LibraryPanel } from './ui/Library';
 import { PatternDrawer } from './ui/PatternDrawer';
-import { StemStrip } from './ui/StemStrip';
+import { MixerChannel } from './ui/MixerChannel';
 import { SceneStrip } from './ui/SceneStrip';
 import { CompareBar } from './ui/CompareBar';
 import { SCENE_SLOTS } from './lib/contract';
@@ -65,7 +65,6 @@ export function App() {
 
   const songStep = inst.songStep;
   const bar = inst.bar;
-  const col = songStep < 0 ? -1 : songStep % 16;
 
   const sounding = useMemo(() => (track ? soundingMap(track) : null), [track]);
   const soloedBy = STEM_ORDER.filter((id) => inst.solo[id]);
@@ -329,22 +328,20 @@ export function App() {
                 />
               </SceneStrip>
             ) : null}
-            <div className="stems">
+            <div className="stems mixer-bank" role="group" aria-label="Mixer">
               {library.stems.map((meta, index) => {
                 const state = stateOf(meta.id);
                 return (
-                  <StemStrip
+                  <MixerChannel
                     key={meta.id}
                     meta={meta}
                     index={index}
                     state={state}
                     stateLabel={stemStateLabel(state, soloedBy)}
                     volume={vols[meta.id]}
+                    home={track.mix[meta.id]}
                     muted={inst.muted[meta.id]}
                     soloed={inst.solo[meta.id]}
-                    track={track}
-                    bar={bar}
-                    col={col}
                     selected={selected === meta.id && inspectorTab === 'stem'}
                     onVolume={inst.setStemVolume}
                     onCut={inst.toggleMute}

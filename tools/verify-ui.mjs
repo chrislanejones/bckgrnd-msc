@@ -384,23 +384,77 @@ try {
     check('a stem echo send knob reaches the engine', leadSend && leadSend.value === (await exact('Echo send')),
       `sent ${leadSend?.value} for ${await shown('Echo send')}`);
 
-    // A stem fader drag is one edit too.
-    before = await edits();
-    const fader = page.locator('article.stem[aria-labelledby="stem-kick"] input[type="range"]');
-    const home = await fader.inputValue();
-    const fb = await fader.boundingBox();
-    await page.mouse.move(fb.x + fb.width * 0.9, fb.y + fb.height / 2);
+    // The vertical stem faders: grab without a jump, one edit per drag, Shift fine,
+    // keys, typed values, Reset and double-click, and a cut that leaves the cap alone.
+    const channel = page.locator('article.stem[aria-labelledby="stem-kick"]');
+    const fader = channel.locator('.vfader');
+    const level = async () => Number(await fader.getAttribute('data-value'));
+    const home = await level();
+    const body = channel.locator('.vfader-body');
+    await body.scrollIntoViewIfNeeded();
+    const fb = await body.boundingBox();
+    // Grab low on the rail, far from the cap: nothing moves until the hand does.
+    await page.mouse.move(fb.x + fb.width / 2, fb.y + fb.height - 6);
     await page.mouse.down();
-    for (let i = 1; i <= 10; i += 1) await page.mouse.move(fb.x + fb.width * (0.9 - i * 0.04), fb.y + fb.height / 2);
+    await frame();
+    check('grabbing the rail away from the cap does not jump the fader', Math.abs((await level()) - home) < 1e-9);
+    before = await edits();
+    for (let i = 1; i <= 10; i += 1) await page.mouse.move(fb.x + fb.width / 2, fb.y + fb.height - 6 + i * 4);
     await page.mouse.up();
     await frame();
-    await frame();
+    const dropped = await level();
+    check('dragging a stem fader down lowers it from where it was', dropped < home - 0.15, `${home} -> ${dropped}`);
     check('a stem fader drag is one edit', (await edits()) === before + 1, JSON.stringify(await lastEdit()));
-    await fader.dblclick();
+    check('the engine got the fader value', Number((await sent('volume:0'))?.value) === dropped);
+    // Shift: ten times finer.
+    const f0 = await level();
+    await page.mouse.move(fb.x + fb.width / 2, fb.y + 20);
+    await page.keyboard.down('Shift');
+    await page.mouse.down();
+    for (let i = 1; i <= 10; i += 1) await page.mouse.move(fb.x + fb.width / 2, fb.y + 20 - i * 4);
+    await page.mouse.up();
+    await page.keyboard.up('Shift');
     await frame();
-    check("double-clicking a stem fader returns it to the track's level",
-      (await fader.inputValue()) === home && Number((await sent('volume:0'))?.value) === Number(home),
-      `${await fader.inputValue()} vs ${home}`);
+    const fineMove = (await level()) - f0;
+    check('Shift drags a fader ten times finer', fineMove > 0 && fineMove < 0.04, fineMove.toFixed(4));
+    // Keyboard on the accessible slider.
+    const slider = page.getByRole('slider', { name: 'Kick volume' });
+    check('the fader is a vertical slider named for its stem',
+      (await slider.getAttribute('aria-orientation')) === 'vertical' && /percent$/.test((await slider.getAttribute('aria-valuetext')) ?? ''));
+    await slider.focus();
+    const k0 = await level();
+    await page.keyboard.press('ArrowUp');
+    await frame();
+    check('ArrowUp raises the fader 1%', Math.abs((await level()) - k0 - 0.01) < 1e-6, `${k0} -> ${await level()}`);
+    await page.keyboard.press('End');
+    check('End takes it to the top', (await level()) === 1);
+    await page.keyboard.press('Home');
+    check('Home takes it to the bottom', (await level()) === 0);
+    // Typed value: the single-pointer alternative to dragging.
+    await channel.locator('.vfader-readout').click();
+    await page.keyboard.press('ControlOrMeta+A');
+    await page.keyboard.type('64');
+    await page.keyboard.press('Enter');
+    await frame();
+    check('typing 64 sets 64%', Math.abs((await level()) - 0.64) < 1e-9 && (await channel.locator('.vfader-readout').textContent()) === '64%');
+    // Cutting the stem dims it but leaves the cap at the stored level.
+    const capBefore = await channel.locator('.vfader-cap').boundingBox();
+    await page.getByRole('button', { name: 'Cut Kick' }).click();
+    await frame();
+    const capAfter = await channel.locator('.vfader-cap').boundingBox();
+    check('a cut leaves the fader cap where the level is stored',
+      Math.abs(capAfter.y - capBefore.y) < 0.5 && (await level()) === 0.64 &&
+      (await channel.locator('.channel-meter').getAttribute('class')).includes('is-dimmed'));
+    await page.getByRole('button', { name: 'Bring in Kick' }).click();
+    // Reset: the visible button, then double-click, both to the track's own level.
+    await page.getByRole('button', { name: "Reset Kick to the track's level" }).click();
+    await frame();
+    check("Reset returns the fader to the track's level", (await level()) === home && Number((await sent('volume:0'))?.value) === home);
+    await slider.focus();
+    await page.keyboard.press('Home');
+    await body.dblclick();
+    await frame();
+    check("double-clicking a stem fader returns it to the track's level", (await level()) === home, `${await level()} vs ${home}`);
 
     check('knobs: no page errors', errors.length === 0, errors.join('; '));
     await page.close();
@@ -636,6 +690,12 @@ try {
       await openMenu(0);
       await page.getByRole('button', { name: 'Rename…' }).click();
       const nameField = page.getByRole('textbox', { name: 'Scene name' });
+      // The field takes focus in an effect after it renders; give it a moment.
+      await nameField.evaluate((el) => new Promise((resolve) => {
+        const start = performance.now();
+        const poll = () => (el === document.activeElement || performance.now() - start > 1000 ? resolve(null) : requestAnimationFrame(poll));
+        poll();
+      }));
       check('menu: Rename… puts focus in the name field', await nameField.evaluate((el) => el === document.activeElement));
       await nameField.fill('   ');
       await page.getByRole('button', { name: 'Save name' }).click();
@@ -746,9 +806,13 @@ try {
 
       // Capture during a held Filter stores the base, not the held treatment.
       finger = await touchHold();
+      const heldScroll = await page.evaluate(() => window.scrollY);
       await openMenu(0);
       await page.getByRole('button', { name: 'Capture current mix' }).click();
       const heldAtCapture = await filterPad.getAttribute('aria-pressed');
+      // The mouse clicks above scrolled the page; put it back before the finger lifts,
+      // or the lift lands as a tap on whatever now sits under it (a mixer channel).
+      await page.evaluate((y) => window.scrollTo(0, y), heldScroll);
       await touch('touchEnd', finger);
       await page.getByRole('button', { name: 'Reset cutoff' }).click();
       await page.getByRole('button', { name: 'Launch now' }).click();
@@ -893,7 +957,14 @@ try {
       check('mixing: a held effect is refused', (await filterPad.getAttribute('aria-pressed')) !== 'true');
       await page.mouse.up();
       await page.getByRole('button', { name: 'Panic', exact: true }).click();
-      await page.waitForFunction(() => document.querySelector('.scene-pad')?.disabled === false, null, { timeout: 8000 });
+      // The pads come back at once; playback reports stopped on the next telemetry
+      // frame. Wait for both rather than reading the second straight after the first.
+      await page.waitForFunction(
+        () => document.querySelector('.scene-pad')?.disabled === false &&
+          document.querySelector('.app')?.getAttribute('data-playing') === 'no',
+        null,
+        { timeout: 8000 },
+      ).catch(() => {});
       check('mixing: Panic abandons the mix and the pads come back',
         (await page.locator('.app').getAttribute('data-playing')) === 'no' &&
           (await page.locator('.scene-pad').evaluateAll((els) => els.every((el) => !el.disabled))));

@@ -233,15 +233,25 @@ function SceneMenu({
   const [draft, setDraft] = useState(scene.name);
   const [invalid, setInvalid] = useState(false);
 
-  // Focus moves into the menu; Escape or a click outside closes it.
+  // Focus moves into the menu once, when it opens. This used to share an effect with
+  // the outside-click listener below, keyed on `onClose`; the parent hands over a new
+  // `onClose` whenever it re-renders (the playhead does that several times a second),
+  // so focus was pulled back to the first button at random, sometimes straight out of
+  // the Rename field.
   useEffect(() => {
     ref.current?.querySelector<HTMLElement>('button, input')?.focus();
+  }, []);
+
+  // Escape or a click outside closes it.
+  const closeRef = useRef(onClose);
+  closeRef.current = onClose;
+  useEffect(() => {
     const onDown = (e: PointerEvent) => {
-      if (ref.current && !ref.current.parentElement?.contains(e.target as Node)) onClose();
+      if (ref.current && !ref.current.parentElement?.contains(e.target as Node)) closeRef.current();
     };
     document.addEventListener('pointerdown', onDown);
     return () => document.removeEventListener('pointerdown', onDown);
-  }, [onClose]);
+  }, []);
 
   return (
     <div
