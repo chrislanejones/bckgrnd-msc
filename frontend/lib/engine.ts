@@ -457,7 +457,7 @@ export class EngineHost {
     this.post({ type: 'stereo', mode });
   }
 
-  /** Output balance, 0 mono-left through 0.5 stereo to 1 mono-right. */
+  /** Output balance: 0 hard left (right speaker silent), 0.5 both at full, 1 hard right. */
   setStereoBalance(balance: number): void {
     this.postParam('stereoBalance', { type: 'stereoBalance', value: balance });
   }

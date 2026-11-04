@@ -149,12 +149,13 @@ pub struct Master {
     pub delay: Delay,
     /// Output level, gliding.
     gain: Smoothed,
-    /// Where the output sits between the two channels, 0 = mono-left, 0.5 = stereo,
-    /// 1 = mono-right.
+    /// Hardware-style balance, 0..1. At 0.5 (center) both channels pass at unity;
+    /// turning left fades the right channel, turning right fades the left, and each
+    /// end silences the opposite side. Not a pan: nothing is moved between channels.
     ///
-    /// Continuous rather than a three-way switch so the UI can offer a control. The
-    /// three old positions are exactly its 0, 0.5 and 1, so `set_stereo_mode` still
-    /// means what it did.
+    /// Mono is the width control's job (width 0 folds to mono), not this one's.
+    /// `set_stereo_mode` still maps its three positions to 0, 0.5 and 1, which now
+    /// mean hard left, center and hard right.
     balance: Smoothed,
     /// Stereo width: 0 mono, 1 as mixed, up to 1.5 wider, by scaling the side signal.
     width: Smoothed,
@@ -479,7 +480,8 @@ impl Master {
         }
     }
 
-    /// Output balance: 0 mono-left, 0.5 stereo, 1 mono-right.
+    /// Output balance: 0 hard left (right channel silent), 0.5 center (both at
+    /// unity), 1 hard right (left channel silent).
     pub fn set_balance(&mut self, balance: f32) {
         if balance.is_finite() {
             self.balance.set(balance.clamp(0.0, 1.0));
@@ -631,15 +633,14 @@ impl Master {
             r = mid - side;
         }
 
-        // Collapse toward one channel or the other. Below centre the right channel is
-        // pulled toward the left, above it the left is pulled toward the right, so the
-        // ends are mono and the middle is untouched stereo.
+        // Balance, the way a hardware console does it: center is unity on both
+        // channels, turning left fades the right channel, turning right fades the
+        // left, and each end silences the opposite side. Linear amplitude.
         let b = self.balance.next();
-        let (mut out_l, mut out_r) = if b < 0.5 {
-            (l, l + (r - l) * (b * 2.0))
-        } else {
-            (l + (r - l) * ((b - 0.5) * 2.0), r)
-        };
+        let gain_l = (2.0 * (1.0 - b)).min(1.0);
+        let gain_r = (2.0 * b).min(1.0);
+        let mut out_l = l * gain_l;
+        let mut out_r = r * gain_r;
         out_l *= self.filter_gain;
         out_r *= self.filter_gain;
 
@@ -1268,23 +1269,76 @@ mod tests {
         }
     }
 
-    #[test]
-    fn stereo_modes_collapse_channels() {
+    /// Mean |L| and |R| over a second of the same 220 Hz tone on both inputs, after a
+    /// quarter second for the balance glide to arrive. A sine, not a constant: the
+    /// chain opens with a 28 Hz highpass, which removes a steady level.
+    fn balanced_levels(balance: Option<f32>) -> (f32, f32) {
         let sr = 48_000.0;
         let mut m = Master::new(sr);
-        // The balance glides, so give it a quarter second to arrive.
-        let settle = |m: &mut Master| {
-            for _ in 0..(sr as usize / 4) {
-                m.process(0.5, -0.5);
-            }
-            m.process(0.5, -0.5)
-        };
-        m.set_balance(0.0);
-        let (l, r) = settle(&mut m);
-        assert!((l - r).abs() < 1e-6, "left mode not mono {l} {r}");
-        m.set_balance(1.0);
-        let (l, r) = settle(&mut m);
-        assert!((l - r).abs() < 1e-6, "right mode not mono");
+        if let Some(b) = balance {
+            m.set_balance(b);
+        }
+        let tone = |i: usize| 0.25 * (i as f32 / sr * 220.0 * std::f32::consts::TAU).sin();
+        let warm = sr as usize / 4;
+        for i in 0..warm {
+            m.process(tone(i), tone(i));
+        }
+        let n = sr as usize;
+        let (mut sl, mut sr_sum) = (0.0f32, 0.0f32);
+        for i in warm..warm + n {
+            let (l, r) = m.process(tone(i), tone(i));
+            sl += l.abs();
+            sr_sum += r.abs();
+        }
+        (sl / n as f32, sr_sum / n as f32)
+    }
+
+    /// Center is the untouched mix, sample for sample.
+    #[test]
+    fn balance_center_is_unity() {
+        let sr = 48_000.0;
+        let mut plain = Master::new(sr);
+        let mut centered = Master::new(sr);
+        centered.set_balance(0.5);
+        for i in 0..(sr as usize) {
+            let t = i as f32 / sr;
+            let l = 0.3 * (t * 220.0 * std::f32::consts::TAU).sin();
+            let r = 0.2 * (t * 330.0 * std::f32::consts::TAU).sin();
+            assert_eq!(
+                plain.process(l, r),
+                centered.process(l, r),
+                "center changed sample {i}"
+            );
+        }
+    }
+
+    /// The ends silence the opposite channel and leave the near one at full level.
+    #[test]
+    fn balance_ends_silence_the_opposite_side() {
+        let (cl, cr) = balanced_levels(None);
+        assert!(cl > 0.05 && cr > 0.05, "center too quiet: {cl} {cr}");
+
+        let (l, r) = balanced_levels(Some(0.0));
+        assert!(r < 1e-4, "hard left should silence the right, got {r}");
+        assert!((l - cl).abs() < 1e-4, "left not at full level: {l} vs {cl}");
+
+        let (l, r) = balanced_levels(Some(1.0));
+        assert!(l < 1e-4, "hard right should silence the left, got {l}");
+        assert!(
+            (r - cr).abs() < 1e-4,
+            "right not at full level: {r} vs {cr}"
+        );
+    }
+
+    /// A quarter of the way from hard left, the right channel is at half (-6 dB).
+    #[test]
+    fn balance_quarter_halves_the_right() {
+        let (l, r) = balanced_levels(Some(0.25));
+        let ratio = r / l;
+        assert!(
+            (ratio - 0.5).abs() < 0.01,
+            "right/left at 0.25 is {ratio}, want 0.5"
+        );
     }
 
     #[test]

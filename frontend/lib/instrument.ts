@@ -132,7 +132,7 @@ export function useInstrument() {
   const [bands, setBandsState] = useState<Bands>({ low: 1, mid: 1, high: 1 });
   const [filter, setFilterState] = useState(1);
   const [echo, setEchoState] = useState(false);
-  /** Output balance: 0 mono-left, 0.5 stereo, 1 mono-right. */
+  /** Output balance: 0 hard left (right speaker silent), 0.5 both at full, 1 hard right. */
   const [stereo, setStereoState] = useState(0.5);
   const [effects, setEffects] = useState<Effects>(EFFECT_DEFAULTS);
   /** Each stem's echo send. A track change puts them back to the stems' own amounts. */

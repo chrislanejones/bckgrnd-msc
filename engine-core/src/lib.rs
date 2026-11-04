@@ -840,8 +840,12 @@ impl Engine {
             .set_eq(band_db(low), band_db(mid), band_db(high));
     }
 
+    /// The old three-way switch, kept for callers that still send it: 0, 1 and 2 map
+    /// to balance 0.0, 0.5 and 1.0. Since the balance became a hardware-style balance,
+    /// 0 is hard left (right channel silent) and 2 is hard right (left silent), not
+    /// mono; mono is `set_width(0.0)`.
     pub fn set_stereo_mode(&mut self, mode: u8) {
-        // The three switch positions are the ends and the centre of the balance.
+        // The three switch positions are the ends and the center of the balance.
         self.master.set_balance(match mode.min(2) {
             0 => 0.0,
             2 => 1.0,
@@ -849,8 +853,9 @@ impl Engine {
         });
     }
 
-    /// Where the output sits between the channels: 0 mono-left, 0.5 stereo, 1
-    /// mono-right. The continuous form of [`Engine::set_stereo_mode`].
+    /// Hardware-style balance, 0..1: 0.5 (center) leaves both channels at unity,
+    /// lower fades the right channel, higher fades the left, and each end silences
+    /// the opposite side. The continuous form of [`Engine::set_stereo_mode`].
     pub fn set_stereo_balance(&mut self, balance: f32) {
         self.master.set_balance(balance);
     }
@@ -1331,43 +1336,47 @@ mod tests {
         }
     }
 
-    /// The balance fader's ends and centre are the old three-way switch.
+    /// The old three-way switch lands on the balance's ends and center: hard left
+    /// silences the right, center leaves both, hard right silences the left.
     #[test]
-    fn balance_endpoints_match_the_old_stereo_modes() {
-        // Mean |L - R| over a second of an out-of-phase tone. A sine, not a constant:
-        // the master opens with a 28 Hz highpass, which removes a steady level, so a
-        // DC input would read as near-silence at every setting.
-        let spread = |balance: f32| -> f32 {
+    fn stereo_mode_maps_to_balance_ends_and_center() {
+        // Mean |L| and |R| over a second of the same tone on both sides. A sine, not a
+        // constant: the master opens with a 28 Hz highpass, which removes a steady
+        // level, so a DC input would read as near-silence at every setting.
+        let levels = |mode: u8| -> (f32, f32) {
             let sr = 48_000.0;
-            let mut m = mixer::Master::new(sr);
-            m.set_balance(balance);
+            let mut e = Engine::new(sr);
+            e.set_stereo_mode(mode);
+            let mut m = std::mem::replace(&mut e.master, mixer::Master::new(sr));
             // The balance glides; let it arrive before measuring.
             let warm = sr as usize / 4;
+            let tone = |i: usize| 0.4 * (i as f32 / sr * 220.0 * std::f32::consts::TAU).sin();
             for i in 0..warm {
-                let v = 0.4 * (i as f32 / sr * 220.0 * std::f32::consts::TAU).sin();
-                m.process(v, -v);
+                m.process(tone(i), tone(i));
             }
-            let mut total = 0.0f32;
+            let (mut sl, mut sr_sum) = (0.0f32, 0.0f32);
             let n = sr as usize;
             for i in warm..warm + n {
-                let v = 0.4 * (i as f32 / sr * 220.0 * std::f32::consts::TAU).sin();
-                let (l, r) = m.process(v, -v);
-                total += (l - r).abs();
+                let (l, r) = m.process(tone(i), tone(i));
+                sl += l.abs();
+                sr_sum += r.abs();
             }
-            total / n as f32
+            (sl / n as f32, sr_sum / n as f32)
         };
 
-        let (left, quarter, centre, right) = (spread(0.0), spread(0.25), spread(0.5), spread(1.0));
-        assert!(left < 1e-4, "left end should be mono, spread {left}");
-        assert!(right < 1e-4, "right end should be mono, spread {right}");
+        let (ll, lr) = levels(0);
+        let (cl, cr) = levels(1);
+        let (rl, rr) = levels(2);
+        assert!(cl > 0.05 && cr > 0.05, "center should play both: {cl} {cr}");
+        assert!(lr < 1e-4, "mode 0 should silence the right, got {lr}");
+        assert!(rl < 1e-4, "mode 2 should silence the left, got {rl}");
         assert!(
-            centre > 0.05,
-            "centre should leave the channels apart, spread {centre}"
+            (ll - cl).abs() < 1e-3,
+            "mode 0 left not at full level: {ll} vs {cl}"
         );
-        // And it opens smoothly rather than switching.
         assert!(
-            left < quarter && quarter < centre,
-            "not monotonic: {left} {quarter} {centre}"
+            (rr - cr).abs() < 1e-3,
+            "mode 2 right not at full level: {rr} vs {cr}"
         );
     }
 

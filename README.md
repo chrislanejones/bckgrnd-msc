@@ -199,7 +199,7 @@ The continuous controls in the inspector are knobs. Each one:
 | Return | How loud the echo comes back. The echo throw holds feedback and return open while it is on and gives them back after. With the echo off, both are disabled: they have nothing to act on. |
 | Room mix / Decay | The room under the mix: 0–50%, and 0.2 to 2.5 s. |
 | Width | 0% is mono, 100% as mixed, up to 150%. |
-| Balance | Left end is mono-left, the middle is full stereo, the right end is mono-right. |
+| Balance | Turn it left and the right speaker fades out; turn it right and the left one does. Both play at full in the middle. Reads **R 10 %** on screen between the ends. |
 | Master | Output level, in dB. |
 | Stem fader | The stem's level. Double-click it, or press Delete on it, to go back to the track's own level. |
 | Echo send (per stem) | How much of the stem feeds the echo. Each stem starts at its own amount and goes back there with a new track. |

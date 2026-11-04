@@ -183,6 +183,9 @@ try {
       let peakR = 0;
       let nonFinite = 0;
       let maxDiff = 0;
+      // Per-channel peaks after the settle time, once glides (balance, width) arrive.
+      let settledL = 0;
+      let settledR = 0;
       let sumSq = 0;
       let count = 0;
       const bufD = new Float32Array(analyserD.fftSize);
@@ -208,6 +211,8 @@ try {
           analyserD.getFloatTimeDomainData(bufD);
           for (let i = 0; i < bufL.length; i += 1) {
             maxDiff = Math.max(maxDiff, Math.abs(bufD[i]));
+            settledL = Math.max(settledL, Math.abs(bufL[i]));
+            settledR = Math.max(settledR, Math.abs(bufR[i]));
             sumSq += bufL[i] * bufL[i] + bufR[i] * bufR[i];
             count += 2;
           }
@@ -232,6 +237,8 @@ try {
         peakR,
         nonFinite,
         maxDiff,
+        settledL,
+        settledR,
         rms: count ? Math.sqrt(sumSq / count) : 0,
         // Mean power per bin, and the bin width in Hz, when asked for.
         power: spectrum ? Array.from(power, (p) => p / Math.max(1, spectra)) : null,
@@ -321,6 +328,9 @@ try {
     const fx = (commands) => measure({ ms: 1500, commands });
     out.fxDefault = await fx([]);
     out.fxMono = await fx([{ type: 'width', value: 0 }]);
+    // Balance is heard as one speaker fading: hard left silences the right channel.
+    out.fxBalanceLeft = await fx([{ type: 'stereoBalance', value: 0 }]);
+    out.fxBalanceRight = await fx([{ type: 'stereoBalance', value: 1 }]);
     // Resonance is a peak at the cutoff, so it is measured there: the power in a band
     // around the cutoff with the filter closed to 0.3 (240 * 75^0.3, about 876 Hz).
     out.fxResonance = await measure({
@@ -456,6 +466,18 @@ try {
       result.fxMono.maxDiff < 1e-4 && d.maxDiff > 0.01 && result.fxMono.errors.length === 0,
       `max |L-R| ${result.fxMono.maxDiff.toExponential(2)} (default ${d.maxDiff.toFixed(3)})`,
     );
+    // Measured after the settle time: the balance glides in from center over 20 ms,
+    // and the first kick lands inside that glide.
+    for (const [side, r, kept, gone] of [
+      ['left', result.fxBalanceLeft, 'settledL', 'settledR'],
+      ['right', result.fxBalanceRight, 'settledR', 'settledL'],
+    ]) {
+      check(
+        `balance hard ${side} silences the other speaker`,
+        r[gone] < 1e-3 && r[kept] > 0.5 * d[kept] && r.errors.length === 0,
+        `L ${r.settledL.toFixed(4)} R ${r.settledR.toFixed(4)} (default L ${d.settledL.toFixed(4)} R ${d.settledR.toFixed(4)})`,
+      );
+    }
     {
       const band = (r, lo, hi) => {
         let sum = 0;
