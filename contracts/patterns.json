@@ -1,0 +1,23 @@
+{
+  "$comment": "The pattern registry: which lanes a project may override, how musical positions are measured, and the limits every reader enforces. Read by frontend/lib/patterns.ts and App\\Support\\Project\\Patterns, and by the engine's tests for the lane order. See contracts/README.md, Patterns.",
+  "contract": "bckgrnd-msc/patterns",
+  "version": 1,
+  "unit": "sixteenth",
+  "steps": 256,
+  "stepsPerBar": 16,
+  "maxEvents": 256,
+  "maxNotes": 6,
+  "pitch": { "min": 0, "max": 127 },
+  "lanes": [
+    { "id": "kick", "stem": "kick", "kind": "drum", "label": "Kick", "prefix": "k", "engine": 0, "editable": true, "velocity": 0.95 },
+    { "id": "clap", "stem": "clap", "kind": "drum", "label": "Clap", "prefix": "c", "engine": 1, "editable": true, "velocity": 0.85 },
+    { "id": "hat", "stem": "hats", "kind": "drum", "label": "Closed hat", "prefix": "h", "engine": 2, "editable": true, "velocity": 0.6 },
+    { "id": "hatOpen", "stem": "hats", "kind": "drum", "label": "Open hat", "prefix": "o", "engine": 3, "editable": true, "velocity": 0.55 },
+    { "id": "bass", "stem": "bass", "kind": "notes", "label": "Bass", "prefix": "b", "engine": 4, "editable": true, "velocity": 0.9, "range": [24, 60] },
+    { "id": "stab", "stem": "stab", "kind": "notes", "label": "Stab", "prefix": "s", "engine": 5, "editable": false, "velocity": 0.6, "range": [36, 96] },
+    { "id": "lead", "stem": "lead", "kind": "notes", "label": "Lead", "prefix": "l", "engine": 6, "editable": true, "velocity": 0.7, "range": [48, 96] },
+    { "id": "pad", "stem": "pad", "kind": "notes", "label": "Pad", "prefix": "p", "engine": 7, "editable": false, "velocity": 0.5, "range": [36, 96] },
+    { "id": "arp", "stem": "arp", "kind": "notes", "label": "Arp", "prefix": "a", "engine": 8, "editable": false, "velocity": 0.5, "range": [48, 108] }
+  ],
+  "originKinds": ["edit", "paste", "humanize", "variation", "scene"]
+}

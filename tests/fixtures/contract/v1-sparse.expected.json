@@ -1,6 +1,6 @@
 {
     "format": "bckgrnd-msc/project",
-    "version": 2,
+    "version": 3,
     "name": "Sparse",
     "trackId": "rain",
     "params": {
@@ -71,6 +71,10 @@
         }
     },
     "patterns": {},
+    "locks": {
+        "lanes": [],
+        "events": {}
+    },
     "scenes": {
         "slots": [
             {

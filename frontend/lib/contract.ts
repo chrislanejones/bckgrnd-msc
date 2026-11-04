@@ -12,10 +12,20 @@
 
 import registry from '../../contracts/parameters.json';
 import scenesContract from '../../contracts/scenes.json';
+import {
+  readLocks,
+  readPatterns,
+  readScenePatterns,
+  sameEvents,
+  type LaneId,
+  type Locks,
+  type Patterns,
+  type ScenePatterns,
+} from './patterns';
 import type { StemId, TrackArrangement, TrackSummary } from './types';
 
 export const PROJECT_FORMAT = 'bckgrnd-msc/project';
-export const PROJECT_VERSION = 2;
+export const PROJECT_VERSION = 3;
 
 type Option = { value: number; label: string };
 
@@ -141,8 +151,12 @@ export type Scene = {
   revision: number;
   params: Record<ParamId, number>;
   stems: Record<StemId, StemSettings>;
-  /** Pattern references arrive in Night 4. Empty until then. */
-  patterns: Record<string, never>;
+  /**
+   * The lanes this scene sets when it launches (version 3): each a pinned copy of a
+   * pattern, or `{factory: true}` for the track's own. A lane the scene leaves out is
+   * left alone by a launch. Version 2 scenes have none.
+   */
+  patterns: ScenePatterns;
 };
 
 export type Scenes = { slots: Scene[] };
@@ -157,8 +171,10 @@ export type Project = {
   trackId: string;
   params: Record<ParamId, number>;
   stems: Record<StemId, StemSettings>;
-  /** Reserved for pattern edits (Night 4). Empty. */
-  patterns: Record<string, never>;
+  /** Lane overrides (version 3). A lane not here plays the factory pattern. */
+  patterns: Patterns;
+  /** Lanes and events a variation or humanize must never change. */
+  locks: Locks;
   scenes: Scenes;
 };
 
@@ -215,6 +231,7 @@ export function projectFromTrack(track: TrackSummary | TrackArrangement): Projec
     params,
     stems,
     patterns: {},
+    locks: { lanes: [], events: {} },
     scenes: factoryScenes(track),
   };
 }
@@ -241,7 +258,7 @@ const sameKeySet = (o: Loose, keys: readonly string[]) => {
  * set. Nothing is clamped or filled. Mirrors `Contract::readScenes()`, error text
  * included.
  */
-export function readScenes(raw: unknown): Scenes {
+export function readScenes(raw: unknown, version: number = PROJECT_VERSION): Scenes {
   const fail = (why: string): never => {
     throw new Error(`Scenes are malformed: ${why}`);
   };
@@ -271,10 +288,12 @@ export function readScenes(raw: unknown): Scenes {
       if (typeof sc.revision !== 'number' || !Number.isInteger(sc.revision) || sc.revision < 1) {
         fail(`slot ${slot} needs a whole-number revision of at least 1`);
       }
-      // PHP reads {} and [] alike, so both are accepted as "no patterns".
+      // PHP reads {} and [] alike, so both are accepted as "no patterns". Version 2
+      // scenes can hold none; version 3 scenes hold pinned lanes.
       const pats = sc.patterns;
       const emptyPatterns = (isObj(pats) && Object.keys(pats).length === 0) || (Array.isArray(pats) && pats.length === 0);
-      if (!emptyPatterns) fail(`slot ${slot} refers to patterns, which this version does not support`);
+      if (version < 3 && !emptyPatterns) fail(`slot ${slot} refers to patterns, which this version does not support`);
+      const patterns = version < 3 ? {} : readScenePatterns(pats, slot);
 
       if (!isObj(sc.params) || !sameKeySet(sc.params, SCENE_PARAMS)) {
         fail(`slot ${slot} must hold exactly the scene parameters`);
@@ -312,7 +331,7 @@ export function readScenes(raw: unknown): Scenes {
         revision: sc.revision as number,
         params,
         stems,
-        patterns: {},
+        patterns,
       };
     }),
   };
@@ -331,6 +350,7 @@ function clamp(spec: ParameterSpec, value: unknown, fallback: number): number {
 
 type Loose = Record<string, unknown>;
 const isObj = (v: unknown): v is Loose => typeof v === 'object' && v !== null && !Array.isArray(v);
+const isEmptyMap = (v: unknown) => (isObj(v) && Object.keys(v).length === 0) || (Array.isArray(v) && v.length === 0);
 
 /**
  * Read any supported document into a complete version 2 project.
@@ -364,7 +384,11 @@ export function migrateProject(
     );
   }
   if (version === 1 && 'scenes' in doc) throw new Error('A version 1 project cannot carry scenes.');
-  if (version >= 2 && !('scenes' in doc)) throw new Error('Scenes are missing from a version 2 project.');
+  if (version >= 2 && !('scenes' in doc)) throw new Error(`Scenes are missing from a version ${version} project.`);
+  if (version < 3 && 'locks' in doc) throw new Error(`A version ${version} project cannot carry locks.`);
+  if (version < 3 && 'patterns' in doc && !isEmptyMap(doc.patterns)) {
+    throw new Error(`A version ${version} project cannot carry patterns.`);
+  }
 
   const track = lookup(String(doc.trackId ?? ''));
   if (!track) throw new Error(`Unknown track: ${String(doc.trackId ?? '')}`);
@@ -390,7 +414,12 @@ export function migrateProject(
 
   // A version 1 project gets the track's factory scenes. Nothing is applied: the
   // working mix above is what it was.
-  const scenes = 'scenes' in doc ? readScenes(doc.scenes) : fresh.scenes;
+  // Version 3 patterns and locks are read strictly; older documents have none, so
+  // migrating them changes nothing that plays. Read before the scenes, as PHP does,
+  // so a document broken in both places reports the same error from either reader.
+  const patterns = version >= 3 ? readPatterns(doc.patterns) : {};
+  const locks = version >= 3 ? readLocks(doc.locks) : { lanes: [], events: {} };
+  const scenes = 'scenes' in doc ? readScenes(doc.scenes, version) : fresh.scenes;
 
   const out: Project = {
     format: PROJECT_FORMAT,
@@ -399,7 +428,8 @@ export function migrateProject(
     trackId: track.id,
     params,
     stems,
-    patterns: {},
+    patterns,
+    locks,
     scenes,
   };
   if (typeof doc.id === 'string') out.id = doc.id;
@@ -417,6 +447,7 @@ export function migrateProject(
     params: out.params,
     stems: out.stems,
     patterns: out.patterns,
+    locks: out.locks,
     scenes: out.scenes,
   };
 }
@@ -453,6 +484,14 @@ function fromLegacyPreset(preset: Loose): Loose {
 /** Whether two projects describe the same music. Names and timestamps are ignored. */
 export function sameMusic(a: Project, b: Project): boolean {
   if (a.trackId !== b.trackId) return false;
+  const lanesA = Object.keys(a.patterns);
+  const lanesB = Object.keys(b.patterns);
+  if (lanesA.length !== lanesB.length) return false;
+  for (const lane of lanesA as LaneId[]) {
+    const x = a.patterns[lane];
+    const y = b.patterns[lane];
+    if (!x || !y || !sameEvents(x, y)) return false;
+  }
   for (const id of PROJECT_PARAMS) if (Math.abs(a.params[id] - b.params[id]) > 1e-6) return false;
   for (const id of STEMS) {
     const x = a.stems[id];

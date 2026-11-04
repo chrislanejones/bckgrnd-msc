@@ -1,6 +1,6 @@
 {
     "format": "bckgrnd-msc/project",
-    "version": 2,
+    "version": 3,
     "id": "kept",
     "name": "Kept",
     "updatedAt": "2026-10-21T12:00:00+00:00",
@@ -73,6 +73,10 @@
         }
     },
     "patterns": {},
+    "locks": {
+        "lanes": [],
+        "events": {}
+    },
     "scenes": {
         "slots": [
             {

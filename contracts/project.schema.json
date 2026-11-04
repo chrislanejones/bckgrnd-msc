@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://bckgrnd-msc.netlify.app/contracts/project.v2.schema.json",
-  "title": "bckgrnd-msc project, version 2",
-  "description": "Saved musical data only. Playback telemetry (meters, playhead, live deck) is never part of a project. Parameter ids and ranges come from contracts/parameters.json; scene slots and the scene parameters come from contracts/scenes.json. Version 1 is the same without `scenes`; readers migrate it by adding the track's factory scenes.",
+  "$id": "https://bckgrnd-msc.netlify.app/contracts/project.v3.schema.json",
+  "title": "bckgrnd-msc project, version 3",
+  "description": "Saved musical data only. Playback telemetry (meters, playhead, live deck) is never part of a project. Parameter ids and ranges come from contracts/parameters.json; scene slots and the scene parameters from contracts/scenes.json; lanes, the musical unit and pattern limits from contracts/patterns.json. Version 2 is the same without `locks` and with no patterns anywhere; version 1 is version 2 without `scenes`. Readers migrate both forward without changing anything that plays. Beyond this schema, readers also refuse a pattern whose events repeat an id or a step, or whose lane key and `lane` disagree.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -13,6 +13,7 @@
     "params",
     "stems",
     "patterns",
+    "locks",
     "scenes"
   ],
   "properties": {
@@ -20,7 +21,7 @@
       "const": "bckgrnd-msc/project"
     },
     "version": {
-      "const": 2
+      "const": 3
     },
     "id": {
       "type": "string",
@@ -84,9 +85,11 @@
       }
     },
     "patterns": {
-      "description": "Reserved for pattern edits (Night 4). Empty in version 2.",
-      "type": "object",
-      "maxProperties": 0
+      "description": "Lane overrides. A lane absent here plays the track's factory lane; a lane present with no events plays nothing.",
+      "$ref": "#/$defs/patternMap"
+    },
+    "locks": {
+      "$ref": "#/$defs/locks"
     },
     "scenes": {
       "description": "Four stored scene snapshots. Complete on disk. A malformed scene refuses the whole set. Which scene is active is session state and is never saved.",
@@ -299,9 +302,31 @@
           }
         },
         "patterns": {
+          "description": "Lanes this scene sets when it launches: a pinned pattern, or {\"factory\": true}. A lane absent is left alone by a launch.",
           "type": "object",
-          "maxProperties": 0,
-          "description": "Pattern references arrive in Night 4. Any key is refused."
+          "propertyNames": {
+            "enum": [
+              "kick",
+              "clap",
+              "hat",
+              "hatOpen",
+              "bass",
+              "stab",
+              "lead",
+              "pad",
+              "arp"
+            ]
+          },
+          "additionalProperties": {
+            "oneOf": [
+              {
+                "$ref": "#/$defs/pattern"
+              },
+              {
+                "$ref": "#/$defs/factoryRef"
+              }
+            ]
+          }
         }
       }
     },
@@ -330,6 +355,229 @@
         },
         "solo": {
           "type": "boolean"
+        }
+      }
+    },
+    "patternMap": {
+      "type": "object",
+      "propertyNames": {
+        "enum": [
+          "kick",
+          "clap",
+          "hat",
+          "hatOpen",
+          "bass",
+          "stab",
+          "lead",
+          "pad",
+          "arp"
+        ]
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/pattern"
+      }
+    },
+    "factoryRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "factory"
+      ],
+      "properties": {
+        "factory": {
+          "const": true
+        }
+      }
+    },
+    "pattern": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "revision",
+        "lane",
+        "length",
+        "events"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{1,64}$"
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "lane": {
+          "enum": [
+            "kick",
+            "clap",
+            "hat",
+            "hatOpen",
+            "bass",
+            "stab",
+            "lead",
+            "pad",
+            "arp"
+          ]
+        },
+        "length": {
+          "const": 256,
+          "description": "Sixteenths: the 16-bar song."
+        },
+        "events": {
+          "type": "array",
+          "maxItems": 256,
+          "items": {
+            "oneOf": [
+              {
+                "$ref": "#/$defs/drumEvent"
+              },
+              {
+                "$ref": "#/$defs/noteEvent"
+              }
+            ]
+          }
+        },
+        "origin": {
+          "type": "object",
+          "required": [
+            "kind"
+          ],
+          "properties": {
+            "kind": {
+              "enum": [
+                "edit",
+                "paste",
+                "humanize",
+                "variation",
+                "scene"
+              ]
+            }
+          },
+          "description": "Provenance: for a variation or humanize, the generator, its version, the seed, the settings and the source revision. The resulting events are stored, so a later generator never changes a saved pattern."
+        }
+      }
+    },
+    "drumEvent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "step",
+        "vel"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{1,24}$"
+        },
+        "step": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 255,
+          "description": "Sixteenth of the song."
+        },
+        "vel": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 1
+        }
+      }
+    },
+    "noteEvent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "step",
+        "notes",
+        "len",
+        "vel",
+        "accent"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{1,24}$"
+        },
+        "step": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 255,
+          "description": "Sixteenth of the song."
+        },
+        "notes": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 6,
+          "items": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 127
+          }
+        },
+        "len": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "description": "Sixteenths; step + len must be at most 256."
+        },
+        "vel": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 1
+        },
+        "accent": {
+          "type": "boolean"
+        }
+      }
+    },
+    "locks": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "lanes",
+        "events"
+      ],
+      "properties": {
+        "lanes": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "kick",
+              "clap",
+              "hat",
+              "hatOpen",
+              "bass",
+              "stab",
+              "lead",
+              "pad",
+              "arp"
+            ]
+          }
+        },
+        "events": {
+          "type": "object",
+          "propertyNames": {
+            "enum": [
+              "kick",
+              "clap",
+              "hat",
+              "hatOpen",
+              "bass",
+              "stab",
+              "lead",
+              "pad",
+              "arp"
+            ]
+          },
+          "additionalProperties": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{1,24}$"
+            }
+          }
         }
       }
     }

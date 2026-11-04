@@ -6,6 +6,7 @@ namespace Tests\Unit;
 
 use App\Support\Music\Library;
 use App\Support\Project\Contract;
+use App\Support\Project\Patterns;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 
@@ -141,7 +142,7 @@ final class ContractTest extends TestCase
     {
         $v1 = json_decode((string) file_get_contents(dirname(__DIR__).'/fixtures/contract/v1-sparse.input.json'), true);
         $v2 = Contract::migrate($v1);
-        $this->assertSame(2, $v2['version']);
+        $this->assertSame(Contract::VERSION, $v2['version']);
         $this->assertSame(0.4, $v2['params']['fx.filter'], 'the working mix is kept');
         $this->assertTrue($v2['stems']['kick']['muted'], 'the working mix is kept');
         $this->assertEquals(Contract::factoryScenes(Library::findOrFail('rain')), $v2['scenes']);
@@ -168,5 +169,50 @@ final class ContractTest extends TestCase
         }
 
         $this->assertEquals($expected, json_decode((string) json_encode($actual), true));
+    }
+
+    public function test_migrating_version_2_to_3_changes_nothing_that_plays(): void
+    {
+        $v2 = json_decode((string) file_get_contents(dirname(__DIR__).'/fixtures/contract/v2-captured.input.json'), true);
+        $v3 = json_decode((string) json_encode(Contract::migrate($v2)), true);
+        $this->assertSame(3, $v3['version']);
+        $this->assertSame([], $v3['patterns'], 'no lane is overridden: every lane plays the factory pattern');
+        $this->assertSame(['lanes' => [], 'events' => []], $v3['locks']);
+        foreach (['params', 'stems'] as $key) {
+            $this->assertEquals($v2[$key], $v3[$key], "{$key} unchanged");
+        }
+        foreach ($v3['scenes']['slots'] as $i => $scene) {
+            $this->assertSame([], $scene['patterns'], 'a migrated scene sets no lanes, so launching it leaves patterns alone');
+            $this->assertEquals($v2['scenes']['slots'][$i]['stems'], $scene['stems']);
+        }
+    }
+
+    public function test_a_version_3_document_round_trips_exactly(): void
+    {
+        $v3 = json_decode((string) file_get_contents(dirname(__DIR__).'/fixtures/contract/v3-patterns.input.json'), true);
+        $once = json_decode((string) json_encode(Contract::migrate($v3)), true);
+        $twice = json_decode((string) json_encode(Contract::migrate($once)), true);
+        $this->assertSame($once, $twice, 'reading what was written gives it back unchanged');
+        $this->assertSame([], $once['patterns']['kick']['events'], 'an explicitly empty lane stays empty, not factory');
+        $this->assertSame([33, 45], $once['patterns']['bass']['events'][0]['notes'], 'a chord keeps every pitch');
+        $this->assertSame(42, $once['patterns']['hat']['origin']['seed'], 'a variation keeps its seed');
+        $this->assertSame(['bass'], $once['locks']['lanes']);
+        $this->assertSame(['factory' => true], $once['scenes']['slots'][0]['patterns']['kick']);
+    }
+
+    public function test_the_factory_pattern_is_the_track_as_written(): void
+    {
+        $track = Library::findOrFail('warehouse')->arrange();
+        $kick = Patterns::factory($track, 'kick');
+        $this->assertSame('factory-kick', $kick['id']);
+        $hits = array_keys(array_filter($track->kick, static fn ($v) => $v > 0));
+        $this->assertSame($hits, array_column($kick['events'], 'step'));
+        $this->assertSame('k0', $kick['events'][0]['id']);
+        $bass = Patterns::factory($track, 'bass');
+        foreach ($bass['events'] as $e) {
+            $this->assertNotNull($track->bass[$e['step']]);
+            $this->assertLessThanOrEqual(256, $e['step'] + $e['len']);
+        }
+        $this->assertSame($bass, Patterns::readPattern($bass, 'bass', 'patterns'), 'the factory reads back as a valid pattern');
     }
 }

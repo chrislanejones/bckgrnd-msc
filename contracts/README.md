@@ -7,7 +7,8 @@ should all agree on these files. None of them should keep a private copy.
 | File | What it is | Read by |
 |---|---|---|
 | [`parameters.json`](parameters.json) | Every engine parameter: id, range, default, unit, scope, and the worklet message that sets it. | `frontend/lib/contract.ts`, `App\Support\Project\Contract`, and the MCP from Night 6 |
-| [`project.schema.json`](project.schema.json) | A saved project, version 2. | The same, plus anything that writes a project file |
+| [`project.schema.json`](project.schema.json) | A saved project, version 3. | The same, plus anything that writes a project file |
+| [`patterns.json`](patterns.json) | The nine lanes a project may override (kind, stem, engine index, id prefix, editable or not), the musical unit, and pattern limits. | `frontend/lib/patterns.ts`, `App\Support\Project\Patterns`, the engine's tests |
 | [`scenes.json`](scenes.json) | The four scene slots, the parameters a scene holds (`sceneVector`, also the engine's vector order) and the factory recipes. | The same, plus `engine-core/tests` |
 
 ## Saved data vs. telemetry
@@ -75,11 +76,49 @@ complete.)
   Readers **upgrade** older versions through a migration, and a migration never drops
   data it doesn't understand silently.
 
+## Patterns (version 3)
+
+```json
+"patterns": {
+  "hat": {
+    "id": "p-hat", "revision": 3, "lane": "hat", "length": 256,
+    "events": [{ "id": "h2", "step": 2, "vel": 0.45 }],
+    "origin": { "kind": "variation", "generator": "php-drums-1", "seed": 42, "sourceRevision": 2 }
+  },
+  "kick": { "id": "p-kick", "revision": 2, "lane": "kick", "length": 256, "events": [] }
+},
+"locks": { "lanes": ["bass"], "events": { "hat": ["h2"] } }
+```
+
+- **Unchanged and silent are different.** A lane absent from `patterns` plays the
+  factory lane. A lane present with no events plays nothing. So clearing a bar never
+  brings the factory pattern back.
+- **Unit:** sixteenths of the 16-bar song. `step` is 0..255, and a note's `len` is in
+  sixteenths and must end by step 256. Nothing on screen (selection, scroll,
+  playhead) is ever stored here.
+- **Identity:** every pattern has an `id` and a `revision` that goes up with every
+  accepted edit. Every event has an `id`, unique in its pattern. The factory's ids
+  come from the lane prefix and the step (`k0`, `h12`, `b64`), so a project and the
+  factory agree on them.
+- **Nothing is flattened:** a note keeps every pitch (chords of up to six), its
+  length, velocity and accent. A drum event is `{id, step, vel}`. The extra
+  percussion on the hats stem is not a lane here and is never touched.
+- **Provenance** (`origin`) records how a pattern was made. For a variation or a
+  humanize, that's the generator and its version, the seed, the settings and the
+  source revision. The resulting events are stored too, so a later generator update
+  never changes a saved pattern.
+- **Scenes pin patterns.** A v3 scene's `patterns` maps the lanes it sets to a copy
+  of the pattern as captured, or to `{"factory": true}`. A lane the scene leaves out
+  is left alone when it launches. Editing the working pattern never rewrites a
+  scene: the scene shows as modified until you capture it again.
+- **Malformed is refused whole**, with the same error text from both readers.
+
 ### Migrations
 
 | From | To | How |
 |---|---|---|
 | Legacy preset (`PresetController`, no `format`) | v1 | `trackId`, `bpm`, `swing` → `transport.*`; `mix`/`muted`/`solo` → `stems`. Effects take their defaults, because legacy presets never stored them. |
+| v2 | v3 | Adds empty `locks`. Patterns stay empty and scenes set no lanes, so nothing that plays changes. A v1 or v2 document carrying patterns or locks is refused rather than silently dropped. |
 | v1 | v2 | Adds the track's four factory scenes. Nothing else changes, and no scene is applied: the working mix stays what was saved. A v1 document that already carries `scenes` is refused. |
 | MCP `MixSettings` (bckgrnd-msc-mcp `src/settings.ts`) | v1 (Night 6) | `track` → `trackId`; `cut[]` → `stems.*.muted`. Its loudness, ducking and fades are render settings for mixing under a voice, not musical data. They stay in the MCP's own presets. |
 

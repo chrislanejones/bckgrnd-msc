@@ -10,6 +10,7 @@
  */
 
 import { build } from 'esbuild';
+import { execFileSync } from 'node:child_process';
 import { readFileSync, readdirSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -62,6 +63,44 @@ for (const summary of library.tracks) {
     failed += 1;
     console.log(`FAIL  fresh project for ${summary.id} does not round-trip`);
   }
+}
+
+// The factory patterns and source hashes: PHP's against the UI's, for every lane of
+// every track (the UI builds them from the exported library JSON).
+{
+  const bundledPatterns = await build({
+    entryPoints: [join(root, 'frontend/lib/patterns.ts')],
+    bundle: true,
+    format: 'esm',
+    platform: 'neutral',
+    write: false,
+    logLevel: 'silent',
+  });
+  const patterns = await import(
+    `data:text/javascript;base64,${Buffer.from(bundledPatterns.outputFiles[0].text).toString('base64')}`
+  );
+  const reference = JSON.parse(execFileSync('php', [join(root, 'tools/patterns-reference.php')], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 }));
+  let mismatches = 0;
+  for (const summary of library.tracks) {
+    const { track } = JSON.parse(readFileSync(join(root, `public/library/${summary.id}.json`), 'utf8'));
+    for (const lane of patterns.LANE_IDS) {
+      const mine = patterns.factoryPattern(track, lane);
+      const theirs = reference[summary.id][lane];
+      if (!isDeepStrictEqual(JSON.parse(JSON.stringify(mine)), theirs.pattern)) {
+        mismatches += 1;
+        if (mismatches <= 3) console.log(`FAIL  factory ${summary.id} ${lane} differs between PHP and the UI`);
+      }
+      for (let part = 0; part < 4; part += 1) {
+        const h = patterns.sourceHash(mine, part * 64, part * 64 + 63);
+        if (h !== theirs.hashes[part]) {
+          mismatches += 1;
+          if (mismatches <= 3) console.log(`FAIL  hash ${summary.id} ${lane} part ${part}: ${h} vs ${theirs.hashes[part]}`);
+        }
+      }
+    }
+  }
+  if (mismatches) failed += mismatches;
+  else console.log(`ok    factory patterns and source hashes agree for ${library.tracks.length} tracks x ${patterns.LANE_IDS.length} lanes`);
 }
 
 if (failed) {

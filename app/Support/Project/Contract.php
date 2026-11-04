@@ -22,7 +22,7 @@ final class Contract
 {
     public const FORMAT = 'bckgrnd-msc/project';
 
-    public const VERSION = 2;
+    public const VERSION = 3;
 
     /** The four scene slots, in order. */
     public const SCENE_SLOTS = ['full', 'sparse', 'build', 'drop'];
@@ -215,6 +215,7 @@ final class Contract
             'params' => $params,
             'stems' => $stems,
             'patterns' => new \stdClass,
+            'locks' => ['lanes' => [], 'events' => new \stdClass],
             'scenes' => self::factoryScenes($track),
         ];
     }
@@ -252,8 +253,15 @@ final class Contract
             throw new \InvalidArgumentException('A version 1 project cannot carry scenes.');
         }
         if ($version >= 2 && ! array_key_exists('scenes', $document)) {
-            throw new \InvalidArgumentException('Scenes are missing from a version 2 project.');
+            throw new \InvalidArgumentException("Scenes are missing from a version {$version} project.");
         }
+        if ($version < 3 && array_key_exists('locks', $document)) {
+            throw new \InvalidArgumentException("A version {$version} project cannot carry locks.");
+        }
+        if ($version < 3 && array_key_exists('patterns', $document) && $document['patterns'] !== []) {
+            throw new \InvalidArgumentException("A version {$version} project cannot carry patterns.");
+        }
+        $document['__version'] = $version;
 
         return self::normalize($document);
     }
@@ -310,11 +318,20 @@ final class Contract
         $out['trackId'] = $track->id;
         $out['params'] = $params;
         $out['stems'] = $stems;
-        $out['patterns'] = new \stdClass;
+        // Version 3 patterns and locks are read strictly; older documents have none, so
+        // migrating them changes nothing that plays.
+        $version = (int) ($project['__version'] ?? self::VERSION);
+        $patterns = $version >= 3 ? Patterns::readPatterns($project['patterns'] ?? []) : [];
+        $out['patterns'] = $patterns === [] ? new \stdClass : $patterns;
+        $locks = $version >= 3 ? Patterns::readLocks($project['locks'] ?? null) : ['lanes' => [], 'events' => []];
+        $out['locks'] = [
+            'lanes' => $locks['lanes'],
+            'events' => $locks['events'] === [] ? new \stdClass : $locks['events'],
+        ];
         // A project without scenes (version 1, or one being built) gets the track's
         // factory scenes. Nothing is applied: the working mix above is what it was.
         $out['scenes'] = array_key_exists('scenes', $project)
-            ? self::readScenes($project['scenes'])
+            ? self::readScenes($project['scenes'], $version)
             : $fresh['scenes'];
 
         return $out;
@@ -328,7 +345,7 @@ final class Contract
      *
      * @return array{slots: list<array<string, mixed>>}
      */
-    public static function readScenes(mixed $scenes): array
+    public static function readScenes(mixed $scenes, int $version = self::VERSION): array
     {
         $fail = static fn (string $why): never => throw new \InvalidArgumentException("Scenes are malformed: {$why}");
 
@@ -366,9 +383,11 @@ final class Contract
             if (! is_int($scene['revision']) || $scene['revision'] < 1) {
                 $fail("slot {$slot} needs a whole-number revision of at least 1");
             }
-            if (! is_array($scene['patterns']) || $scene['patterns'] !== []) {
+            // Version 2 scenes can hold no patterns; version 3 scenes hold pinned lanes.
+            if ($version < 3 && (! is_array($scene['patterns']) || $scene['patterns'] !== [])) {
                 $fail("slot {$slot} refers to patterns, which this version does not support");
             }
+            $scenePatterns = $version < 3 ? [] : Patterns::readScenePatterns($scene['patterns'], $slot);
 
             $params = $scene['params'];
             if (! is_array($params) || array_diff(array_keys($params), $sceneIds) !== [] || array_diff($sceneIds, array_keys($params)) !== []) {
@@ -418,7 +437,7 @@ final class Contract
                 'revision' => $scene['revision'],
                 'params' => $readParams,
                 'stems' => $readStems,
-                'patterns' => new \stdClass,
+                'patterns' => $scenePatterns === [] ? new \stdClass : $scenePatterns,
             ];
         }
 
