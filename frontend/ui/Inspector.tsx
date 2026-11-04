@@ -138,7 +138,9 @@ function MasterRack({ inst }: { inst: Instrument }) {
       </fieldset>
 
       <fieldset className="inspector-group">
-        <legend className="inspector-legend">Filter</legend>
+        {/* A held filter is an override: the knobs keep showing the mix underneath,
+            and the heading says what is on top of it for now. */}
+        <legend className="inspector-legend">{inst.filterHeld ? 'Filter · held' : 'Filter'}</legend>
         <div className="knob-row">
           <Knob
             label="Cutoff"

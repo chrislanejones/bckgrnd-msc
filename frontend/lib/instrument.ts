@@ -14,10 +14,37 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { engine } from './engine';
-import type { Deck as DeckId } from './engine';
+import { engine, GESTURE_KIND, SCENE_TIMING } from './engine';
+import type { Deck as DeckId, EngineEvent as WireEvent } from './engine';
 import { emptyFlags, fetchLibrary, fetchTrack } from './api';
-import { defaultSend, fixedDefault, projectFromTrack, sameMusic, type Project } from './contract';
+import {
+  defaultSend,
+  fixedDefault,
+  projectFromTrack,
+  sameMusic,
+  type Project,
+  type SceneSlotId,
+  type Scenes,
+} from './contract';
+import {
+  EVENT,
+  REASON,
+  captureScene,
+  copyMix,
+  duplicateScene,
+  factoryScenes,
+  foldSceneEvent,
+  isPending,
+  isSceneSlot,
+  renameScene,
+  resetScene,
+  sameMix,
+  sceneVector,
+  type Compare,
+  type SceneMix,
+  type SceneRequest,
+  type Timing,
+} from './scenes';
 import { STEM_ORDER, STEPS } from './stems';
 import type { LibraryResponse, Mix, StemId, TrackArrangement, TrackSummary } from './types';
 
@@ -131,7 +158,6 @@ export function useInstrument() {
   const [echoBeats, setEchoBeatsState] = useState<number>(ECHO_DEFAULT);
   const [bands, setBandsState] = useState<Bands>({ low: 1, mid: 1, high: 1 });
   const [filter, setFilterState] = useState(1);
-  const [echo, setEchoState] = useState(false);
   /** Output balance: 0 hard left (right speaker silent), 0.5 both at full, 1 hard right. */
   const [stereo, setStereoState] = useState(0.5);
   const [effects, setEffects] = useState<Effects>(EFFECT_DEFAULTS);
@@ -155,6 +181,54 @@ export function useInstrument() {
   const [cued, setCued] = useState<TrackArrangement | null>(null);
 
   const arrangementCache = useRef(new Map<string, TrackArrangement>());
+
+  /**
+   * Each deck's loaded-track generation. Every load bumps it and tells the worklet,
+   * and a scene request carries the one it was made for, so a request made for one
+   * track can never land on the next one loaded into that deck.
+   */
+  const generations = useRef<Record<DeckId, number>>({ a: 0, b: 0 });
+  const loadDeck = useCallback((deck: DeckId, arranged: TrackArrangement) => {
+    generations.current[deck] += 1;
+    engine.loadTrack(deck, arranged, generations.current[deck]);
+  }, []);
+
+  // ---- Scenes ---------------------------------------------------------------
+  /** The four stored scene slots for the live track (part of the project). */
+  const [scenes, setScenes] = useState<Scenes | null>(null);
+  /**
+   * The slot the engine last applied, with the exact mix it applied, so a knob moved
+   * afterwards reads as "Modified" until the slot is explicitly overwritten. Session
+   * state: never saved, cleared by a track change.
+   */
+  const [activeScene, setActiveScene] = useState<{ slot: SceneSlotId; mix: SceneMix } | null>(null);
+  /** The latest launch request, pending or just settled. */
+  const [sceneRequest, setSceneRequest] = useState<SceneRequest | null>(null);
+  const sceneRequestRef = useRef<SceneRequest | null>(null);
+  sceneRequestRef.current = sceneRequest;
+  const [sceneTiming, setSceneTiming] = useState<Timing>('bar');
+  /** One line for assistive technology: discrete changes only, never every beat. */
+  const [sceneStatus, setSceneStatus] = useState('');
+  const nextRequestId = useRef(1);
+  /** Compare A/B, or null when not comparing. Session-only. */
+  const [compare, setCompare] = useState<Compare | null>(null);
+
+  // ---- Fill and held effects ----------------------------------------------
+  /** The one-bar fill: idle, sent, queued for a bar, or playing its bar. */
+  const [fill, setFill] = useState<{ status: 'idle' | 'sending' | 'queued' | 'playing'; id: number; bar?: number }>({
+    status: 'idle',
+    id: 0,
+  });
+  const fillRef = useRef(fill);
+  fillRef.current = fill;
+  /**
+   * Held effects, by kind, with the token the engine knows them by. Temporary
+   * overrides only: none of this is part of the working mix or the project.
+   */
+  const [held, setHeld] = useState<{ echo: boolean; filter: boolean }>({ echo: false, filter: false });
+  const heldTokens = useRef<{ echo: number | null; filter: number | null }>({ echo: null, filter: null });
+  const leaseTimers = useRef<{ echo: number | null; filter: number | null }>({ echo: null, filter: null });
+  const nextToken = useRef(1);
 
   useEffect(() => {
     let cancelled = false;
@@ -191,13 +265,14 @@ export function useInstrument() {
         setBpmState(arranged.bpm);
         setSwingState(arranged.swing);
         setVols(arranged.mix);
-        engine.loadTrack('a', arranged);
+        setScenes(factoryScenes(arranged));
+        loadDeck('a', arranged);
       })
       .catch((e: Error) => !cancelled && setError(e.message));
     return () => {
       cancelled = true;
     };
-  }, [library, loadArrangement]);
+  }, [library, loadArrangement, loadDeck]);
 
   /** The deck that is loaded but silent — the one a mix will hand over to. */
   const idleDeck = (): DeckId => (liveDeck === 'a' ? 'b' : 'a');
@@ -217,7 +292,7 @@ export function useInstrument() {
         if (!arranged || cancelled) return;
         // The idle deck is preloaded and silent; it only becomes audible when a mix
         // crossfades to it, which is what makes the handover seamless.
-        engine.loadTrack(deck, arranged);
+        loadDeck(deck, arranged);
         setCued(arranged);
       })
       .catch((e: Error) => !cancelled && setError(e.message));
@@ -225,7 +300,7 @@ export function useInstrument() {
       cancelled = true;
     };
     // `liveDeck` decides which deck is idle, so a handover has to re-run this.
-  }, [nextId, track?.id, liveDeck, loadArrangement]);
+  }, [nextId, track?.id, liveDeck, loadArrangement, loadDeck]);
 
   // Telemetry → the playhead. Meters subscribe on their own and write to the DOM, so
   // a 30 Hz stream never re-renders the tree; this only changes when the step does.
@@ -252,6 +327,10 @@ export function useInstrument() {
     if (playing) {
       engine.stop(liveDeck);
       setPlaying(false);
+      // Stop releases held effects and cancels the fill in the engine; the screen
+      // follows rather than waiting for a release that may never come.
+      clearHeld('echo');
+      clearHeld('filter');
       return;
     }
     try {
@@ -277,9 +356,10 @@ export function useInstrument() {
         cancelTempoGlide();
         const deck = liveDeck;
         engine.stop(deck);
-        engine.loadTrack(deck, arranged);
+        loadDeck(deck, arranged);
         engine.setMuted(0, false);
         setTrack(arranged);
+        resetScenesFor(arranged);
         setBpmState(arranged.bpm);
         engine.setBpm(arranged.bpm);
         setSwingState(arranged.swing);
@@ -331,8 +411,12 @@ export function useInstrument() {
         if (!arranged) return;
 
         const incoming: DeckId = liveDeck === 'a' ? 'b' : 'a';
-        engine.loadTrack(incoming, arranged);
+        loadDeck(incoming, arranged);
         setCued(arranged);
+        // A launch queued for the outgoing track never lands; the worklet cancels it
+        // and refuses new ones until the handover is done.
+        setSceneRequest((r) => (isPending(r) ? { ...r, status: 'cancelled', reason: 4 } : r));
+        releaseAllEffects();
         // Carry the user's faders and cuts across to the incoming track.
         for (let i = 0; i < STEM_ORDER.length; i += 1) {
           const stem = STEM_ORDER[i]!;
@@ -344,9 +428,12 @@ export function useInstrument() {
         engine.setSwing(swing);
 
         setMixing(arranged.name);
+        generations.current[incoming] += 1;
+        const mixGeneration = generations.current[incoming];
         engine.mix(incoming, arranged, bpm, swing, () => {
           setMixing(null);
           setTrack(arranged);
+          resetScenesFor(arranged);
           // The deck that just went live is no longer the cued one, so the panel has to
           // follow the swap or the waveforms will label the wrong tracks.
           setLiveDeck(incoming);
@@ -386,7 +473,7 @@ export function useInstrument() {
           // following track re-cues the deck that just went idle.
           setCued(null);
           setNextId(tracks.find((t) => t.id !== arranged.id)?.id ?? arranged.id);
-        });
+        }, mixGeneration);
       } catch (e) {
         setError((e as Error).message);
       }
@@ -494,6 +581,292 @@ export function useInstrument() {
     });
   }
 
+  // ---- Scenes ---------------------------------------------------------------
+
+  /** A new track gets its own factory scenes, nothing active and nothing queued. */
+  function resetScenesFor(arranged: TrackArrangement) {
+    setScenes(factoryScenes(arranged));
+    setActiveScene(null);
+    setSceneRequest(null);
+    setCompare(null);
+    setSceneStatus('');
+  }
+
+  const sceneName = (slot: string) =>
+    slot === 'compareA'
+      ? 'Compare A'
+      : slot === 'compareB'
+        ? 'Compare B'
+        : slot === 'restore'
+          ? 'The mix from before comparing'
+          : (scenes?.slots.find((s) => s.slot === slot)?.name ?? slot);
+
+  /**
+   * Make an applied scene the working mix on screen. The engine has already set
+   * every value (and the idle deck, and its own memory of them), so nothing is sent
+   * back: the knobs follow what is now playing.
+   */
+  function showMix(mix: SceneMix) {
+    const stems = mix.stems;
+    setVols((prev) => {
+      const next = { ...(prev ?? ({} as Mix)) };
+      for (const id of STEM_ORDER) next[id] = stems[id].volume;
+      return next;
+    });
+    const nextSends = {} as Record<StemId, number>;
+    const nextMuted = emptyFlags();
+    const nextSolo = emptyFlags();
+    for (const id of STEM_ORDER) {
+      nextSends[id] = stems[id].send;
+      nextMuted[id] = stems[id].muted;
+      nextSolo[id] = stems[id].solo;
+    }
+    setSends(nextSends);
+    setMuted(nextMuted);
+    setSolo(nextSolo);
+    setMask('custom');
+    const p = mix.params;
+    setBandsState({ low: p['fx.low'], mid: p['fx.mid'], high: p['fx.high'] });
+    setFilterState(p['fx.filter']);
+    setStereoState(p['fx.stereo']);
+    setEchoBeatsState(p['fx.echoTime']);
+    setEffects({
+      'fx.filterQ': p['fx.filterQ'],
+      'fx.echoFeedback': p['fx.echoFeedback'],
+      'fx.echoReturn': p['fx.echoReturn'],
+      'fx.reverbMix': p['fx.reverbMix'],
+      'fx.reverbDecay': p['fx.reverbDecay'],
+      'fx.width': p['fx.width'],
+    });
+  }
+
+  // Engine outcomes. Only `applied` changes what is active; everything else updates
+  // the request's status and the one-line announcement.
+  useEffect(
+    () =>
+      engine.onSceneEvents((events: readonly WireEvent[]) => {
+        for (const e of events) {
+          if (e.kind < EVENT.sceneQueued || e.kind > EVENT.sceneRejected) continue;
+          const current = sceneRequestRef.current;
+          if (!current || current.requestId !== e.requestId) continue;
+          const next = foldSceneEvent(current, { kind: e.kind, id: e.requestId, a: e.a, b: e.b });
+          if (next === current) continue;
+          sceneRequestRef.current = next;
+          setSceneRequest(next);
+          const name = sceneNameRef.current(next.target);
+          if (next.status === 'queued') {
+            setSceneStatus(next.timing === 'now' ? `${name} queued` : `${name} queued for bar ${next.bar}`);
+          } else if (next.status === 'applied') {
+            landedRef.current(next);
+            showMixRef.current(next.mix);
+            setSceneStatus(next.target === 'restore' ? 'Comparison closed; the earlier mix is back' : `${name} active`);
+          } else if (next.status === 'cancelled') {
+            // A cancel the user asked for needs no reason; any other says what did it.
+            const why = next.reason === undefined || next.reason === 10 ? '' : `: ${REASON[next.reason] ?? ''}`;
+            setSceneStatus(`${name} cancelled${why}`);
+          } else if (next.status === 'rejected') {
+            setSceneStatus(`${name} not launched: ${REASON[next.reason ?? 1] ?? 'refused'}`);
+          }
+        }
+      }),
+    [],
+  );
+  // The subscription above lives for the app; it reads these through refs.
+  const showMixRef = useRef(showMix);
+  showMixRef.current = showMix;
+  const sceneNameRef = useRef(sceneName);
+  sceneNameRef.current = sceneName;
+
+  /** What an applied launch means for the active scene and the comparison. */
+  function landed(request: SceneRequest) {
+    const t = request.target;
+    if (isSceneSlot(t)) {
+      setActiveScene({ slot: t, mix: request.mix });
+    } else if (t === 'restore') {
+      setActiveScene(compareRef.current?.beforeActive ?? null);
+      setCompare(null);
+    } else {
+      setCompare((c) => (c ? { ...c, listening: t === 'compareA' ? 'a' : 'b' } : c));
+    }
+  }
+  const landedRef = useRef(landed);
+  landedRef.current = landed;
+  const compareRef = useRef(compare);
+  compareRef.current = compare;
+
+  /**
+   * Set a whole mix through the ordinary parameter messages. Only used before the
+   * audio engine has booted (no Play yet): there is no scheduler to ask, and the
+   * engine host replays the latest value of every parameter when it boots, so this
+   * is what will play.
+   */
+  function sendMix(mix: SceneMix) {
+    STEM_ORDER.forEach((id, i) => {
+      const s = mix.stems[id];
+      engine.setVolume(i, s.volume);
+      engine.setSend(i, s.send);
+      engine.setMuted(i, s.muted);
+      engine.setSolo(i, s.solo);
+    });
+    const p = mix.params;
+    engine.setBands(p['fx.low'], p['fx.mid'], p['fx.high']);
+    engine.setFilter(p['fx.filter']);
+    engine.setStereoBalance(p['fx.stereo']);
+    engine.setEchoTime(p['fx.echoTime']);
+    for (const id of Object.keys(EFFECT_SENDERS) as EffectId[]) EFFECT_SENDERS[id](p[id]);
+  }
+
+  /** Send a mix to the live deck at the chosen timing. */
+  function requestLaunch(target: SceneRequest['target'], revision: number, mix: SceneMix) {
+    if (!engine.booted) {
+      // Stopped and never played: apply now, without starting playback.
+      const now = copyMix(mix);
+      sendMix(now);
+      showMix(now);
+      setSceneRequest(null);
+      landed({
+        requestId: 0,
+        target,
+        revision,
+        generation: 0,
+        timing: sceneTiming,
+        status: 'applied',
+        mix: now,
+      });
+      setSceneStatus(target === 'restore' ? 'Comparison closed; the earlier mix is back' : `${sceneName(target)} active`);
+      return;
+    }
+    const requestId = nextRequestId.current++;
+    const deck = liveDeck;
+    const request: SceneRequest = {
+      requestId,
+      target,
+      revision,
+      generation: generations.current[deck],
+      timing: sceneTiming,
+      status: 'sending',
+      mix: copyMix(mix),
+    };
+    sceneRequestRef.current = request;
+    setSceneRequest(request);
+    engine.queueScene(requestId, SCENE_TIMING[sceneTiming], sceneVector(request.mix), request.generation);
+  }
+
+  /**
+   * A pad press. Launches the slot; pressing the slot that is already queued cancels
+   * it; pressing the active, unmodified scene does nothing. Never saves anything.
+   */
+  function launchScene(slot: SceneSlotId) {
+    if (!scenes || mixing) return;
+    const pending = isPending(sceneRequest) ? sceneRequest : null;
+    if (pending && pending.target === slot) {
+      cancelQueuedScene();
+      return;
+    }
+    if (!pending && activeScene?.slot === slot && sameMix(workingMix(), activeScene.mix)) return;
+    const scene = scenes.slots.find((s) => s.slot === slot);
+    if (!scene) return;
+    requestLaunch(slot, scene.revision, scene);
+  }
+
+  /** Withdraw the queued launch. Says so if it had already landed. */
+  function cancelQueuedScene() {
+    const pending = isPending(sceneRequest) ? sceneRequest : null;
+    if (!pending) return;
+    const name = sceneName(pending.target);
+    void engine.cancelScene(pending.requestId).then((cancelled) => {
+      if (!cancelled && sceneRequestRef.current?.requestId === pending.requestId) {
+        setSceneStatus(`${name} had already applied`);
+      }
+    });
+  }
+
+  /** The working mix, as a scene sees it: the base values the knobs show. */
+  function workingMix(): SceneMix {
+    const p = project ?? (track ? projectFromTrack(track) : null);
+    if (!p) throw new Error('no track loaded');
+    return copyMix({ params: p.params, stems: p.stems });
+  }
+
+  /**
+   * Capture the working mix into a slot. Held effects are never part of the working
+   * mix (they live in the engine), so a capture during a held echo stores the mix
+   * underneath it.
+   */
+  function captureSceneSlot(slot: SceneSlotId) {
+    if (!scenes) return;
+    const working = workingMix();
+    setScenes(captureScene(scenes, slot, working));
+    if (activeScene?.slot === slot) setActiveScene({ slot, mix: working });
+    setSceneStatus(`Captured the current mix into ${sceneName(slot)}`);
+  }
+
+  // ---- Compare A/B ------------------------------------------------------------
+
+  /**
+   * Capture the working mix into A or B. The first capture starts the comparison and
+   * remembers the working mix as it was, for Exit Comparison.
+   */
+  function captureCompare(which: 'a' | 'b') {
+    const working = workingMix();
+    setCompare((c) => {
+      const base: Compare = c ?? { a: null, b: null, listening: null, before: working, beforeActive: activeScene };
+      // What is playing right after a capture is the mix just captured.
+      return { ...base, [which]: working, listening: which };
+    });
+    setSceneStatus(`Captured the current mix as ${which.toUpperCase()}`);
+  }
+
+  /** Listen to A or B, on the same timing as a scene. Listening never overwrites it. */
+  function listenCompare(which: 'a' | 'b') {
+    const mix = compare?.[which];
+    if (!mix || mixing) return;
+    requestLaunch(which === 'a' ? 'compareA' : 'compareB', 0, mix);
+  }
+
+  /** Replace the stored A or B (the one being heard) with the working mix. */
+  function updateCompare() {
+    if (!compare?.listening) return;
+    const which = compare.listening;
+    setCompare({ ...compare, [which]: workingMix() });
+    setSceneStatus(`Updated ${which.toUpperCase()}`);
+  }
+
+  /** Keep what is playing as the working mix and close the comparison. */
+  function keepCompare() {
+    setCompare(null);
+    setSceneStatus('Kept the current mix');
+  }
+
+  /** Close the comparison and bring back the working mix from before it began. */
+  function exitCompare() {
+    if (!compare || mixing) return;
+    requestLaunch('restore', 0, compare.before);
+  }
+
+  function renameSceneSlot(slot: SceneSlotId, name: string): boolean {
+    if (!scenes) return false;
+    const next = renameScene(scenes, slot, name);
+    if (!next) return false;
+    setScenes(next);
+    return true;
+  }
+
+  function duplicateSceneSlot(from: SceneSlotId, to: SceneSlotId) {
+    if (!scenes) return;
+    setScenes(duplicateScene(scenes, from, to));
+    setSceneStatus(`Copied ${sceneName(from)} into the ${sceneName(to)} slot`);
+  }
+
+  function resetSceneSlot(slot: SceneSlotId) {
+    if (!scenes || !track) return;
+    const next = resetScene(scenes, slot, track);
+    setScenes(next);
+    // Named after the reset, so a slot that had been renamed reads by its own name.
+    const name = next.slots.find((s) => s.slot === slot)?.name ?? slot;
+    setSceneStatus(`${name} is back to its factory mix`);
+  }
+
   // ---- Master and effects ------------------------------------------------
 
   function setBpm(value: number) {
@@ -567,10 +940,128 @@ export function useInstrument() {
     engine.nudge(dir);
   }
 
-  function toggleEchoThrow() {
-    const next = !echo;
-    setEchoState(next);
-    engine.setEcho(next);
+  // ---- Held effects (Echo Throw, Filter Hold) -----------------------------
+
+  type HeldKind = 'echo' | 'filter';
+
+  function clearHeld(kind: HeldKind) {
+    const timer = leaseTimers.current[kind];
+    if (timer !== null) window.clearInterval(timer);
+    leaseTimers.current[kind] = null;
+    heldTokens.current[kind] = null;
+    setHeld((h) => (h[kind] ? { ...h, [kind]: false } : h));
+  }
+
+  /**
+   * Begin a held effect. It is an override on top of the working mix: letting go
+   * reveals whatever the mix is by then, including a scene launched while holding.
+   * The engine's lease ends it if a release never arrives; holding renews it.
+   */
+  function holdEffect(kind: HeldKind) {
+    if (mixing || heldTokens.current[kind] !== null) return;
+    const token = nextToken.current++;
+    heldTokens.current[kind] = token;
+    setHeld((h) => ({ ...h, [kind]: true }));
+    leaseTimers.current[kind] = window.setInterval(() => engine.gestureRenew(token), 1000);
+    void engine
+      .gestureBegin(token, kind === 'echo' ? GESTURE_KIND.echoThrow : GESTURE_KIND.filterHold)
+      .then((accepted) => {
+        if (!accepted && heldTokens.current[kind] === token) clearHeld(kind);
+      });
+  }
+
+  /** End the held effect of this kind, and only that one. */
+  function releaseEffect(kind: HeldKind) {
+    const token = heldTokens.current[kind];
+    if (token === null) return;
+    engine.gestureEnd(token);
+    clearHeld(kind);
+  }
+
+  /** Release FX: end every held effect. The working mix is left exactly as it is. */
+  function releaseAllEffects() {
+    engine.releaseGestures();
+    clearHeld('echo');
+    clearHeld('filter');
+  }
+
+  // A lease that ran out (a lost release, a frozen tab) shows as let go.
+  useEffect(
+    () =>
+      engine.onSceneEvents((events) => {
+        for (const e of events) {
+          if (e.kind === EVENT.gestureExpired) {
+            for (const kind of ['echo', 'filter'] as const) {
+              if (heldTokens.current[kind] === e.requestId) clearHeldRef.current(kind);
+            }
+          }
+        }
+      }),
+    [],
+  );
+  const clearHeldRef = useRef(clearHeld);
+  clearHeldRef.current = clearHeld;
+
+  // ---- Fill ------------------------------------------------------------------
+
+  /**
+   * The Fill button. First press queues the track's fill for the next bar; a second
+   * press before it starts cancels it; a press while it plays does nothing.
+   */
+  function toggleFill() {
+    const f = fillRef.current;
+    if (f.status === 'playing') return;
+    if (f.status === 'sending' || f.status === 'queued') {
+      void engine.cancelFill(f.id);
+      return;
+    }
+    if (!playing || mixing || !track?.fills?.length) return;
+    const id = nextRequestId.current++;
+    setFill({ status: 'sending', id });
+    engine.queueFill(id, 0, generations.current[liveDeck]);
+  }
+
+  useEffect(
+    () =>
+      engine.onSceneEvents((events) => {
+        for (const e of events) {
+          if (e.kind < EVENT.fillQueued || e.kind > EVENT.fillRejected) continue;
+          const f = fillRef.current;
+          if (e.requestId !== f.id) continue;
+          let next = f;
+          if (e.kind === EVENT.fillQueued) next = { ...f, status: 'queued', bar: e.a };
+          else if (e.kind === EVENT.fillStarted) next = { ...f, status: 'playing' };
+          else next = { status: 'idle', id: f.id };
+          fillRef.current = next;
+          setFill(next);
+          if (e.kind === EVENT.fillQueued) setSceneStatus(`Fill queued for bar ${e.a}`);
+          if (e.kind === EVENT.fillStarted) setSceneStatus('Fill playing');
+          if (e.kind === EVENT.fillCancelled) {
+            setSceneStatus(e.a === 10 ? 'Fill cancelled' : `Fill cancelled: ${REASON[e.a] ?? ''}`);
+          }
+          if (e.kind === EVENT.fillRejected) setSceneStatus(`Fill not started: ${REASON[e.a] ?? 'refused'}`);
+        }
+      }),
+    [],
+  );
+
+  // ---- Panic -----------------------------------------------------------------
+
+  /**
+   * Panic: stop, and leave nothing behind. Cancels anything queued, releases every
+   * held effect, clears the echo and room tails, and abandons a running mix. Not the
+   * same as Cancel queued, which only withdraws the next launch.
+   */
+  function panic() {
+    engine.panic();
+    cancelTempoGlide();
+    clearHeld('echo');
+    clearHeld('filter');
+    setFill({ status: 'idle', id: fillRef.current.id });
+    setSceneRequest((r) => (isPending(r) ? { ...r, status: 'cancelled', reason: 5 } : r));
+    setPlaying(false);
+    setMixing(null);
+    setSceneStatus('Panic: stopped, nothing queued, effects released');
   }
 
   // ---- The project the screen describes -----------------------------------
@@ -600,6 +1091,8 @@ export function useInstrument() {
   }, [track, vols, sends, bpm, swing, master, bands, filter, stereo, effects, echoBeats, muted, solo]);
 
   const edited = project && track ? !sameMusic(project, projectFromTrack(track)) : false;
+  const sceneModified =
+    activeScene !== null && project !== null && !sameMix({ params: project.params, stems: project.stems }, activeScene.mix);
 
   const actions = useStable({
     togglePlay,
@@ -622,10 +1115,26 @@ export function useInstrument() {
     setEffect,
     pickEchoTime,
     pickLoop,
-    toggleEchoThrow,
+    holdEffect,
+    releaseEffect,
+    releaseAllEffects,
+    toggleFill,
+    panic,
     brake,
     backspin,
     nudge,
+    setSceneTiming,
+    launchScene,
+    cancelQueuedScene,
+    captureSceneSlot,
+    renameSceneSlot,
+    duplicateSceneSlot,
+    resetSceneSlot,
+    captureCompare,
+    listenCompare,
+    updateCompare,
+    keepCompare,
+    exitCompare,
   });
 
   return {
@@ -657,11 +1166,30 @@ export function useInstrument() {
     stereo,
     effects,
     echoBeats,
-    echo,
+    /** An Echo Throw is being held (a temporary override, not the mix). */
+    echo: held.echo,
+    /** A Filter Hold is being held. */
+    filterHeld: held.filter,
     loopBars,
     // project
     project,
     edited,
+    // scenes
+    scenes,
+    activeScene: activeScene?.slot ?? null,
+    sceneModified,
+    sceneRequest,
+    sceneTiming,
+    sceneStatus,
+    fill,
+    fillName: track?.fills?.[0]?.name ?? 'Fill',
+    hasFill: Boolean(track?.fills?.length),
+    compare,
+    compareModified:
+      compare?.listening != null &&
+      project !== null &&
+      compare[compare.listening] !== null &&
+      !sameMix({ params: project.params, stems: project.stems }, compare[compare.listening]!),
     // intents, each with one identity for the life of the app
     ...actions,
   };

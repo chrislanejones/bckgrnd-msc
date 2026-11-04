@@ -23,6 +23,9 @@ import { JogWheel } from './ui/JogWheel';
 import { LibraryPanel } from './ui/Library';
 import { PatternDrawer } from './ui/PatternDrawer';
 import { StemStrip } from './ui/StemStrip';
+import { SceneStrip } from './ui/SceneStrip';
+import { CompareBar } from './ui/CompareBar';
+import { SCENE_SLOTS } from './lib/contract';
 import { TransportBar } from './ui/Transport';
 
 type View = 'perform' | 'mix' | 'edit';
@@ -110,7 +113,8 @@ export function App() {
     if (next === 'mix') setInspectorTab('master');
   }
 
-  // Space plays, 1–8 cut a stem, Escape closes whatever was opened on purpose.
+  // Space plays, 1–8 cut a stem, Shift+1–4 launch a scene, Escape closes whatever was
+  // opened on purpose.
   // Ignored while a text field or a slider has focus, so their own keys still work.
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -137,6 +141,14 @@ export function App() {
         void inst.togglePlay();
         return;
       }
+      // Shift+1–4 launch a scene. Checked by physical key, because Shift+1 types "!".
+      const digit = /^Digit([1-4])$/.exec(event.code);
+      if (event.shiftKey && digit) {
+        const slot = SCENE_SLOTS[Number(digit[1]) - 1];
+        if (slot) inst.launchScene(slot);
+        return;
+      }
+      if (event.shiftKey) return;
       const n = Number(event.key);
       if (n >= 1 && n <= 8) {
         const id = STEM_ORDER[n - 1];
@@ -278,6 +290,45 @@ export function App() {
               </>
             }
           >
+            {inst.scenes ? (
+              <SceneStrip
+                scenes={inst.scenes.slots}
+                active={inst.activeScene}
+                modified={inst.sceneModified}
+                request={inst.sceneRequest}
+                timing={inst.sceneTiming}
+                unavailable={inst.mixing ? 'Available after mix' : null}
+                status={inst.sceneStatus}
+                onTiming={inst.setSceneTiming}
+                onLaunch={inst.launchScene}
+                onCancel={inst.cancelQueuedScene}
+                onCapture={inst.captureSceneSlot}
+                onRename={inst.renameSceneSlot}
+                onDuplicate={inst.duplicateSceneSlot}
+                onReset={inst.resetSceneSlot}
+                {...(inst.hasFill
+                  ? {
+                      fill: inst.fill.status,
+                      fillBar: inst.fill.bar,
+                      fillName: inst.fillName,
+                      fillUnavailable: inst.mixing ? 'Available after mix' : !inst.playing ? 'Press play first: a fill needs playback' : null,
+                      onFill: inst.toggleFill,
+                    }
+                  : {})}
+              >
+                <CompareBar
+                  compare={inst.compare}
+                  modified={inst.compareModified}
+                  request={inst.sceneRequest}
+                  disabled={inst.mixing ? 'Available after mix' : null}
+                  onCapture={inst.captureCompare}
+                  onListen={inst.listenCompare}
+                  onUpdate={inst.updateCompare}
+                  onKeep={inst.keepCompare}
+                  onExit={inst.exitCompare}
+                />
+              </SceneStrip>
+            ) : null}
             <div className="stems">
               {library.stems.map((meta, index) => {
                 const state = stateOf(meta.id);
@@ -303,7 +354,10 @@ export function App() {
                 );
               })}
             </div>
-            <p className="hint-line">Space plays. Keys 1–8 cut a stem. Select a stem&rsquo;s name to inspect it.</p>
+            <p className="hint-line">
+              Space plays. Keys 1–8 cut a stem. Shift+1–4 launch a scene. Select a stem&rsquo;s name to
+              inspect it.
+            </p>
           </InstrumentPanel>
 
           <InstrumentPanel title="Deck" views={['perform']} className="deck-panel">
@@ -314,10 +368,19 @@ export function App() {
                 <PerformancePad label="Brake" ariaLabel="Vinyl brake" onPress={inst.brake} />
                 <PerformancePad
                   label="Echo"
-                  hint="throw"
-                  ariaLabel="Echo throw"
+                  hint="hold"
+                  ariaLabel="Echo throw, while held"
                   latched={inst.echo}
-                  onPress={inst.toggleEchoThrow}
+                  onHoldStart={() => inst.holdEffect('echo')}
+                  onHoldEnd={() => inst.releaseEffect('echo')}
+                />
+                <PerformancePad
+                  label="Filter"
+                  hint="hold"
+                  ariaLabel="Filter hold, while held"
+                  latched={inst.filterHeld}
+                  onHoldStart={() => inst.holdEffect('filter')}
+                  onHoldEnd={() => inst.releaseEffect('filter')}
                 />
                 <PerformancePad
                   label="Bend +"
@@ -335,6 +398,22 @@ export function App() {
                 />
                 <PerformancePad label="Backspin" ariaLabel="Backspin the platter" onPress={inst.backspin} />
               </div>
+            </div>
+            {/* Three different exits, kept apart: Cancel queued (in the scene strip)
+                withdraws the next launch, Release FX lets go of held effects, Panic
+                stops everything and clears the tails. */}
+            <div className="deck-safety">
+              <button
+                type="button"
+                className="text-button"
+                disabled={!inst.echo && !inst.filterHeld}
+                onClick={inst.releaseAllEffects}
+              >
+                Release FX
+              </button>
+              <button type="button" className="panic-button" onClick={inst.panic}>
+                Panic
+              </button>
             </div>
             <Segmented<number>
               label={inst.loopBars ? `Loop · ${inst.loopBars} bar${inst.loopBars === 1 ? '' : 's'}` : 'Loop · off'}

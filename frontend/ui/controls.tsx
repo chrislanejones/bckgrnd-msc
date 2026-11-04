@@ -134,6 +134,25 @@ export function PerformancePad({
     held.current = false;
     onHoldEnd?.();
   };
+  // The pointer and key paths above cover the pad itself. These cover the rest: the
+  // window losing focus (alt-tab, a dialog), the tab being hidden, and the pad going
+  // away while held. Without them a held gesture outlives the hand that held it.
+  const releaseRef = useRef(release);
+  releaseRef.current = release;
+  useEffect(() => {
+    if (!momentary) return;
+    const onBlur = () => releaseRef.current();
+    const onVisibility = () => {
+      if (document.visibilityState === 'hidden') releaseRef.current();
+    };
+    window.addEventListener('blur', onBlur);
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => {
+      window.removeEventListener('blur', onBlur);
+      document.removeEventListener('visibilitychange', onVisibility);
+      releaseRef.current();
+    };
+  }, [momentary]);
   return (
     <button
       type="button"

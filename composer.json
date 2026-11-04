@@ -68,6 +68,7 @@
             "@test:parity",
             "@test:arrangement",
             "@test:contract",
+            "@test:scenes",
             "@test:audio",
             "@test:ui"
         ],
@@ -78,6 +79,7 @@
         "test:ui": "pnpm run verify:ui",
         "test:arrangement": "@php tools/check-arrangement.php",
         "test:contract": "node tools/check-contract.mjs",
+        "test:scenes": "node tools/check-scenes.mjs",
         "build:library": "@php tools/export-library.php public/library"
     },
     "extra": {

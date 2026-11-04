@@ -342,16 +342,21 @@ try {
       ],
     });
     out.fxDark = await measure({ ms: 1500, spectrum: true, commands: [{ type: 'filter', value: 0.3 }] });
-    // The room is heard as what rings on after the music stops feeding it: cut every
-    // stem at 0.9 s and measure what is left a quarter second later.
-    const roomRun = (commands) =>
+    // The room is heard as what rings on after the music stops feeding it. Cutting
+    // *every* stem now silences the returns too (the all-cut rule, checked below), so
+    // the music is stopped here by cutting seven stems and turning the eighth down to a
+    // whisper, and what is left a quarter second later is measured.
+    const roomRun = (commands, allCut = false) =>
       measure({
         ms: 1550,
         commands,
-        timeline: Array.from({ length: 8 }, (_, index) => ({
-          at: 900,
-          message: { type: 'mute', index, value: true },
-        })),
+        timeline: [
+          ...Array.from({ length: allCut ? 8 : 7 }, (_, index) => ({
+            at: 900,
+            message: { type: 'mute', index, value: true },
+          })),
+          ...(allCut ? [] : [{ at: 900, message: { type: 'volume', index: 7, value: 0.001 } }]),
+        ],
         windows: [{ name: 'tail', from: 1150, to: 1500 }],
       });
     out.fxRoomDefault = await roomRun([]);
@@ -359,6 +364,14 @@ try {
       { type: 'reverbMix', value: 0.5 },
       { type: 'reverbDecay', value: 2.5 },
     ]);
+    // Every stem cut with the room ringing: the output fades to silence, returns too.
+    out.fxAllCut = await roomRun(
+      [
+        { type: 'reverbMix', value: 0.5 },
+        { type: 'reverbDecay', value: 2.5 },
+      ],
+      true,
+    );
     out.fxEcho = await fx([
       { type: 'echoFeedback', value: 0.9 },
       { type: 'echoReturn', value: 1 },
@@ -504,6 +517,11 @@ try {
         'room mix and decay ring on after the music stops',
         after > before * 3 && after > 1e-3 && result.fxRoom.errors.length === 0,
         `tail peak ${before.toExponential(2)} -> ${after.toExponential(2)}`,
+      );
+      check(
+        'cutting every stem fades to silence, the room tail included',
+        result.fxAllCut.windowPeak.tail < 1e-4 && result.fxAllCut.errors.length === 0,
+        `tail peak ${result.fxAllCut.windowPeak.tail.toExponential(2)} (room left ringing: ${after.toExponential(2)})`,
       );
     }
     differs('echo feedback, return and stem sends', result.fxEcho);

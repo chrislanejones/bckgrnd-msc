@@ -2123,3 +2123,406 @@ html[data-control-drag="yes"] * {
     transition: none;
   }
 }
+
+
+/* ------------------------------------------------------------------------ */
+/* Scenes (Night 3)                                                         */
+/* ------------------------------------------------------------------------ */
+
+/* The strip sits right above the stem mixer, so a scene's effect on the faders is
+   in view. States are told by words and borders, never color alone. */
+.scene-strip {
+  display: grid;
+  gap: var(--space-2);
+  padding-bottom: var(--space-3);
+  margin-bottom: var(--space-3);
+  border-bottom: 1px solid var(--color-line);
+}
+
+.scene-strip-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  justify-content: space-between;
+  gap: var(--space-2) var(--space-3);
+}
+
+.scene-strip-head .segmented-block {
+  grid-template-columns: auto auto;
+  align-items: center;
+}
+
+.scene-strip-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.scene-pads {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--space-2);
+}
+
+.scene-slot {
+  position: relative;
+  min-width: 0;
+}
+
+.scene-pad {
+  display: grid;
+  align-content: center;
+  gap: 0.15rem;
+  width: 100%;
+  min-height: var(--control-lg);
+  padding: 0.35rem 1.9rem 0.35rem 0.6rem;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-control);
+  background: var(--raised);
+  box-shadow: var(--raised-shadow);
+  color: var(--color-fg);
+  text-align: left;
+}
+
+.scene-pad:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--color-acid) 35%, var(--color-line));
+}
+
+.scene-pad:active:not(:disabled) {
+  translate: 0 1px;
+}
+
+.scene-name {
+  overflow: hidden;
+  font-size: 0.8125rem;
+  font-weight: 700;
+  line-height: 1.15;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.scene-line {
+  overflow: hidden;
+  font-size: 0.625rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  line-height: 1.2;
+  color: var(--color-muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Active: an acid border and the word Active. */
+.scene-slot[data-state="active"] .scene-pad,
+.scene-slot[data-state="modified"] .scene-pad {
+  border-color: var(--color-acid);
+  box-shadow: 0 0 0 1px var(--color-acid) inset, var(--raised-shadow);
+}
+
+.scene-slot[data-state="active"] .scene-line {
+  color: var(--color-acid);
+}
+
+/* Modified: still the active scene, with the change spelled out in warn. */
+.scene-slot[data-state="modified"] .scene-line {
+  color: var(--color-warn);
+}
+
+/* Queued and sending: a dashed border and the boundary in words. The pulse is extra;
+   reduced motion keeps the border and the words. */
+.scene-slot[data-state="queued"] .scene-pad,
+.scene-slot[data-state="sending"] .scene-pad {
+  border-style: dashed;
+  border-color: var(--color-acid);
+  animation: scene-queued 1.1s ease-in-out infinite;
+}
+
+.scene-slot[data-state="queued"] .scene-line {
+  color: var(--color-fg);
+}
+
+@keyframes scene-queued {
+  50% {
+    border-color: color-mix(in srgb, var(--color-acid) 35%, var(--color-line));
+  }
+}
+
+.scene-slot[data-state="unavailable"] .scene-pad {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.scene-menu-button {
+  position: absolute;
+  top: 0.35rem;
+  right: 0.35rem;
+  display: grid;
+  place-items: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--color-muted);
+}
+
+.scene-menu-button:hover,
+.scene-menu-button[aria-expanded="true"] {
+  border-color: var(--color-line);
+  color: var(--color-fg);
+}
+
+.scene-menu {
+  position: absolute;
+  z-index: 30;
+  top: calc(100% + 0.35rem);
+  left: 0;
+  display: grid;
+  gap: 0.35rem;
+  width: max(100%, 15rem);
+  padding: var(--space-3);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-control);
+  background: var(--color-surface);
+  box-shadow: 0 0.75rem 2rem rgba(0, 0, 0, 0.55);
+}
+
+.scene-slot:nth-child(n + 3) .scene-menu {
+  right: 0;
+  left: auto;
+}
+
+.scene-menu-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.scene-menu-title {
+  font-size: 0.8125rem;
+  font-weight: 800;
+}
+
+.scene-menu-desc {
+  margin-bottom: 0.25rem;
+  font-size: 0.75rem;
+  line-height: 1.35;
+  color: var(--color-muted);
+}
+
+.scene-menu-item {
+  min-height: var(--control-sm);
+  padding: 0.3rem 0.6rem;
+  border: 1px solid var(--color-line);
+  border-radius: 0.6rem;
+  background: transparent;
+  color: var(--color-fg);
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-align: left;
+}
+
+.scene-menu-item:hover {
+  border-color: var(--color-acid);
+}
+
+.scene-menu-group {
+  margin-top: 0.25rem;
+  font-size: var(--text-label);
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--color-muted);
+}
+
+.scene-menu-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+}
+
+.scene-menu-chip {
+  min-height: var(--control-sm);
+  padding: 0.2rem 0.6rem;
+  border: 1px solid var(--color-line);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--color-fg);
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.scene-menu-chip:hover {
+  border-color: var(--color-acid);
+}
+
+.scene-rename {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.35rem;
+}
+
+.scene-rename-input {
+  min-width: 0;
+  min-height: var(--control-sm);
+  padding: 0.2rem 0.5rem;
+  border: 1px solid var(--color-acid);
+  border-radius: 0.6rem;
+  background: var(--color-bg);
+  color: var(--color-fg);
+  font: inherit;
+  font-size: 0.8125rem;
+}
+
+.scene-rename-input[aria-invalid="true"] {
+  border-color: var(--color-danger);
+}
+
+.scene-status {
+  min-height: 1.2em;
+  font-size: 0.6875rem;
+  line-height: 1.2;
+  color: var(--color-muted);
+}
+
+.scene-strip-actions .text-button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.fill-button {
+  min-height: var(--control-sm);
+  padding: 0.25rem 0.85rem;
+  border: 1px solid var(--color-line);
+  border-radius: 999px;
+  background: var(--raised);
+  box-shadow: var(--raised-shadow);
+  color: var(--color-fg);
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+.fill-button.is-on {
+  border-style: dashed;
+  border-color: var(--color-acid);
+}
+
+.fill-button[data-state="playing"] {
+  border-style: solid;
+  background: var(--color-acid);
+  color: var(--color-acid-ink);
+}
+
+.fill-button:disabled:not([data-state="playing"]) {
+  opacity: 0.5;
+}
+
+@media (max-width: 639.98px) {
+  .scene-pads {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .scene-slot:nth-child(n + 3) .scene-menu {
+    right: auto;
+    left: 0;
+  }
+
+  .scene-slot:nth-child(even) .scene-menu {
+    right: 0;
+    left: auto;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .scene-slot[data-state="queued"] .scene-pad,
+  .scene-slot[data-state="sending"] .scene-pad {
+    animation: none;
+  }
+}
+
+/* Compare A/B: a quiet row under the scene pads. Not a deck control. */
+.compare-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2) var(--space-3);
+}
+
+.compare-title {
+  font-size: var(--text-label);
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.compare-note {
+  margin-left: 0.4rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: none;
+  color: var(--color-muted);
+}
+
+.compare-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.compare-chip {
+  min-height: var(--control-sm);
+  padding: 0.2rem 0.75rem;
+  border: 1px solid var(--color-line);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--color-fg);
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+.compare-chip:hover:not(:disabled) {
+  border-color: var(--color-acid);
+}
+
+.compare-chip.is-on {
+  border-color: var(--color-acid);
+  box-shadow: 0 0 0 1px var(--color-acid) inset;
+}
+
+.compare-chip:disabled,
+.compare-row .text-button:disabled {
+  opacity: 0.4;
+}
+
+/* Release FX and Panic: under the deck pads, apart from the gestures themselves. */
+.deck-safety {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}
+
+.deck-safety .text-button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.panic-button {
+  min-height: var(--control-sm);
+  padding: 0.25rem 0.9rem;
+  border: 1px solid color-mix(in srgb, var(--color-danger) 70%, var(--color-line));
+  border-radius: 999px;
+  background: transparent;
+  color: var(--color-danger);
+  font-size: 0.75rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.panic-button:hover {
+  background: color-mix(in srgb, var(--color-danger) 14%, transparent);
+}
