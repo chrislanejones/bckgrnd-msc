@@ -533,9 +533,27 @@ pub struct ToneVoice {
     filt_ramp: f32,
     sample_rate: f32,
     done: bool,
+    /// The song step that started this note, so a pattern revision can tell whether
+    /// the note it is playing still exists. `usize::MAX` until set.
+    onset: usize,
 }
 
 impl ToneVoice {
+    /// Record the step that started this note.
+    pub fn set_onset(&mut self, step: usize) {
+        self.onset = step;
+    }
+
+    /// The step that started this note, or `usize::MAX` if it was never set.
+    pub fn onset(&self) -> usize {
+        self.onset
+    }
+
+    /// The stem this voice plays on.
+    pub fn stem(&self) -> Stem {
+        self.stem
+    }
+
     /// Index of the stem bus this voice feeds, for the mixer's routing.
     pub fn stem_index(&self) -> usize {
         self.stem.index()
@@ -629,6 +647,7 @@ impl ToneVoice {
             filt_ramp: 1.0,
             sample_rate,
             done: false,
+            onset: usize::MAX,
         }
     }
 

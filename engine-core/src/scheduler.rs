@@ -155,7 +155,7 @@ impl Timing {
     }
 
     /// Steps between eligible onsets, or `None` for `Now`, which waits on no onset.
-    fn grid(self) -> Option<usize> {
+    pub fn grid(self) -> Option<usize> {
         match self {
             Self::Now => None,
             Self::Beat => Some(4),
@@ -184,6 +184,11 @@ pub mod event {
     pub const FILL_CANCELLED: u8 = 14;
     pub const FILL_REJECTED: u8 = 15;
     pub const GESTURE_EXPIRED: u8 = 21;
+    pub const PATTERNS_QUEUED: u8 = 31;
+    pub const PATTERNS_APPLIED: u8 = 32;
+    pub const PATTERNS_CANCELLED: u8 = 33;
+    pub const PATTERNS_REPLACED: u8 = 34;
+    pub const PATTERNS_REJECTED: u8 = 35;
 }
 
 /// Reason codes, carried by `cancelled` and `rejected` events and returned by
@@ -325,6 +330,11 @@ pub struct Scheduler {
 }
 
 impl Scheduler {
+    /// Onsets counted so far. A pattern revision queued now applies on a later one.
+    pub fn serial(&self) -> u64 {
+        self.serial
+    }
+
     pub fn pending(&self) -> Option<&PendingScene> {
         self.scene.as_ref()
     }
@@ -538,7 +548,7 @@ impl Scheduler {
 /// The step the next eligible onset on `grid` will fire, walking the clock's own
 /// advance rule (loops included) from the step due next. Bounded: a loop start is
 /// always on a bar line, so a multiple of `grid` turns up within a bar.
-fn predict(t: &Transport, grid: usize) -> usize {
+pub fn predict(t: &Transport, grid: usize) -> usize {
     let mut step = t.step;
     for _ in 0..=STEPS {
         if step.is_multiple_of(grid) {

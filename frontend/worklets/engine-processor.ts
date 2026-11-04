@@ -68,8 +68,21 @@ type Inbound =
       timing: number;
       values: ArrayLike<number>;
       deck?: DeckId;
+      /** The lanes this scene sets, compiled (NIGHT4_PROTOCOL.md); applied with it. */
+      patterns?: Float32Array;
+      /** The request id those lanes carry in events. */
+      patternsId?: number;
     }
   | { type: 'cancelScene'; requestId: number }
+  | {
+      type: 'patterns';
+      requestId: number;
+      generation: number;
+      timing: number;
+      data: Float32Array;
+      deck?: DeckId;
+    }
+  | { type: 'cancelPatterns'; requestId: number }
   | { type: 'fill'; requestId: number; generation: number; index: number; deck?: DeckId }
   | { type: 'cancelFill'; requestId: number }
   | { type: 'gestureBegin'; token: number; kind: number }
@@ -117,6 +130,7 @@ const EVENT_SCENE_APPLIED = 2;
 const EVENT_SCENE_CANCELLED = 3;
 const EVENT_SCENE_REJECTED = 5;
 const EVENT_FILL_REJECTED = 15;
+const EVENT_PATTERNS_REJECTED = 35;
 const REASON_INVALID = 1;
 const REASON_TRACK = 4;
 const REASON_MIXING = 6;
@@ -375,6 +389,20 @@ class EngineProcessor extends AudioWorkletProcessor {
         this.promote(message.deck);
         return;
 
+      case 'patterns':
+        this.queuePatterns(message);
+        this.drainEvents(this.live, this.engines[this.live]);
+        return;
+
+      case 'cancelPatterns': {
+        const engine = this.engines[this.live];
+        const id = message.requestId >>> 0;
+        const cancelled = engine ? engine.cancel_patterns(id) : false;
+        this.port.postMessage({ type: 'patternsCancelResult', deck: this.live, requestId: id, cancelled });
+        this.drainEvents(this.live, engine);
+        return;
+      }
+
       case 'scene':
         this.queueScene(message);
         // A stopped deck applies a scene on the spot. Drain now rather than wait for
@@ -463,6 +491,16 @@ class EngineProcessor extends AudioWorkletProcessor {
       this.postSceneEvents(this.live, [EVENT_SCENE_REJECTED, requestId, refusal, 0]);
       return;
     }
+    // The lanes the scene sets go in first, linked to it, so a scene that applies on
+    // the spot (stopped) takes them with it. If the lanes are refused, the scene is
+    // refused too: half a scene would play something nobody captured.
+    if (message.patterns && message.patterns.length > 0) {
+      const linkId = (message.patternsId ?? 0) >>> 0;
+      if (engine.queue_patterns(linkId, 2, requestId, message.patterns) !== 0) {
+        this.postSceneEvents(this.live, [EVENT_SCENE_REJECTED, requestId, REASON_INVALID, 0]);
+        return;
+      }
+    }
     // Copied, so the engine reads a Float32Array and nothing the UI still holds.
     for (let i = 0; i < SCENE_LEN; i += 1) this.sceneIn[i] = Number(values[i]);
     // Anything but 0, 1 or 2 goes in as 255, which the engine refuses (`invalid`),
@@ -474,6 +512,34 @@ class EngineProcessor extends AudioWorkletProcessor {
       this.scenePending.set(this.sceneIn);
       this.scenePendingId = requestId;
     }
+  }
+
+  /**
+   * Hand a pattern revision to the live engine, or refuse it here in the engine's own
+   * `patterns rejected` shape: an auto-mix in progress (`mixing`: the live deck is on
+   * its way out), a request made for a deck or track generation that is no longer live
+   * (`stale generation`, so an edit for the old track never reaches a new one), or no
+   * engine yet (`not playing`). The engine validates the payload itself.
+   */
+  private queuePatterns(message: Extract<Inbound, { type: 'patterns' }>): void {
+    const requestId = message.requestId >>> 0;
+    let refusal = 0;
+    if (!(message.data instanceof Float32Array) || message.data.length === 0) refusal = REASON_INVALID;
+    else if (this.mix) refusal = REASON_MIXING;
+    else if (
+      (message.deck !== undefined && message.deck !== this.live) ||
+      message.generation !== this.generation[this.live]
+    )
+      refusal = REASON_STALE;
+    const engine = this.engines[this.live];
+    if (refusal === 0 && !engine) refusal = REASON_NOT_PLAYING;
+    if (refusal !== 0 || !engine) {
+      this.postSceneEvents(this.live, [EVENT_PATTERNS_REJECTED, requestId, refusal, 0]);
+      return;
+    }
+    const t = message.timing;
+    const timing = t === 0 || t === 1 || t === 2 ? t : 255;
+    engine.queue_patterns(requestId, timing, 0, message.data);
   }
 
   /**

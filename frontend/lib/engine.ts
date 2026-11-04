@@ -101,6 +101,7 @@ type WorkletMessage =
   | { type: 'sceneEvents'; deck: Deck; events: number[] }
   | { type: 'sceneCancelResult'; deck: Deck; requestId: number; cancelled: boolean }
   | { type: 'fillCancelResult'; deck: Deck; requestId: number; cancelled: boolean }
+  | { type: 'patternsCancelResult'; deck: Deck; requestId: number; cancelled: boolean }
   | { type: 'gestureBeginResult'; deck: Deck; token: number; accepted: boolean };
 
 type Listener = (telemetry: Telemetry) => void;
@@ -122,6 +123,7 @@ export class EngineHost {
   private cancelWaiters = new Map<number, Array<(cancelled: boolean) => void>>();
   /** `cancelFill` callers, kept apart: scene and fill ids may coincide. */
   private fillCancelWaiters = new Map<number, Array<(cancelled: boolean) => void>>();
+  private patternsCancelWaiters = new Map<number, Array<(cancelled: boolean) => void>>();
   /** `gestureBegin` callers waiting to hear whether the engine took it, by token. */
   private gestureWaiters = new Map<number, Array<(accepted: boolean) => void>>();
 
@@ -267,6 +269,10 @@ export class EngineHost {
     }
     if (message.type === 'fillCancelResult') {
       settle(this.fillCancelWaiters, message.requestId, message.cancelled);
+      return;
+    }
+    if (message.type === 'patternsCancelResult') {
+      settle(this.patternsCancelWaiters, message.requestId, message.cancelled);
       return;
     }
     if (message.type === 'gestureBeginResult') {
@@ -521,6 +527,7 @@ export class EngineHost {
     timing: SceneTiming,
     values: ArrayLike<number>,
     generation: number,
+    patterns?: { requestId: number; data: Float32Array },
   ): void {
     this.post({
       type: 'scene',
@@ -528,7 +535,26 @@ export class EngineHost {
       generation,
       timing,
       values: Array.from(values),
+      ...(patterns ? { patterns: patterns.data, patternsId: patterns.requestId } : {}),
     });
+  }
+
+  // -- Patterns (docs/NIGHT4_PROTOCOL.md) ----------------------------------
+
+  /**
+   * Stage a pattern revision on the live deck. `data` is the compiled payload
+   * (`compileLanes`), holding every lane the revision sets. Coalesced like a
+   * parameter: of several revisions posted before the next frame (or before the
+   * engine has booted) only the latest is sent, which is what "latest wins" means
+   * anyway. Outcomes arrive through `onSceneEvents` as kinds 31-35.
+   */
+  queuePatterns(requestId: number, timing: SceneTiming, data: Float32Array, generation: number): void {
+    this.postParam('patterns', { type: 'patterns', requestId, generation, timing, data });
+  }
+
+  /** Withdraw a pending revision. Resolves true when it was still pending. */
+  cancelPatterns(requestId: number): Promise<boolean> {
+    return this.ask(this.patternsCancelWaiters, requestId, { type: 'cancelPatterns', requestId });
   }
 
   /**

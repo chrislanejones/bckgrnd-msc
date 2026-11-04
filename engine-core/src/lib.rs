@@ -65,6 +65,7 @@ mod drums;
 mod dsp;
 mod gesture;
 mod mixer;
+mod patterns;
 mod scheduler;
 mod scratch;
 mod tone;
@@ -442,6 +443,17 @@ impl Ring {
     }
 }
 
+/// A pattern revision waiting for its boundary (docs/NIGHT4_PROTOCOL.md).
+struct PendingPatterns {
+    request_id: u32,
+    timing: scheduler::Timing,
+    /// The onset serial when it was queued; only a later onset can apply it.
+    queued_at: u64,
+    /// The scene request this revision belongs to, or 0 for a standalone edit.
+    link: u32,
+    set: patterns::PatternSet,
+}
+
 /// One engine instance. Owns the voices, buses, master chain and transport.
 ///
 /// Two engines can run side by side against the same output buffer, which is how the
@@ -489,6 +501,13 @@ pub struct Engine {
     channel_coef: f32,
     /// The pending scene, the onset serial and the outcome events.
     scheduler: scheduler::Scheduler,
+    /// The pending standalone pattern edit (one at most; the latest replaces it).
+    edit: Option<PendingPatterns>,
+    /// Lanes a pending scene sets, applied when that scene commits.
+    linked: Option<PendingPatterns>,
+    /// Lanes swapped out at a boundary, kept until the next pattern message so nothing
+    /// is freed on the audio path. Capacity for two full revisions is reserved.
+    retired: Vec<patterns::LaneData>,
     /// Samples rendered, and what happened on which of them, for the scheduling tests.
     #[cfg(test)]
     clock: u64,
@@ -506,6 +525,8 @@ enum Trace {
     Trigger(usize, u64),
     /// A drum voice was spawned: stem index, step, velocity.
     Drum(usize, usize, f32),
+    /// A pattern revision was swapped in: request id, sample.
+    Patterns(u32, u64),
 }
 
 /// How long a fader, a cut, a solo or a send takes to glide, in seconds. The browser
@@ -554,6 +575,9 @@ impl Engine {
             transitions: transition::Transitions::new(track.kind, sr),
             channel_coef: dsp::glide_coef(CHANNEL_GLIDE, sr),
             scheduler: scheduler::Scheduler::default(),
+            edit: None,
+            linked: None,
+            retired: Vec::with_capacity(2 * patterns::LANES),
             #[cfg(test)]
             clock: 0,
             #[cfg(test)]
@@ -982,6 +1006,145 @@ impl Engine {
     /// `timing` is 0 Now, 1 Next Beat, 2 Next Bar. While stopped the scene applies
     /// here and now and playback does not start; while a scratch, brake or backspin is
     /// in progress it is refused (`transport`).
+    /// Stage a pattern revision (docs/NIGHT4_PROTOCOL.md). Returns 0 when accepted,
+    /// otherwise the reason it was refused, also reported as `patterns rejected`.
+    ///
+    /// `data` is the compiled payload ([`patterns::PatternSet::parse`]), validated as a
+    /// whole: a refused payload changes nothing and leaves whatever was pending,
+    /// pending. Lanes are built here, in the message handler, never on the audio path.
+    ///
+    /// - `link` 0: a standalone edit. While stopped it applies here and now (`applied`
+    ///   with step -1) and does not start playback. While playing it waits for the
+    ///   boundary `timing` names (0 Now: the next render call; 1 the next beat; 2 the
+    ///   next bar), reporting `queued` with the predicted bar. A newer edit replaces a
+    ///   pending one (`replaced`) and keeps the boundary already announced unless it
+    ///   is Now.
+    /// - `link` = a scene request id: the lanes that scene sets. They apply when that
+    ///   scene commits, after any edit due on the same onset, and are withdrawn with
+    ///   it. The host queues them just before the scene.
+    pub fn queue_patterns(&mut self, request_id: u32, timing: u8, link: u32, data: &[f32]) -> u8 {
+        // What the last boundary swapped out is freed here, off the audio path.
+        self.retired.clear();
+        let verdict = match (
+            scheduler::Timing::from_code(timing),
+            patterns::PatternSet::parse(data),
+        ) {
+            (Some(t), Some(set)) => {
+                let serial = self.scheduler.serial();
+                if link != 0 {
+                    if let Some(old) = self.linked.take() {
+                        self.scheduler.events.push(
+                            scheduler::event::PATTERNS_REPLACED,
+                            old.request_id,
+                            request_id as f64,
+                            0.0,
+                        );
+                    }
+                    self.linked = Some(PendingPatterns {
+                        request_id,
+                        timing: t,
+                        queued_at: serial,
+                        link,
+                        set,
+                    });
+                } else if !self.transport.playing {
+                    if let Some(old) = self.edit.take() {
+                        self.scheduler.events.push(
+                            scheduler::event::PATTERNS_REPLACED,
+                            old.request_id,
+                            request_id as f64,
+                            0.0,
+                        );
+                    }
+                    let now = PendingPatterns {
+                        request_id,
+                        timing: t,
+                        queued_at: serial,
+                        link: 0,
+                        set,
+                    };
+                    self.apply_patterns(now, -1);
+                } else {
+                    let (timing, queued_at) = match self.edit.take() {
+                        Some(old) => {
+                            self.scheduler.events.push(
+                                scheduler::event::PATTERNS_REPLACED,
+                                old.request_id,
+                                request_id as f64,
+                                0.0,
+                            );
+                            if t == scheduler::Timing::Now {
+                                (t, serial)
+                            } else {
+                                (old.timing, old.queued_at)
+                            }
+                        }
+                        None => (t, serial),
+                    };
+                    if let Some(grid) = timing.grid() {
+                        let step = scheduler::predict(&self.transport, grid);
+                        self.scheduler.events.push(
+                            scheduler::event::PATTERNS_QUEUED,
+                            request_id,
+                            (step / 16 + 1) as f64,
+                            step as f64,
+                        );
+                    }
+                    self.edit = Some(PendingPatterns {
+                        request_id,
+                        timing,
+                        queued_at,
+                        link: 0,
+                        set,
+                    });
+                }
+                reason::OK
+            }
+            _ => reason::INVALID,
+        };
+        if verdict != reason::OK {
+            self.scheduler.events.push(
+                scheduler::event::PATTERNS_REJECTED,
+                request_id,
+                verdict as f64,
+                0.0,
+            );
+        }
+        verdict
+    }
+
+    /// Withdraw a pending pattern revision (standalone or scene-linked) by request id.
+    /// False when it is not pending: already applied, replaced or unknown.
+    pub fn cancel_patterns(&mut self, request_id: u32) -> bool {
+        if self
+            .edit
+            .as_ref()
+            .is_some_and(|e| e.request_id == request_id)
+        {
+            self.edit = None;
+        } else if self
+            .linked
+            .as_ref()
+            .is_some_and(|l| l.request_id == request_id)
+        {
+            self.linked = None;
+        } else {
+            return false;
+        }
+        self.scheduler.events.push(
+            scheduler::event::PATTERNS_CANCELLED,
+            request_id,
+            reason::USER as f64,
+            0.0,
+        );
+        true
+    }
+
+    /// The request id of the pending standalone edit, if any.
+    pub fn pending_patterns(&self) -> Option<u32> {
+        self.edit.as_ref().map(|e| e.request_id)
+    }
+
     pub fn queue_scene(&mut self, request_id: u32, timing: u8, values: &[f32]) -> u8 {
         let verdict = match scheduler::Timing::from_code(timing) {
             None => reason::INVALID,
@@ -1008,6 +1171,23 @@ impl Engine {
                 0.0,
             );
         }
+        // Lanes go with their scene: a refused scene's are withdrawn; an accepted one
+        // replaces whatever lanes an earlier pending scene was carrying.
+        let orphan = self.linked.as_ref().is_some_and(|l| {
+            if verdict == reason::OK {
+                l.link != request_id
+            } else {
+                l.link == request_id
+            }
+        });
+        if orphan {
+            let why = if verdict == reason::OK {
+                reason::USER
+            } else {
+                verdict
+            };
+            self.cancel_linked(why);
+        }
         verdict
     }
 
@@ -1029,7 +1209,11 @@ impl Engine {
     /// reason 10. False when it is not pending: already applied, replaced, cancelled,
     /// or never queued.
     pub fn cancel_scene(&mut self, request_id: u32) -> bool {
-        self.scheduler.cancel(request_id)
+        let cancelled = self.scheduler.cancel(request_id);
+        if cancelled && self.linked.as_ref().is_some_and(|l| l.link == request_id) {
+            self.cancel_linked(reason::USER);
+        }
+        cancelled
     }
 
     /// Cancel whatever scene and fill are pending, and cut short an active fill, for
@@ -1170,6 +1354,15 @@ impl Engine {
         if let Some(p) = self.scheduler.take_now() {
             self.commit_scene(p.request_id, &p.values, -1);
         }
+        if self
+            .edit
+            .as_ref()
+            .is_some_and(|e| e.timing == scheduler::Timing::Now)
+        {
+            if let Some(e) = self.edit.take() {
+                self.apply_patterns(e, -1);
+            }
+        }
         for i in 0..n {
             if self.transport.tick_gesture() {
                 self.stop();
@@ -1177,8 +1370,16 @@ impl Engine {
             let onset = self.transport.tick();
             if let Some(step) = onset {
                 // The order on a boundary is fixed (NIGHT3_PROTOCOL.md, Timing):
-                // 1. Commit the scene, so this step's notes are already in it.
-                if let Some(p) = self.scheduler.on_onset(step) {
+                // 1. Apply a pattern edit due here, then commit the scene (with any
+                //    lanes it sets, which win over the edit's for the same lane), so
+                //    this step's notes are already in both. NIGHT4_PROTOCOL.md.
+                let due = self.scheduler.on_onset(step);
+                if self.edit_due(step) {
+                    if let Some(e) = self.edit.take() {
+                        self.apply_patterns(e, step as i32);
+                    }
+                }
+                if let Some(p) = due {
                     self.commit_scene(p.request_id, &p.values, step as i32);
                 }
                 // 2. End a fill that has played its bar, and start one due here, after
@@ -1231,7 +1432,118 @@ impl Engine {
     fn interrupt(&mut self, why: u8) -> bool {
         let scene = self.scheduler.cancel_pending(why);
         let fill = self.scheduler.end_fills(why);
+        // A scene's lanes go with the scene. A standalone edit is the user's
+        // composition: a stop, a seek or a panic applies it at once rather than lose
+        // it. Only a new track (or the deck handing over) withdraws it, because it was
+        // written for the track that is going.
+        self.cancel_linked(why);
+        if let Some(edit) = self.edit.take() {
+            if why == reason::TRACK {
+                self.scheduler.events.push(
+                    scheduler::event::PATTERNS_CANCELLED,
+                    edit.request_id,
+                    why as f64,
+                    0.0,
+                );
+            } else {
+                self.apply_patterns(edit, -1);
+            }
+        }
         scene || fill
+    }
+
+    /// Cancel the scene-linked lanes, reporting `why`.
+    fn cancel_linked(&mut self, why: u8) {
+        if let Some(l) = self.linked.take() {
+            self.scheduler.events.push(
+                scheduler::event::PATTERNS_CANCELLED,
+                l.request_id,
+                why as f64,
+                0.0,
+            );
+        }
+    }
+
+    /// Swap a revision's lanes into the track and report `applied` on `step` (-1 for
+    /// at once). Allocation-free: lanes move by pointer, and what they replace is kept
+    /// in `retired` until the next pattern message.
+    ///
+    /// A note still sounding on a replaced note lane is released (its own envelope
+    /// release, not a cut) if the event that started it is gone or now sounds
+    /// different, so a shortened or deleted note never hangs on and an untouched one
+    /// keeps ringing. Drum voices are short and are left to finish.
+    fn apply_patterns(&mut self, mut pending: PendingPatterns, step: i32) {
+        for index in 0..patterns::LANES {
+            let Some(data) = pending.set.lanes[index].take() else {
+                continue;
+            };
+            match data {
+                patterns::LaneData::Drum(mut v) => {
+                    let lane = match index {
+                        0 => &mut self.track.kick,
+                        1 => &mut self.track.clap,
+                        2 => &mut self.track.hat,
+                        _ => &mut self.track.hat_open,
+                    };
+                    std::mem::swap(lane, &mut v);
+                    self.retired.push(patterns::LaneData::Drum(v));
+                }
+                patterns::LaneData::Notes(mut v) => {
+                    let Some(stem) = patterns::note_stem(index) else {
+                        continue;
+                    };
+                    let lane = match stem {
+                        Stem::Bass => &mut self.track.bass,
+                        Stem::Stab => &mut self.track.stab,
+                        Stem::Lead => &mut self.track.lead,
+                        Stem::Pad => &mut self.track.pad,
+                        _ => &mut self.track.arp,
+                    };
+                    std::mem::swap(lane, &mut v);
+                    // `v` now holds the old lane.
+                    for slot in self.voices.iter_mut() {
+                        let Some(Voice::Tone(t)) = slot.as_mut() else {
+                            continue;
+                        };
+                        if t.stem() != stem {
+                            continue;
+                        }
+                        let at = t.onset();
+                        let kept = match (
+                            v.get(at).and_then(|e| e.as_ref()),
+                            lane.get(at).and_then(|e| e.as_ref()),
+                        ) {
+                            (Some(old), Some(new)) => patterns::same_note(old, new),
+                            _ => false,
+                        };
+                        if !kept {
+                            t.release_now();
+                        }
+                    }
+                    self.retired.push(patterns::LaneData::Notes(v));
+                }
+            }
+        }
+        self.scheduler.events.push(
+            scheduler::event::PATTERNS_APPLIED,
+            pending.request_id,
+            step as f64,
+            0.0,
+        );
+        #[cfg(test)]
+        self.trace
+            .push(Trace::Patterns(pending.request_id, self.clock));
+    }
+
+    /// Whether the pending edit is due on this onset (`step`), the serial already
+    /// counted.
+    fn edit_due(&self, step: usize) -> bool {
+        self.edit.as_ref().is_some_and(|e| {
+            self.scheduler.serial() > e.queued_at
+                && e.timing
+                    .grid()
+                    .is_some_and(|grid| step.is_multiple_of(grid))
+        })
     }
 
     /// End every held gesture (not the latch) and put the base back.
@@ -1366,6 +1678,11 @@ impl Engine {
     /// their usual smoothing (ADR-013); nothing here jumps the audio. No allocation.
     fn commit_scene(&mut self, request_id: u32, values: &[f32; SCENE_LEN], step: i32) {
         self.commit_targets(values);
+        if self.linked.as_ref().is_some_and(|l| l.link == request_id) {
+            if let Some(l) = self.linked.take() {
+                self.apply_patterns(l, step);
+            }
+        }
         self.scheduler.events.push(
             scheduler::event::SCENE_APPLIED,
             request_id,
@@ -1468,26 +1785,17 @@ impl Engine {
             let hold = self.hold_seconds(at, ev.len);
             let freq = crate::dsp::midi_hz(ev.first(60.0));
             let v = tone::voicing(stem, kind, &ev, freq);
-            self.spawn(Voice::Tone(tone::ToneVoice::with_stem(
-                stem,
-                &ev,
-                freq,
-                hold,
-                self.sample_rate,
-                v,
-            )));
+            let mut voice = tone::ToneVoice::with_stem(stem, &ev, freq, hold, self.sample_rate, v);
+            voice.set_onset(at);
+            self.spawn(Voice::Tone(voice));
             // House and deep bass get a second saw layer under the sine body, routed
             // to the same stem so it rides the same fader. `bass_sub_layer` checks the
             // stem itself and returns None for the other tuned stems.
             if let Some(sub) = tone::bass_sub_layer(stem, kind, &ev, freq) {
-                self.spawn(Voice::Tone(tone::ToneVoice::with_stem(
-                    stem,
-                    &ev,
-                    freq,
-                    hold,
-                    self.sample_rate,
-                    sub,
-                )));
+                let mut layer =
+                    tone::ToneVoice::with_stem(stem, &ev, freq, hold, self.sample_rate, sub);
+                layer.set_onset(at);
+                self.spawn(Voice::Tone(layer));
             }
         }
     }
@@ -1715,6 +2023,9 @@ mod scene_tests;
 
 #[cfg(test)]
 mod perform_tests;
+
+#[cfg(test)]
+mod pattern_tests;
 
 #[cfg(test)]
 mod tests {

@@ -117,3 +117,27 @@ fn the_filter_maps_as_the_ui_displays_it() {
     let open = (1_000.0f32 / 240.0).ln() / (18_000.0f32 / 240.0).ln();
     assert!((Master::filter_freq(open) - 1_000.0).abs() < 0.5);
 }
+
+#[test]
+fn the_pattern_lanes_and_limits_match_the_engine() {
+    // contracts/patterns.json names each lane's engine index and kind; the engine's
+    // payload parser (patterns.rs) relies on drum lanes being 0..4 and note lanes 4..9,
+    // and on six pitches per note.
+    let raw = std::fs::read_to_string(format!(
+        "{}/../contracts/patterns.json",
+        env!("CARGO_MANIFEST_DIR")
+    ))
+    .expect("contracts/patterns.json");
+    let reg: Value = serde_json::from_str(&raw).expect("valid JSON");
+    assert_eq!(reg["steps"], 256);
+    assert_eq!(reg["maxNotes"], 6);
+    let lanes = reg["lanes"].as_array().unwrap();
+    assert_eq!(lanes.len(), 9);
+    for (i, lane) in lanes.iter().enumerate() {
+        assert_eq!(lane["engine"], i, "{} is engine lane {i}", lane["id"]);
+        let kind = if i < 4 { "drum" } else { "notes" };
+        assert_eq!(lane["kind"], kind, "{} kind", lane["id"]);
+    }
+    let order: Vec<&str> = lanes.iter().map(|l| l["id"].as_str().unwrap()).collect();
+    assert_eq!(order, ["kick", "clap", "hat", "hatOpen", "bass", "stab", "lead", "pad", "arp"]);
+}
