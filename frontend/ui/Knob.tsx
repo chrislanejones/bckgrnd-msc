@@ -65,6 +65,9 @@ type Props = {
    * when a note comes and goes.
    */
   note?: string;
+  /** The id of a description that lives outside the knob, e.g. one status line shared
+      by a whole group ("Echo is off"), for screen readers. */
+  describedBy?: string;
   size?: 'md' | 'sm';
 };
 
@@ -101,6 +104,7 @@ export const Knob = memo(function Knob({
   historyId,
   disabled = false,
   note,
+  describedBy,
   size = 'md',
 }: Props) {
   const inputId = useId();
@@ -406,7 +410,7 @@ export const Knob = memo(function Knob({
           value={Math.round(norm * RANGE)}
           disabled={disabled}
           aria-valuetext={spoken}
-          aria-describedby={note ? noteId : undefined}
+          aria-describedby={[note ? noteId : '', describedBy ?? ''].filter(Boolean).join(' ') || undefined}
           aria-keyshortcuts="Enter Delete"
           // Screen readers and anything else that sets the range directly. Each such
           // adjustment is a discrete step, so it is its own edit.

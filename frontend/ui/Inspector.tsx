@@ -12,6 +12,7 @@
  * off, its feedback and return have nothing to act on and are disabled.
  */
 
+import { useId } from 'react';
 import { defaultSend, param, stemRange } from '../lib/contract';
 import type { Instrument } from '../lib/instrument';
 import { EFFECT_DEFAULTS, MASTER_DEFAULT } from '../lib/instrument';
@@ -108,6 +109,7 @@ function MasterRack({ inst }: { inst: Instrument }) {
   const { track, effects, setEffect } = inst;
   const echoOn = echoLive(inst);
   const echoNote = !echoOn ? 'Echo is off' : inst.echo ? 'Held open by the throw' : '';
+  const echoNoteId = useId();
 
   return (
     <>
@@ -181,12 +183,17 @@ function MasterRack({ inst }: { inst: Instrument }) {
 
       <fieldset className="inspector-group">
         <legend className="inspector-legend">Echo</legend>
+        {/* The echo's state is said once, in the Time label, rather than as the same
+            note under both knobs. Screen readers get it on each knob as well. */}
         <Segmented<number>
-          label={inst.echoBeats === 0 ? 'Time · off' : 'Time'}
+          label={!echoOn ? 'Time · off' : inst.echo ? 'Time · held open by the throw' : 'Time'}
           value={inst.echoBeats}
           onPick={inst.pickEchoTime}
           options={ECHO_OPTIONS}
         />
+        <span id={echoNoteId} className="sr-only">
+          {echoNote}
+        </span>
         <div className="knob-row">
           <Knob
             label="Feedback"
@@ -196,7 +203,7 @@ function MasterRack({ inst }: { inst: Instrument }) {
             defaultValue={EFFECT_DEFAULTS['fx.echoFeedback']}
             onChange={(v) => setEffect('fx.echoFeedback', v)}
             disabled={!echoOn}
-            note={echoNote}
+            describedBy={echoNote ? echoNoteId : undefined}
           />
           <Knob
             label="Return"
@@ -206,7 +213,7 @@ function MasterRack({ inst }: { inst: Instrument }) {
             defaultValue={EFFECT_DEFAULTS['fx.echoReturn']}
             onChange={(v) => setEffect('fx.echoReturn', v)}
             disabled={!echoOn}
-            note={echoNote}
+            describedBy={echoNote ? echoNoteId : undefined}
           />
         </div>
       </fieldset>

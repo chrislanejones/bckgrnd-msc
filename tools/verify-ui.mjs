@@ -360,8 +360,13 @@ try {
     // Disabled: with the echo off, its feedback and return have nothing to act on.
     await page.getByRole('button', { name: 'Echo every dotted eighth' }).click();
     const fbDisabled = await knob('Feedback').locator('input[type="range"]').isDisabled();
-    const fbNote = await knob('Feedback').locator('.knob-note').textContent();
-    check('with the echo off, feedback is disabled and says why', fbDisabled && fbNote === 'Echo is off', fbNote);
+    // The reason is said once for the group (the Time label), and on each knob for
+    // screen readers through its description.
+    const fbNote = await knob('Feedback')
+      .locator('input[type="range"]')
+      .evaluate((el) => (el.getAttribute('aria-describedby') ?? '').split(' ').map((id) => document.getElementById(id)?.textContent ?? '').join(' ').trim());
+    const timeLabel = await page.locator('.inspector-group', { hasText: 'Echo' }).locator('.segmented-block .control-label').textContent();
+    check('with the echo off, feedback is disabled and says why', fbDisabled && fbNote === 'Echo is off' && timeLabel === 'Time · off', `${fbNote} / ${timeLabel}`);
     await page.getByRole('button', { name: 'Echo every dotted eighth' }).click();
     check('turning the echo back on enables it', !(await knob('Feedback').locator('input[type="range"]').isDisabled()));
 

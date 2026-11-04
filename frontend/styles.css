@@ -653,6 +653,12 @@ body {
   min-width: 0;
 }
 
+/* Knobs under a row of pills (Echo: Time, then Feedback and Return) get the same air
+   as a new group, so the labels do not sit on the pills. */
+.segmented-block ~ .knob-row {
+  margin-top: var(--space-2);
+}
+
 .segmented {
   display: grid;
   gap: 3px;
