@@ -1,1 +1,9 @@
-{ "format": "bckgrnd-msc/project", "version": 2, "name": "Later", "trackId": "rain", "params": {}, "stems": {}, "patterns": {} }
+{
+  "format": "bckgrnd-msc/project",
+  "version": 3,
+  "name": "Later",
+  "trackId": "rain",
+  "params": {},
+  "stems": {},
+  "patterns": {}
+}

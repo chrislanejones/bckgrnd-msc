@@ -1,0 +1,3 @@
+{
+    "error": "Scenes are malformed: slot drop refers to patterns, which this version does not support"
+}

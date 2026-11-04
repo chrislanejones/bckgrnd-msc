@@ -27,3 +27,5 @@ and is marked `(backfilled)`.
 | [011](011-no-vinyl-crackle-or-tape-hiss-under-lofi.md) | No synthesized vinyl crackle or tape hiss under lo-fi: built, read as rain, removed | accepted | 2026-10-05 (backfilled) |
 | [012](012-one-parameter-registry-and-a-versioned-project-format.md) | One parameter registry and a versioned project format, shared by UI, PHP and MCP; telemetry is never saved | draft | 2026-11-03 |
 | [013](013-parameter-smoothing-lives-in-the-engine.md) | Parameter smoothing lives in the engine, per parameter, with control-rate filter/EQ and a snap on silence | draft | 2026-11-03 |
+| [014](014-scenes-are-complete-snapshots-in-project-version-2.md) | Scenes are four complete snapshots in project version 2; the active scene is never saved | draft | 2026-11-04 |
+| [015](015-the-engine-schedules-musical-changes-gestures-are-overrides.md) | The engine commits scenes at an onset from musical intent; held effects are tokened overrides on the base | draft | 2026-11-04 |

@@ -7,7 +7,8 @@ should all agree on these files. None of them should keep a private copy.
 | File | What it is | Read by |
 |---|---|---|
 | [`parameters.json`](parameters.json) | Every engine parameter: id, range, default, unit, scope, and the worklet message that sets it. | `frontend/lib/contract.ts`, `App\Support\Project\Contract`, and the MCP from Night 6 |
-| [`project.schema.json`](project.schema.json) | A saved project, version 1. | The same, plus anything that writes a project file |
+| [`project.schema.json`](project.schema.json) | A saved project, version 2. | The same, plus anything that writes a project file |
+| [`scenes.json`](scenes.json) | The four scene slots, the parameters a scene holds (`sceneVector`, also the engine's vector order) and the factory recipes. | The same, plus `engine-core/tests` |
 
 ## Saved data vs. telemetry
 
@@ -23,8 +24,8 @@ Two kinds of state, never mixed.
 A parameter's `scope` says which side it is on:
 
 - `project`: part of the song as the user has shaped it. Saved.
-- `performance`: a gesture in the moment (loop, echo throw). Not saved. Scenes in
-  Night 3 may record these as cues, but a project never reopens mid-gesture.
+- `performance`: a gesture in the moment (loop, echo throw). Not saved, and never
+  part of a scene. A project never reopens mid-gesture.
 
 ## Parameters
 
@@ -50,18 +51,26 @@ Ids never change meaning. To change a parameter's meaning, add a new id and migr
 ```json
 {
   "format": "bckgrnd-msc/project",
-  "version": 1,
+  "version": 2,
   "name": "Warehouse, no drums",
   "trackId": "warehouse",
   "params": { "transport.bpm": 124, "fx.filter": 0.6 },
   "stems": { "kick": { "volume": 0.9, "send": 0, "muted": true, "solo": false } },
-  "patterns": {}
+  "patterns": {},
+  "scenes": { "slots": [ { "slot": "full", "name": "Full", "factory": "full", "revision": 1, "params": {}, "stems": {}, "patterns": {} } ] }
 }
 ```
 
+(The `scenes` above is abbreviated: on disk there are always four slots, each
+complete.)
+
 - A missing `params` key or stem field means its default. A project only needs to
   carry what differs, but writers may write everything.
-- `patterns` is reserved for Night 4 and must be empty in version 1.
+- `patterns` is reserved for Night 4 and must be empty.
+- `scenes` holds four complete snapshots: every stem, every scene parameter. Unlike
+  `params`, a scene is never clamped or filled: a malformed one refuses the whole
+  set, so a bad scene cannot reach the mix. Which scene is active is not saved.
+  Details: [`docs/NIGHT3_PROTOCOL.md`](../docs/NIGHT3_PROTOCOL.md).
 - Readers **reject** an unknown `format` or a newer `version`. They never guess.
   Readers **upgrade** older versions through a migration, and a migration never drops
   data it doesn't understand silently.
@@ -71,6 +80,7 @@ Ids never change meaning. To change a parameter's meaning, add a new id and migr
 | From | To | How |
 |---|---|---|
 | Legacy preset (`PresetController`, no `format`) | v1 | `trackId`, `bpm`, `swing` → `transport.*`; `mix`/`muted`/`solo` → `stems`. Effects take their defaults, because legacy presets never stored them. |
+| v1 | v2 | Adds the track's four factory scenes. Nothing else changes, and no scene is applied: the working mix stays what was saved. A v1 document that already carries `scenes` is refused. |
 | MCP `MixSettings` (bckgrnd-msc-mcp `src/settings.ts`) | v1 (Night 6) | `track` → `trackId`; `cut[]` → `stems.*.muted`. Its loudness, ducking and fades are render settings for mixing under a voice, not musical data. They stay in the MCP's own presets. |
 
 The engine's own defaults and ranges are held against the registry too

@@ -78,9 +78,74 @@ final class ContractTest extends TestCase
         $this->assertSame($track->bpm, $project['params']['transport.bpm']);
         $this->assertSame($track->swing, $project['params']['transport.swing']);
         $this->assertSame(0.78, $project['params']['master.level']);
+        $this->assertSame(Contract::SCENE_SLOTS, array_column($project['scenes']['slots'], 'slot'));
         $this->assertSame((float) $track->mix['bass'], $project['stems']['bass']['volume']);
         $this->assertArrayNotHasKey('performance.loopBars', $project['params'], 'performance gestures are not saved');
         $this->assertEquals($project, Contract::migrate(json_decode(json_encode($project), true)), 'a fresh project round-trips');
+    }
+
+    public function test_a_scene_holds_every_effect_and_nothing_else(): void
+    {
+        $effects = array_values(array_filter(
+            array_column(Contract::projectParameters(), 'id'),
+            static fn (string $id): bool => str_starts_with($id, 'fx.'),
+        ));
+        $scene = Contract::sceneParameterIds();
+        sort($effects);
+        sort($scene);
+        $this->assertSame($effects, $scene, 'a scene holds every fx parameter');
+        foreach (['transport.bpm', 'transport.swing', 'master.level'] as $outside) {
+            $this->assertNotContains($outside, Contract::sceneParameterIds(), "{$outside} stays outside scenes");
+        }
+        $this->assertSame(Contract::SCENE_SLOTS, Contract::scenesContract()['slots']);
+        $this->assertSame(Contract::SCENE_SLOTS, array_column(Contract::scenesContract()['factory'], 'id'));
+    }
+
+    public function test_factory_scenes_are_complete_and_read_back_for_every_track(): void
+    {
+        foreach (Library::all() as $track) {
+            $scenes = json_decode((string) json_encode(Contract::factoryScenes($track)), true);
+            $this->assertEquals($scenes, json_decode((string) json_encode(Contract::readScenes($scenes)), true), $track->id);
+        }
+    }
+
+    public function test_drop_returns_without_turning_anything_up(): void
+    {
+        foreach (Library::all() as $track) {
+            $drop = Contract::factoryScene($track, 'drop', 'drop');
+            foreach (Library::STEMS as $stem) {
+                $this->assertLessThanOrEqual((float) ($track->mix[$stem] ?? 0.8), $drop['stems'][$stem]['volume'], "{$track->id} {$stem}");
+                $this->assertFalse($drop['stems'][$stem]['muted'], "{$track->id} {$stem} plays in the drop");
+            }
+            $this->assertSame(1.0, $drop['params']['fx.filter'], 'the drop opens the filter');
+        }
+    }
+
+    public function test_sparse_and_build_follow_their_recipes(): void
+    {
+        $track = Library::findOrFail('warehouse');
+        $sparse = Contract::factoryScene($track, 'sparse', 'sparse');
+        foreach (['kick', 'clap', 'stab', 'lead', 'arp'] as $out) {
+            $this->assertTrue($sparse['stems'][$out]['muted'], "{$out} steps out of the breakdown");
+        }
+        foreach (['hats', 'bass', 'pad'] as $in) {
+            $this->assertFalse($sparse['stems'][$in]['muted'], "{$in} carries the breakdown");
+        }
+        $build = Contract::factoryScene($track, 'build', 'build');
+        $this->assertEqualsWithDelta($track->mix['bass'] * 0.45, $build['stems']['bass']['volume'], 1e-9, 'build pulls the bass down');
+        $this->assertSame($track->mix['hats'], $build['stems']['hats']['volume'], 'build keeps the hats');
+        $this->assertLessThan(1.0, $build['params']['fx.filter'], 'build darkens');
+    }
+
+    public function test_migrating_version_1_adds_scenes_and_changes_nothing_else(): void
+    {
+        $v1 = json_decode((string) file_get_contents(dirname(__DIR__).'/fixtures/contract/v1-sparse.input.json'), true);
+        $v2 = Contract::migrate($v1);
+        $this->assertSame(2, $v2['version']);
+        $this->assertSame(0.4, $v2['params']['fx.filter'], 'the working mix is kept');
+        $this->assertTrue($v2['stems']['kick']['muted'], 'the working mix is kept');
+        $this->assertEquals(Contract::factoryScenes(Library::findOrFail('rain')), $v2['scenes']);
+        $this->assertArrayNotHasKey('activeScene', $v2, 'no scene is applied or remembered as active');
     }
 
     /** @return iterable<string, array{string}> */

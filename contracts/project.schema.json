@@ -1,43 +1,142 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://bckgrnd-msc.netlify.app/contracts/project.v1.schema.json",
-  "title": "bckgrnd-msc project, version 1",
-  "description": "Saved musical data only. Playback telemetry (meters, playhead, live deck) is never part of a project. Parameter ids and ranges come from contracts/parameters.json.",
+  "$id": "https://bckgrnd-msc.netlify.app/contracts/project.v2.schema.json",
+  "title": "bckgrnd-msc project, version 2",
+  "description": "Saved musical data only. Playback telemetry (meters, playhead, live deck) is never part of a project. Parameter ids and ranges come from contracts/parameters.json; scene slots and the scene parameters come from contracts/scenes.json. Version 1 is the same without `scenes`; readers migrate it by adding the track's factory scenes.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["format", "version", "name", "trackId", "params", "stems", "patterns"],
+  "required": [
+    "format",
+    "version",
+    "name",
+    "trackId",
+    "params",
+    "stems",
+    "patterns",
+    "scenes"
+  ],
   "properties": {
-    "format": { "const": "bckgrnd-msc/project" },
-    "version": { "const": 1 },
-    "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$" },
-    "name": { "type": "string", "minLength": 1, "maxLength": 80 },
-    "createdAt": { "type": "string", "format": "date-time" },
-    "updatedAt": { "type": "string", "format": "date-time" },
-    "trackId": { "type": "string", "pattern": "^[a-z0-9_-]+$" },
+    "format": {
+      "const": "bckgrnd-msc/project"
+    },
+    "version": {
+      "const": 2
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$"
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 80
+    },
+    "createdAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "updatedAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "trackId": {
+      "type": "string",
+      "pattern": "^[a-z0-9_-]+$"
+    },
     "params": {
       "description": "Project-scoped parameters keyed by their id in parameters.json. A missing key means the parameter's default.",
       "type": "object",
-      "propertyNames": { "pattern": "^(transport|master|fx)\\.[A-Za-z]+$" },
-      "additionalProperties": { "type": "number" }
+      "propertyNames": {
+        "pattern": "^(transport|master|fx)\\.[A-Za-z]+$"
+      },
+      "additionalProperties": {
+        "type": "number"
+      }
     },
     "stems": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "kick": { "$ref": "#/$defs/stem" },
-        "clap": { "$ref": "#/$defs/stem" },
-        "hats": { "$ref": "#/$defs/stem" },
-        "bass": { "$ref": "#/$defs/stem" },
-        "stab": { "$ref": "#/$defs/stem" },
-        "lead": { "$ref": "#/$defs/stem" },
-        "pad": { "$ref": "#/$defs/stem" },
-        "arp": { "$ref": "#/$defs/stem" }
+        "kick": {
+          "$ref": "#/$defs/stem"
+        },
+        "clap": {
+          "$ref": "#/$defs/stem"
+        },
+        "hats": {
+          "$ref": "#/$defs/stem"
+        },
+        "bass": {
+          "$ref": "#/$defs/stem"
+        },
+        "stab": {
+          "$ref": "#/$defs/stem"
+        },
+        "lead": {
+          "$ref": "#/$defs/stem"
+        },
+        "pad": {
+          "$ref": "#/$defs/stem"
+        },
+        "arp": {
+          "$ref": "#/$defs/stem"
+        }
       }
     },
     "patterns": {
-      "description": "Reserved for pattern edits (Night 4). Empty in version 1.",
+      "description": "Reserved for pattern edits (Night 4). Empty in version 2.",
       "type": "object",
       "maxProperties": 0
+    },
+    "scenes": {
+      "description": "Four stored scene snapshots. Complete on disk. A malformed scene refuses the whole set. Which scene is active is session state and is never saved.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "slots"
+      ],
+      "properties": {
+        "slots": {
+          "type": "array",
+          "minItems": 4,
+          "maxItems": 4,
+          "prefixItems": [
+            {
+              "$ref": "#/$defs/scene",
+              "properties": {
+                "slot": {
+                  "const": "full"
+                }
+              }
+            },
+            {
+              "$ref": "#/$defs/scene",
+              "properties": {
+                "slot": {
+                  "const": "sparse"
+                }
+              }
+            },
+            {
+              "$ref": "#/$defs/scene",
+              "properties": {
+                "slot": {
+                  "const": "build"
+                }
+              }
+            },
+            {
+              "$ref": "#/$defs/scene",
+              "properties": {
+                "slot": {
+                  "const": "drop"
+                }
+              }
+            }
+          ],
+          "items": false
+        }
+      }
     }
   },
   "$defs": {
@@ -45,10 +144,193 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "volume": { "type": "number", "minimum": 0, "maximum": 1 },
-        "send": { "type": "number", "minimum": 0, "maximum": 1 },
-        "muted": { "type": "boolean" },
-        "solo": { "type": "boolean" }
+        "volume": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "send": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "muted": {
+          "type": "boolean"
+        },
+        "solo": {
+          "type": "boolean"
+        }
+      }
+    },
+    "scene": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "slot",
+        "name",
+        "factory",
+        "revision",
+        "params",
+        "stems",
+        "patterns"
+      ],
+      "properties": {
+        "slot": {
+          "enum": [
+            "full",
+            "sparse",
+            "build",
+            "drop"
+          ]
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 40
+        },
+        "factory": {
+          "enum": [
+            "full",
+            "sparse",
+            "build",
+            "drop"
+          ],
+          "description": "The recipe in contracts/scenes.json that Reset to Factory restores."
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "fx.filter",
+            "fx.filterQ",
+            "fx.low",
+            "fx.mid",
+            "fx.high",
+            "fx.echoTime",
+            "fx.echoFeedback",
+            "fx.echoReturn",
+            "fx.reverbMix",
+            "fx.reverbDecay",
+            "fx.width",
+            "fx.stereo"
+          ],
+          "properties": {
+            "fx.filter": {
+              "type": "number"
+            },
+            "fx.filterQ": {
+              "type": "number"
+            },
+            "fx.low": {
+              "type": "number"
+            },
+            "fx.mid": {
+              "type": "number"
+            },
+            "fx.high": {
+              "type": "number"
+            },
+            "fx.echoTime": {
+              "type": "number"
+            },
+            "fx.echoFeedback": {
+              "type": "number"
+            },
+            "fx.echoReturn": {
+              "type": "number"
+            },
+            "fx.reverbMix": {
+              "type": "number"
+            },
+            "fx.reverbDecay": {
+              "type": "number"
+            },
+            "fx.width": {
+              "type": "number"
+            },
+            "fx.stereo": {
+              "type": "number"
+            }
+          },
+          "description": "Exactly the scene parameters (sceneVector), each inside its registry range."
+        },
+        "stems": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kick",
+            "clap",
+            "hats",
+            "bass",
+            "stab",
+            "lead",
+            "pad",
+            "arp"
+          ],
+          "properties": {
+            "kick": {
+              "$ref": "#/$defs/sceneStem"
+            },
+            "clap": {
+              "$ref": "#/$defs/sceneStem"
+            },
+            "hats": {
+              "$ref": "#/$defs/sceneStem"
+            },
+            "bass": {
+              "$ref": "#/$defs/sceneStem"
+            },
+            "stab": {
+              "$ref": "#/$defs/sceneStem"
+            },
+            "lead": {
+              "$ref": "#/$defs/sceneStem"
+            },
+            "pad": {
+              "$ref": "#/$defs/sceneStem"
+            },
+            "arp": {
+              "$ref": "#/$defs/sceneStem"
+            }
+          }
+        },
+        "patterns": {
+          "type": "object",
+          "maxProperties": 0,
+          "description": "Pattern references arrive in Night 4. Any key is refused."
+        }
+      }
+    },
+    "sceneStem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "volume",
+        "send",
+        "muted",
+        "solo"
+      ],
+      "properties": {
+        "volume": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "send": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "muted": {
+          "type": "boolean"
+        },
+        "solo": {
+          "type": "boolean"
+        }
       }
     }
   }

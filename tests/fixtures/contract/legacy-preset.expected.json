@@ -1,6 +1,6 @@
 {
     "format": "bckgrnd-msc/project",
-    "version": 1,
+    "version": 2,
     "id": "kept",
     "name": "Kept",
     "updatedAt": "2026-10-21T12:00:00+00:00",
@@ -72,5 +72,293 @@
             "solo": false
         }
     },
-    "patterns": {}
+    "patterns": {},
+    "scenes": {
+        "slots": [
+            {
+                "slot": "full",
+                "name": "Full",
+                "factory": "full",
+                "revision": 1,
+                "params": {
+                    "fx.filter": 1,
+                    "fx.filterQ": 0.85,
+                    "fx.low": 1,
+                    "fx.mid": 1,
+                    "fx.high": 1,
+                    "fx.echoTime": 0.75,
+                    "fx.echoFeedback": 0.3,
+                    "fx.echoReturn": 0.24,
+                    "fx.reverbMix": 0.07,
+                    "fx.reverbDecay": 0.32,
+                    "fx.width": 1,
+                    "fx.stereo": 0.5
+                },
+                "stems": {
+                    "kick": {
+                        "volume": 0.88,
+                        "send": 0,
+                        "muted": false,
+                        "solo": false
+                    },
+                    "clap": {
+                        "volume": 0.42,
+                        "send": 0.05,
+                        "muted": false,
+                        "solo": false
+                    },
+                    "hats": {
+                        "volume": 0.4,
+                        "send": 0.06,
+                        "muted": false,
+                        "solo": false
+                    },
+                    "bass": {
+                        "volume": 0.9,
+                        "send": 0,
+                        "muted": false,
+                        "solo": false
+                    },
+                    "stab": {
+                        "volume": 0.24,
+                        "send": 0.16,
+                        "muted": false,
+                        "solo": false
+                    },
+                    "lead": {
+                        "volume": 0.2,
+                        "send": 0.3,
+                        "muted": false,
+                        "solo": false
+                    },
+                    "pad": {
+                        "volume": 0.16,
+                        "send": 0.2,
+                        "muted": false,
+                        "solo": false
+                    },
+                    "arp": {
+                        "volume": 0.22,
+                        "send": 0.28,
+                        "muted": false,
+                        "solo": false
+                    }
+                },
+                "patterns": {}
+            },
+            {
+                "slot": "sparse",
+                "name": "Sparse",
+                "factory": "sparse",
+                "revision": 1,
+                "params": {
+                    "fx.filter": 1,
+                    "fx.filterQ": 0.85,
+                    "fx.low": 1,
+                    "fx.mid": 1,
+                    "fx.high": 1,
+                    "fx.echoTime": 0.75,
+                    "fx.echoFeedback": 0.3,
+                    "fx.echoReturn": 0.24,
+                    "fx.reverbMix": 0.14,
+                    "fx.reverbDecay": 0.32,
+                    "fx.width": 1,
+                    "fx.stereo": 0.5
+                },
+                "stems": {
+                    "kick": {
+                        "volume": 0.88,
+                        "send": 0,
+                        "muted": true,
+                        "solo": false
+                    },
+                    "clap": {
+                        "volume": 0.42,
+                        "send": 0.05,
+                        "muted": true,
+                        "solo": false
+                    },
+                    "hats": {
+                        "volume": 0.4,
+                        "send": 0.06,
+                        "muted": false,
+                        "solo": false
+                    },
+                    "bass": {
+                        "volume": 0.765,
+                        "send": 0,
+                        "muted": false,
+                        "solo": false
+                    },
+                    "stab": {
+                        "volume": 0.24,
+                        "send": 0.16,
+                        "muted": true,
+                        "solo": false
+                    },
+                    "lead": {
+                        "volume": 0.2,
+                        "send": 0.3,
+                        "muted": true,
+                        "solo": false
+                    },
+                    "pad": {
+                        "volume": 0.16,
+                        "send": 0.2,
+                        "muted": false,
+                        "solo": false
+                    },
+                    "arp": {
+                        "volume": 0.22,
+                        "send": 0.28,
+                        "muted": true,
+                        "solo": false
+                    }
+                },
+                "patterns": {}
+            },
+            {
+                "slot": "build",
+                "name": "Build",
+                "factory": "build",
+                "revision": 1,
+                "params": {
+                    "fx.filter": 0.62,
+                    "fx.filterQ": 1.6,
+                    "fx.low": 0.7,
+                    "fx.mid": 1,
+                    "fx.high": 1,
+                    "fx.echoTime": 0.75,
+                    "fx.echoFeedback": 0.42,
+                    "fx.echoReturn": 0.24,
+                    "fx.reverbMix": 0.12,
+                    "fx.reverbDecay": 0.32,
+                    "fx.width": 1,
+                    "fx.stereo": 0.5
+                },
+                "stems": {
+                    "kick": {
+                        "volume": 0.66,
+                        "send": 0,
+                        "muted": false,
+                        "solo": false
+                    },
+                    "clap": {
+                        "volume": 0.42,
+                        "send": 0.05,
+                        "muted": false,
+                        "solo": false
+                    },
+                    "hats": {
+                        "volume": 0.4,
+                        "send": 0.06,
+                        "muted": false,
+                        "solo": false
+                    },
+                    "bass": {
+                        "volume": 0.405,
+                        "send": 0,
+                        "muted": false,
+                        "solo": false
+                    },
+                    "stab": {
+                        "volume": 0.192,
+                        "send": 0.16,
+                        "muted": false,
+                        "solo": false
+                    },
+                    "lead": {
+                        "volume": 0.13999999999999999,
+                        "send": 0.3,
+                        "muted": false,
+                        "solo": false
+                    },
+                    "pad": {
+                        "volume": 0.14400000000000002,
+                        "send": 0.2,
+                        "muted": false,
+                        "solo": false
+                    },
+                    "arp": {
+                        "volume": 0.22,
+                        "send": 0.28,
+                        "muted": false,
+                        "solo": false
+                    }
+                },
+                "patterns": {}
+            },
+            {
+                "slot": "drop",
+                "name": "Drop",
+                "factory": "drop",
+                "revision": 1,
+                "params": {
+                    "fx.filter": 1,
+                    "fx.filterQ": 0.85,
+                    "fx.low": 1,
+                    "fx.mid": 1,
+                    "fx.high": 1,
+                    "fx.echoTime": 0.75,
+                    "fx.echoFeedback": 0.25,
+                    "fx.echoReturn": 0.24,
+                    "fx.reverbMix": 0.05,
+                    "fx.reverbDecay": 0.32,
+                    "fx.width": 1,
+                    "fx.stereo": 0.5
+                },
+                "stems": {
+                    "kick": {
+                        "volume": 0.88,
+                        "send": 0,
+                        "muted": false,
+                        "solo": false
+                    },
+                    "clap": {
+                        "volume": 0.42,
+                        "send": 0.05,
+                        "muted": false,
+                        "solo": false
+                    },
+                    "hats": {
+                        "volume": 0.4,
+                        "send": 0.06,
+                        "muted": false,
+                        "solo": false
+                    },
+                    "bass": {
+                        "volume": 0.9,
+                        "send": 0,
+                        "muted": false,
+                        "solo": false
+                    },
+                    "stab": {
+                        "volume": 0.24,
+                        "send": 0.16,
+                        "muted": false,
+                        "solo": false
+                    },
+                    "lead": {
+                        "volume": 0.2,
+                        "send": 0.3,
+                        "muted": false,
+                        "solo": false
+                    },
+                    "pad": {
+                        "volume": 0.12,
+                        "send": 0.2,
+                        "muted": false,
+                        "solo": false
+                    },
+                    "arp": {
+                        "volume": 0.187,
+                        "send": 0.28,
+                        "muted": false,
+                        "solo": false
+                    }
+                },
+                "patterns": {}
+            }
+        ]
+    }
 }

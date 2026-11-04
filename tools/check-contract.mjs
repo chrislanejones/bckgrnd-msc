@@ -58,7 +58,7 @@ for (const file of readdirSync(fixtures).filter((f) => f.endsWith('.input.json')
 for (const summary of library.tracks) {
   const fresh = contract.projectFromTrack(summary);
   const again = contract.migrateProject(JSON.parse(JSON.stringify(fresh)), lookup);
-  if (!contract.sameMusic(fresh, again)) {
+  if (!contract.sameMusic(fresh, again) || !isDeepStrictEqual(fresh.scenes, again.scenes)) {
     failed += 1;
     console.log(`FAIL  fresh project for ${summary.id} does not round-trip`);
   }

@@ -1,0 +1,79 @@
+{
+  "$comment": "Scene slots and factory recipes, read by frontend/lib/contract.ts, App\\Support\\Project\\Contract and engine-core/tests. sceneVector is both the list of parameters a scene holds and the order of indices 32..43 of the engine's scene vector (docs/NIGHT3_PROTOCOL.md). A recipe is relative to the track: scale multiplies the track's own level for that stem, cut mutes it, and a stem not listed keeps the track's level. Params not listed take their registry default.",
+  "contract": "bckgrnd-msc/scenes",
+  "version": 1,
+  "slots": ["full", "sparse", "build", "drop"],
+  "sceneVector": [
+    "fx.filter",
+    "fx.filterQ",
+    "fx.low",
+    "fx.mid",
+    "fx.high",
+    "fx.echoTime",
+    "fx.echoFeedback",
+    "fx.echoReturn",
+    "fx.reverbMix",
+    "fx.reverbDecay",
+    "fx.width",
+    "fx.stereo"
+  ],
+  "factory": [
+    {
+      "id": "full",
+      "name": "Full",
+      "description": "The track as written: every part at its own level, effects at their defaults.",
+      "stems": {},
+      "params": {}
+    },
+    {
+      "id": "sparse",
+      "name": "Sparse",
+      "description": "The breakdown. Hats, bass and pad carry it; the kick, clap and top parts step out.",
+      "stems": {
+        "kick": { "cut": true },
+        "clap": { "cut": true },
+        "stab": { "cut": true },
+        "lead": { "cut": true },
+        "arp": { "cut": true },
+        "pad": { "scale": 1 },
+        "bass": { "scale": 0.85 }
+      },
+      "params": {
+        "fx.reverbMix": 0.14
+      }
+    },
+    {
+      "id": "build",
+      "name": "Build",
+      "description": "Reduce the bass, keep the hats, and darken the mix before the return.",
+      "stems": {
+        "bass": { "scale": 0.45 },
+        "kick": { "scale": 0.75 },
+        "lead": { "scale": 0.7 },
+        "stab": { "scale": 0.8 },
+        "pad": { "scale": 0.9 }
+      },
+      "params": {
+        "fx.filter": 0.62,
+        "fx.filterQ": 1.6,
+        "fx.low": 0.7,
+        "fx.echoFeedback": 0.42,
+        "fx.reverbMix": 0.12
+      }
+    },
+    {
+      "id": "drop",
+      "name": "Drop",
+      "description": "The return. Kick and bass back at full, the filter open, the lead and stab back in, the pad tucked under.",
+      "stems": {
+        "pad": { "scale": 0.75 },
+        "arp": { "scale": 0.85 }
+      },
+      "params": {
+        "fx.filter": 1,
+        "fx.echoFeedback": 0.25,
+        "fx.reverbMix": 0.05
+      }
+    }
+  ]
+}

@@ -17,7 +17,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { engine } from './engine';
 import type { Deck as DeckId } from './engine';
 import { emptyFlags, fetchLibrary, fetchTrack } from './api';
-import { defaultSend, fixedDefault, projectFromTrack, sameMusic, type ProjectV1 } from './contract';
+import { defaultSend, fixedDefault, projectFromTrack, sameMusic, type Project } from './contract';
 import { STEM_ORDER, STEPS } from './stems';
 import type { LibraryResponse, Mix, StemId, TrackArrangement, TrackSummary } from './types';
 
@@ -576,11 +576,11 @@ export function useInstrument() {
   // ---- The project the screen describes -----------------------------------
 
   /**
-   * The current mix as a version 1 project. Nothing saves it yet; it is what the save
+   * The current mix as a project. Nothing saves it yet; it is what the save
    * indicator compares against the track as written, so the transport can say
    * truthfully whether there is anything a reload would lose.
    */
-  const project: ProjectV1 | null = useMemo(() => {
+  const project: Project | null = useMemo(() => {
     if (!track || !vols) return null;
     const p = projectFromTrack(track);
     p.params['transport.bpm'] = bpm;

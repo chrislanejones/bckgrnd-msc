@@ -11,10 +11,11 @@
  */
 
 import registry from '../../contracts/parameters.json';
+import scenesContract from '../../contracts/scenes.json';
 import type { StemId, TrackArrangement, TrackSummary } from './types';
 
 export const PROJECT_FORMAT = 'bckgrnd-msc/project';
-export const PROJECT_VERSION = 1;
+export const PROJECT_VERSION = 2;
 
 type Option = { value: number; label: string };
 
@@ -113,9 +114,42 @@ export function trackDefault(id: ParamId, track: TrackSummary): number {
 
 export type StemSettings = { volume: number; send: number; muted: boolean; solo: boolean };
 
-export type ProjectV1 = {
+/** The four scene slots, in order (contracts/scenes.json). */
+export const SCENE_SLOTS = ['full', 'sparse', 'build', 'drop'] as const;
+export type SceneSlotId = (typeof SCENE_SLOTS)[number];
+
+/** The parameters a scene holds, in the engine's scene-vector order. */
+export const SCENE_PARAMS = scenesContract.sceneVector as ParamId[];
+
+type FactoryRecipe = {
+  id: string;
+  name: string;
+  description: string;
+  stems: Partial<Record<StemId, { scale?: number; cut?: boolean }>>;
+  params: Partial<Record<ParamId, number>>;
+};
+export const FACTORY_SCENES = scenesContract.factory as FactoryRecipe[];
+
+/**
+ * A stored scene: a complete snapshot of the mix (every stem, every scene parameter).
+ * `revision` goes up on every overwrite, so a queued launch can pin what it plays.
+ */
+export type Scene = {
+  slot: SceneSlotId;
+  name: string;
+  factory: string;
+  revision: number;
+  params: Record<ParamId, number>;
+  stems: Record<StemId, StemSettings>;
+  /** Pattern references arrive in Night 4. Empty until then. */
+  patterns: Record<string, never>;
+};
+
+export type Scenes = { slots: Scene[] };
+
+export type Project = {
   format: typeof PROJECT_FORMAT;
-  version: 1;
+  version: typeof PROJECT_VERSION;
   id?: string;
   name: string;
   createdAt?: string;
@@ -123,14 +157,50 @@ export type ProjectV1 = {
   trackId: string;
   params: Record<ParamId, number>;
   stems: Record<StemId, StemSettings>;
-  /** Reserved for pattern edits. Empty in version 1. */
+  /** Reserved for pattern edits (Night 4). Empty. */
   patterns: Record<string, never>;
+  scenes: Scenes;
 };
 
 const PROJECT_PARAMS = PARAMETERS.filter((p) => p.scope === 'project').map((p) => p.id as ParamId);
 
+/**
+ * One factory scene for a track, built from its recipe relative to the track's own
+ * mix: `scale` multiplies the track's level, `cut` mutes the stem, anything not
+ * listed keeps the track's level and the registry default. Mirrors
+ * `Contract::factoryScene()`.
+ */
+export function factoryScene(
+  track: TrackSummary | TrackArrangement,
+  recipeId: string,
+  slot: SceneSlotId,
+  revision = 1,
+): Scene {
+  const recipe = FACTORY_SCENES.find((r) => r.id === recipeId);
+  if (!recipe) throw new Error(`No factory scene ${recipeId}`);
+  const params = {} as Record<ParamId, number>;
+  for (const id of SCENE_PARAMS) params[id] = recipe.params[id] ?? fixedDefault(id);
+  const stems = {} as Record<StemId, StemSettings>;
+  for (const id of STEMS) {
+    const rule = recipe.stems[id] ?? {};
+    const level = track.mix[id] ?? 0.8;
+    stems[id] = {
+      volume: Math.max(0, Math.min(1, level * (rule.scale ?? 1))),
+      send: defaultSend(id),
+      muted: Boolean(rule.cut ?? false),
+      solo: false,
+    };
+  }
+  return { slot, name: recipe.name, factory: recipeId, revision, params, stems, patterns: {} };
+}
+
+/** The four factory scenes for a track: each slot gets the recipe of the same name. */
+export function factoryScenes(track: TrackSummary | TrackArrangement): Scenes {
+  return { slots: SCENE_SLOTS.map((slot) => factoryScene(track, slot, slot)) };
+}
+
 /** A fresh project: the track as written, every parameter at its default. */
-export function projectFromTrack(track: TrackSummary | TrackArrangement): ProjectV1 {
+export function projectFromTrack(track: TrackSummary | TrackArrangement): Project {
   const params = {} as Record<ParamId, number>;
   for (const id of PROJECT_PARAMS) params[id] = trackDefault(id, track);
   const stems = {} as Record<StemId, StemSettings>;
@@ -145,6 +215,106 @@ export function projectFromTrack(track: TrackSummary | TrackArrangement): Projec
     params,
     stems,
     patterns: {},
+    scenes: factoryScenes(track),
+  };
+}
+
+/** Whether a value is one the parameter accepts as written (refused, not clamped). */
+function inRange(spec: ParameterSpec, value: unknown): value is number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return false;
+  if (spec.kind === 'enum') return (spec.options ?? []).some((o) => Math.abs(o.value - value) < 1e-9);
+  return (spec.min ?? -Infinity) <= value && value <= (spec.max ?? Infinity);
+}
+
+const sameKeys = (o: Loose, keys: readonly string[]) => {
+  const k = Object.keys(o);
+  return k.length === keys.length && k.every((key, i) => key === keys[i]);
+};
+const sameKeySet = (o: Loose, keys: readonly string[]) => {
+  const k = Object.keys(o);
+  return k.length === keys.length && keys.every((key) => k.includes(key));
+};
+
+/**
+ * Read version 2 scenes strictly. Every slot present, in order, complete; any
+ * unknown key, wrong type, out-of-range value or pattern reference refuses the whole
+ * set. Nothing is clamped or filled. Mirrors `Contract::readScenes()`, error text
+ * included.
+ */
+export function readScenes(raw: unknown): Scenes {
+  const fail = (why: string): never => {
+    throw new Error(`Scenes are malformed: ${why}`);
+  };
+  if (!isObj(raw) || !sameKeys(raw, ['slots'])) fail('expected an object with only "slots"');
+  const slots = (raw as Loose).slots;
+  if (!Array.isArray(slots) || slots.length !== SCENE_SLOTS.length) fail(`expected ${SCENE_SLOTS.length} slots`);
+  const keys = ['slot', 'name', 'factory', 'revision', 'params', 'stems', 'patterns'];
+  const factoryIds = FACTORY_SCENES.map((r) => r.id);
+  return {
+    slots: (slots as unknown[]).map((scene, i) => {
+      const slot = SCENE_SLOTS[i]!;
+      if (!isObj(scene)) fail(`slot ${slot} is not an object`);
+      const sc = scene as Loose;
+      const present = Object.keys(sc);
+      const extra = present.filter((k) => !keys.includes(k));
+      const missing = keys.filter((k) => !present.includes(k));
+      if (extra.length || missing.length) {
+        fail(`slot ${slot} has keys ${JSON.stringify(extra)} and lacks ${JSON.stringify(missing)}`);
+      }
+      if (sc.slot !== slot) fail(`slot ${i} should be ${slot}`);
+      if (typeof sc.name !== 'string' || sc.name === '' || [...sc.name].length > 40) {
+        fail(`slot ${slot} needs a name of 1 to 40 characters`);
+      }
+      if (typeof sc.factory !== 'string' || !factoryIds.includes(sc.factory)) {
+        fail(`slot ${slot} names an unknown factory scene`);
+      }
+      if (typeof sc.revision !== 'number' || !Number.isInteger(sc.revision) || sc.revision < 1) {
+        fail(`slot ${slot} needs a whole-number revision of at least 1`);
+      }
+      // PHP reads {} and [] alike, so both are accepted as "no patterns".
+      const pats = sc.patterns;
+      const emptyPatterns = (isObj(pats) && Object.keys(pats).length === 0) || (Array.isArray(pats) && pats.length === 0);
+      if (!emptyPatterns) fail(`slot ${slot} refers to patterns, which this version does not support`);
+
+      if (!isObj(sc.params) || !sameKeySet(sc.params, SCENE_PARAMS)) {
+        fail(`slot ${slot} must hold exactly the scene parameters`);
+      }
+      const params = {} as Record<ParamId, number>;
+      for (const id of SCENE_PARAMS) {
+        const value = (sc.params as Loose)[id];
+        if (!inRange(param(id), value)) fail(`slot ${slot} has ${id} out of range`);
+        params[id] = value as number;
+      }
+
+      if (!isObj(sc.stems) || !sameKeys(sc.stems, STEMS)) fail(`slot ${slot} must hold every stem, in order`);
+      const stems = {} as Record<StemId, StemSettings>;
+      for (const id of STEMS) {
+        const entry = (sc.stems as Loose)[id];
+        if (!isObj(entry) || !sameKeys(entry, ['volume', 'send', 'muted', 'solo'])) {
+          fail(`slot ${slot} stem ${id} must have volume, send, muted and solo`);
+        }
+        const e = entry as Loose;
+        for (const level of ['volume', 'send'] as const) {
+          const v = e[level];
+          if (typeof v !== 'number' || !Number.isFinite(v) || v < 0 || v > 1) {
+            fail(`slot ${slot} stem ${id} ${level} must be a number from 0 to 1`);
+          }
+        }
+        if (typeof e.muted !== 'boolean' || typeof e.solo !== 'boolean') {
+          fail(`slot ${slot} stem ${id} muted and solo must be true or false`);
+        }
+        stems[id] = { volume: e.volume as number, send: e.send as number, muted: e.muted as boolean, solo: e.solo as boolean };
+      }
+      return {
+        slot,
+        name: sc.name as string,
+        factory: sc.factory as string,
+        revision: sc.revision as number,
+        params,
+        stems,
+        patterns: {},
+      };
+    }),
   };
 }
 
@@ -163,10 +333,12 @@ type Loose = Record<string, unknown>;
 const isObj = (v: unknown): v is Loose => typeof v === 'object' && v !== null && !Array.isArray(v);
 
 /**
- * Read any supported document into a complete version 1 project.
+ * Read any supported document into a complete version 2 project.
  *
- * Accepts version 1, and a legacy preset (no `format`). Refuses an unknown format or
- * a newer version rather than half-reading it. `lookup` resolves the track, so a
+ * Accepts version 2, version 1 (migrated by adding the track's factory scenes and
+ * changing nothing else), and a legacy preset (no `format`). Refuses an unknown
+ * format or a newer version rather than half-reading it, and refuses a version 2
+ * document whose scenes do not read cleanly. `lookup` resolves the track, so a
  * project for a track this build does not have is refused too.
  *
  * Mirrors `Contract::migrate()` in PHP; `tools/check-contract.mjs` runs both against
@@ -175,7 +347,7 @@ const isObj = (v: unknown): v is Loose => typeof v === 'object' && v !== null &&
 export function migrateProject(
   raw: unknown,
   lookup: (id: string) => TrackSummary | undefined,
-): ProjectV1 {
+): Project {
   if (!isObj(raw)) throw new Error('A project must be a JSON object.');
   let doc: Loose = raw;
   if (!('format' in doc)) doc = fromLegacyPreset(doc);
@@ -191,6 +363,8 @@ export function migrateProject(
       `Project version ${version} is newer than this app understands (${PROJECT_VERSION}).`,
     );
   }
+  if (version === 1 && 'scenes' in doc) throw new Error('A version 1 project cannot carry scenes.');
+  if (version >= 2 && !('scenes' in doc)) throw new Error('Scenes are missing from a version 2 project.');
 
   const track = lookup(String(doc.trackId ?? ''));
   if (!track) throw new Error(`Unknown track: ${String(doc.trackId ?? '')}`);
@@ -214,7 +388,11 @@ export function migrateProject(
     };
   }
 
-  const out: ProjectV1 = {
+  // A version 1 project gets the track's factory scenes. Nothing is applied: the
+  // working mix above is what it was.
+  const scenes = 'scenes' in doc ? readScenes(doc.scenes) : fresh.scenes;
+
+  const out: Project = {
     format: PROJECT_FORMAT,
     version: PROJECT_VERSION,
     name: typeof doc.name === 'string' && doc.name !== '' ? doc.name : track.name,
@@ -222,6 +400,7 @@ export function migrateProject(
     params,
     stems,
     patterns: {},
+    scenes,
   };
   if (typeof doc.id === 'string') out.id = doc.id;
   if (typeof doc.createdAt === 'string') out.createdAt = doc.createdAt;
@@ -238,10 +417,11 @@ export function migrateProject(
     params: out.params,
     stems: out.stems,
     patterns: out.patterns,
+    scenes: out.scenes,
   };
 }
 
-/** A legacy preset as a version 1 document. Effects were never saved, so they default. */
+/** A legacy preset as a version 1 document (then migrated). Effects were never saved, so they default. */
 function fromLegacyPreset(preset: Loose): Loose {
   const mix = isObj(preset.mix) ? preset.mix : {};
   const muted = isObj(preset.muted) ? preset.muted : {};
@@ -259,7 +439,7 @@ function fromLegacyPreset(preset: Loose): Loose {
   if (preset.swing !== undefined) params['transport.swing'] = Number(preset.swing);
   return {
     format: PROJECT_FORMAT,
-    version: PROJECT_VERSION,
+    version: 1,
     ...(preset.id !== undefined ? { id: String(preset.id) } : {}),
     name: typeof preset.name === 'string' ? preset.name : '',
     ...(preset.updatedAt !== undefined ? { updatedAt: String(preset.updatedAt) } : {}),
@@ -271,7 +451,7 @@ function fromLegacyPreset(preset: Loose): Loose {
 }
 
 /** Whether two projects describe the same music. Names and timestamps are ignored. */
-export function sameMusic(a: ProjectV1, b: ProjectV1): boolean {
+export function sameMusic(a: Project, b: Project): boolean {
   if (a.trackId !== b.trackId) return false;
   for (const id of PROJECT_PARAMS) if (Math.abs(a.params[id] - b.params[id]) > 1e-6) return false;
   for (const id of STEMS) {
