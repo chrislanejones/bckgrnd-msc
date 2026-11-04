@@ -25,6 +25,7 @@ final class ArrangedTrack implements \JsonSerializable
      * @param  array<int, NoteEvent|null>  $arp
      * @param  array<string, array<int, float>>  $perc  256-step lanes keyed by
      *                                                  instrument; silent ones omitted
+     * @param  list<array<string, mixed>>  $fills  one-bar drum fills (see Fills)
      */
     public function __construct(
         public readonly string $id,
@@ -46,6 +47,7 @@ final class ArrangedTrack implements \JsonSerializable
         public readonly string $section = '',
         public readonly string $style = '',
         public readonly array $perc = [],
+        public readonly array $fills = [],
     ) {}
 
     public function jsonSerialize(): array
@@ -74,6 +76,9 @@ final class ArrangedTrack implements \JsonSerializable
             // hits are sent, and the engine reads a missing key, or a missing `perc`,
             // as silence, so arrangements from before it existed still load.
             'perc' => (object) $this->perc,
+            // One-bar drum fills (Fills), each a 16-step replacement for the drum
+            // lanes it lists. The engine reads a missing `fills` as none.
+            'fills' => $this->fills,
         ];
     }
 

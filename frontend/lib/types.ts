@@ -36,6 +36,16 @@ export type TrackSummary = {
 };
 
 /** A fully arranged track, exactly what the engine deserialises. */
+/** A one-bar drum fill, prepared in PHP (app/Support/Music/Fills.php). */
+export type Fill = {
+  id: string;
+  name: string;
+  kick: number[];
+  clap: number[];
+  hat: number[];
+  hatOpen: number[];
+};
+
 export type TrackArrangement = TrackSummary & {
   kick: number[];
   clap: number[];
@@ -51,6 +61,8 @@ export type TrackArrangement = TrackSummary & {
    * `rim`, `congaHi`, `congaLo`). Only lanes with hits are sent.
    */
   perc?: Record<string, number[]>;
+  /** One-bar drum fills. Missing on arrangements exported before Night 3. */
+  fills?: Fill[];
 };
 
 export type LibraryResponse = {

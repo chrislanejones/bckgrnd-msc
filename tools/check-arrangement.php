@@ -25,6 +25,7 @@ require __DIR__.'/../app/Support/Music/NoteEvent.php';
 require __DIR__.'/../app/Support/Music/Phrase.php';
 require __DIR__.'/../app/Support/Music/Track.php';
 require __DIR__.'/../app/Support/Music/ArrangedTrack.php';
+require __DIR__.'/../app/Support/Music/Fills.php';
 require __DIR__.'/../app/Support/Music/Arranger.php';
 require __DIR__.'/../app/Support/Music/Library.php';
 

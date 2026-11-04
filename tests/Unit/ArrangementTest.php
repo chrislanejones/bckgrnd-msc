@@ -168,7 +168,7 @@ final class ArrangementTest extends TestCase
     {
         $json = Library::findOrFail('rain')->arrange()->jsonSerialize();
         $this->assertSame(
-            ['id', 'name', 'detail', 'kind', 'section', 'style', 'bpm', 'swing', 'mix', 'kick', 'clap', 'hat', 'hatOpen', 'bass', 'stab', 'lead', 'pad', 'arp', 'perc'],
+            ['id', 'name', 'detail', 'kind', 'section', 'style', 'bpm', 'swing', 'mix', 'kick', 'clap', 'hat', 'hatOpen', 'bass', 'stab', 'lead', 'pad', 'arp', 'perc', 'fills'],
             array_keys($json),
         );
         $first = array_values(array_filter($json['pad']))[0];

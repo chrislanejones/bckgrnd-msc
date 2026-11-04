@@ -134,6 +134,7 @@ final class Arranger
             section: $t->section,
             style: $t->style,
             perc: $perc,
+            fills: Fills::forTrack($t),
         );
     }
 }
