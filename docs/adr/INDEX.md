@@ -29,3 +29,5 @@ and is marked `(backfilled)`.
 | [013](013-parameter-smoothing-lives-in-the-engine.md) | Parameter smoothing lives in the engine, per parameter, with control-rate filter/EQ and a snap on silence | draft | 2026-11-03 |
 | [014](014-scenes-are-complete-snapshots-in-project-version-2.md) | Scenes are four complete snapshots in project version 2; the active scene is never saved | draft | 2026-11-04 |
 | [015](015-the-engine-schedules-musical-changes-gestures-are-overrides.md) | The engine commits scenes at an onset from musical intent; held effects are tokened overrides on the base | draft | 2026-11-04 |
+| [016](016-pattern-edits-are-whole-lane-revisions-applied-at-a-boundary.md) | Pattern edits are whole-lane revisions (project v3), swapped in by the engine at a bar boundary; undo is one entry per gesture | draft | 2026-11-04 |
+| [017](017-php-writes-variations-static-build-uses-a-hash-matched-catalog.md) | PHP writes variations; the static build serves a catalog matched by source hash and never substitutes | draft | 2026-11-04 |

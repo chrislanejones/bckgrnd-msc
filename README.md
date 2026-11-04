@@ -77,7 +77,7 @@ read `netlify.toml`.
 | Library (left) | Tracks by section and style, with a star to keep favorites (stored in this browser only). On narrower screens it opens from the button in the transport. |
 | Performance area (middle) | The two decks, the scene strip, the stems, the jog wheel and pads, loop, Release FX and Panic, and mixing to the next track. |
 | Inspector (right) | **Master**: the effects rack, all knobs except the echo's note divisions. Select a stem's name to see that stem instead: its fader, its echo send, Solo and Cut. |
-| Pattern drawer (bottom) | Opened from **Pattern** or the inspector. One stem's pattern across all 16 bars, with the playhead. Read-only for now. Escape closes it. |
+| Pattern editor (bottom) | Opened from **Pattern** or the inspector. Edit the drums, bass and lead one bar at a time while the track plays; see [Editing patterns](#editing-patterns). Escape closes it. |
 
 On a phone the same panels show one view at a time: **Perform**, **Mix** and
 **Edit**, from the tabs at the bottom. The transport stays at the top.
@@ -224,6 +224,40 @@ and it reads **B · Modified**; **Update B** stores the change. A works the same
 comparison** goes back to the mix from before the first capture. No scene is
 overwritten either way, and loading another track closes the comparison.
 
+## Editing patterns
+
+The pattern editor changes the track itself, not just the mix. Edits land in the
+music at the next bar while it plays, and at once while stopped. The playhead never
+jumps to what you're editing.
+
+The header says three things: what you're **Editing** (lane, bar, part), what's
+**Playing**, and the **Change**: *Queued for bar 6*, then *In the music*.
+**Follow playback** keeps the editor on the playing bar until you pick a bar or
+start an edit. **Hear bar** jumps there and loops it.
+
+| Lane | How |
+|---|---|
+| Drums (kick, clap, closed and open hat) | Press an empty step to add a hit, a hit to remove it; drag along a row to paint. The velocity row under the grid: drag a bar, or select several (Shift-click, **Select bar**) and **Set together** or **Adjust together**, or type a value. Making a hit quiet never removes it. |
+| Bass, Lead | Click to add a note, drag to move, drag its right edge to change its length; arrow keys nudge, Alt+arrows resize. A note can't land on another one. Chords stay chords. |
+| Stab, Pad, Arp | Shown with their chords, not editable yet. |
+
+**Copy**, **Paste**, **Duplicate to** and **Clear** say what they act on, for one
+lane or all four drums. **Undo** and **Redo** (Ctrl/Cmd+Z, Shift+Ctrl/Cmd+Z) step
+back through every edit, one gesture at a time, even while the track plays.
+
+**Humanize** moves velocities a little: seeded, with an amount, and it keeps the
+accents if you ask. **Vary** asks the PHP side for a new take on the four-bar part
+on screen: Subtle, Moderate or Adventurous, by seed. The same seed gives the same
+take. Bass and lead vary only in rhythm, because no track records its harmony yet.
+Either way you hear a **preview** first: **Keep** makes it one undoable edit,
+**Revert** puts the original back, and the mix you set while listening stays.
+**Lock lane** (and Lock on a hit or note) keeps it out of Humanize and Vary. The
+static build can only vary the tracks as written, and says so for a phrase you've
+changed.
+
+A scene captured after editing remembers those lanes and brings them back when it
+launches. Nothing is saved to a file yet (Night 5).
+
 ## The decks
 
 Two decks, A and B, each with a waveform drawn from the arrangement. One is live; the
@@ -358,10 +392,10 @@ files on disk ([ADR-002](docs/adr/002-laravel-runs-stateless.md)).
 |---|---|
 | `pnpm run build:engine` | Rust engine → `public/wasm/` via `wasm-pack`. |
 | `pnpm run build` | Worklet and app → `public/build/`. |
-| `pnpm run build:static` | The PHP-free shell, `public/index.html`. |
+| `pnpm run build:static` | The PHP-free shell, `public/index.html`, and the variation catalog. |
 | `pnpm run build:netlify` | Engine, app and static export, assembled into `dist/`. |
 | `pnpm run dev` | Vite dev server with the worklet on watch. |
-| `composer test` | PHPUnit, Rust tests, parity, arrangement, the contract, the scene logic, `verify:audio` and `verify:ui`. The last two need the app running on `:8080`. |
+| `composer test` | PHPUnit, Rust tests, parity, arrangement, the contract, the scene and editing logic, `verify:audio`, `verify:ui` and `verify:editor`. The last three need the app running on `:8080`. |
 
 ## Checks
 
@@ -374,9 +408,11 @@ files on disk ([ADR-002](docs/adr/002-laravel-runs-stateless.md)).
 | `composer test:php` | PHPUnit: the song form for every track, the API, the static export matching the API, presets, and the project contract. |
 | `pnpm run check:contract` | The UI's project reader against the same fixtures as PHP's, scenes included. |
 | `pnpm run check:scenes` | The scene logic: the vector order, captures copied and not shared, revisions, and a settled request staying settled. |
+| `pnpm run check:editing` | Pattern editing: undo exactness, one revision per gesture, the velocity floor, paste and duplicate rules, chords, humanize determinism and locks. |
 | `pnpm run verify:ui` | The layout at five widths, keyboard focus, the stem states, the inspector, the drawer and the phone views. |
-| `pnpm run verify:audio` | Drives the real worklet in Chromium and asserts audio. |
-| `pnpm run verify:static` | The same, against the static build, plus no API calls. |
+| `pnpm run verify:editor` | The pattern editor in Chromium: edit bar 9 while bar 2 plays, undo, duplicate, a bass note, humanize and variation preview/keep/revert, scenes with lanes, the phone's eight-step view. |
+| `pnpm run verify:audio` | Drives the real worklet in Chromium and asserts audio, pattern edits landing on the bar included. |
+| `pnpm run verify:static` | The same, against the static build, plus no API calls and the variation catalog. |
 | `php tools/check-arrangement.php` | The 16-bar form. |
 | `php tools/compare-with-original.php tools/reference.json` | Parity with `old/`. |
 

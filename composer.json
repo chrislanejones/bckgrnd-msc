@@ -69,17 +69,21 @@
             "@test:arrangement",
             "@test:contract",
             "@test:scenes",
+            "@test:editing",
             "@test:audio",
-            "@test:ui"
+            "@test:ui",
+            "@test:editor"
         ],
         "test:php": "@php vendor/bin/phpunit",
         "test:rust": "cargo test --manifest-path engine-core/Cargo.toml",
         "test:parity": "@php tools/compare-with-original.php tools/reference.json",
         "test:audio": "pnpm run verify:audio",
         "test:ui": "pnpm run verify:ui",
+        "test:editor": "pnpm run verify:editor",
         "test:arrangement": "@php tools/check-arrangement.php",
         "test:contract": "node tools/check-contract.mjs",
         "test:scenes": "node tools/check-scenes.mjs",
+        "test:editing": "node tools/check-editing.mjs",
         "build:library": "@php tools/export-library.php public/library"
     },
     "extra": {

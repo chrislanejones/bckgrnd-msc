@@ -134,6 +134,38 @@ Picked up from Night 3:
 - **A compact and an expanded mixer** (moved from Night 3), sized around the scene
   strip and the editor drawer.
 
+**Status:** done 11-04-2026, on branch `claude/music-instrument-roadmap-5d70t5`.
+Built:
+- **The editor.** The drawer is now the pattern editor: four drum lanes with paint
+  gestures and a velocity lane, and a piano roll for bass and lead. Stab, pad and arp
+  are shown read-only with their chords intact. Copy, paste, duplicate and clear say
+  their scope, and an inspector takes exact numbers. The header says what is being
+  edited, what is playing and whether the change is in the music yet. Hear Bar is the
+  one explicit way to move the playhead. The phone shows eight real steps at a time.
+- **Contract and engine.** Project version 3 adds `patterns` and `locks`, and scenes
+  carry pinned lanes; the v2→v3 migration changes nothing that plays. Edits are
+  whole-lane revisions that the engine swaps in at the next bar without allocating,
+  in a fixed boundary order. Changed notes are released, not cut (ADR-016).
+- **Undo.** Real pattern undo and redo: one entry per gesture, sent to the engine as a
+  revision.
+- **Humanize.** Velocity only, seeded, always recomputed from the source.
+- **Variations.** Written by PHP (`POST /api/variations`): seeded, range-bound, and
+  respecting locks and anchors. The static build reads a catalog matched by source
+  hash and reports a changed phrase as unavailable (ADR-017). Every variation goes
+  through Preview, Keep or Revert, and Keep is one undo step.
+- **Faders.** Vertical faders with a meter alongside, a home notch and numeric entry.
+
+The working protocol is [NIGHT4_PROTOCOL.md](NIGHT4_PROTOCOL.md).
+
+Not done:
+- **Timing humanize and pitch variation.** Both need the track's key and harmony as
+  data; today melodic variation is rhythm-only and says so.
+- **Editing stab, pad and arp.**
+- **"Randomize mix".**
+- **Timed builds, the last-beat fill, Drop + Crash and stutter.** Still open from the
+  Night 3 list.
+- **The compact and expanded mixer.** The new vertical-fader bank is the start of it.
+
 ## Night 5: projects, undo, export, hardening
 
 - Save, reopen, rename and delete projects. Migrate project v1 and legacy presets

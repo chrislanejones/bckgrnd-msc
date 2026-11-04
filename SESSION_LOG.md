@@ -113,3 +113,60 @@ live performance). Working protocol: `docs/NIGHT3_PROTOCOL.md`.
 Next session: run Chris's listening notes as fixes on this branch, re-run the full gates
 (cargo, PHPUnit, check:contract, check:scenes, typecheck, build, build:static, verify:ui,
 verify:audio, verify:static), then push or merge only on an explicit word.
+
+---
+
+# Night 4 session log
+
+Branch `claude/music-instrument-roadmap-5d70t5` (restarted from main after PR #1
+merged), 11-04-2026. Spec: the Night 4 brief (pattern editing, constrained variation,
+better vertical faders). Working protocol: `docs/NIGHT4_PROTOCOL.md`.
+
+## Order kept
+
+4A vertical faders → 4B contract v3 → engine revisions (4F's engine half) →
+4C/4D editor with real undo → 4E humanize, PHP variations, preview/keep/revert → 4F
+scenes with lanes and acceptance tests. The engine half of 4F moved ahead of the
+editor, because undo before audible, "latest wins" and the boundary order had to be
+testable in Rust before any UI depended on them.
+
+## Decisions
+
+| Decision | Why |
+|---|---|
+| Whole-lane revisions, every touched lane in every revision (ADR-016) | Order-free "latest wins"; an undo is just another revision. |
+| Pattern edits always use bar timing | "Edits apply at the next bar while playing"; Hear Bar is the explicit seek. |
+| A scene captures only lanes the session touched | A scene captured on an unedited track still launches the mix only, as in Night 3. |
+| Variation scope = the four-bar part on screen | Matches the brief's "Bars 9–12", and keeps the static catalog to 3,888 entries. |
+| Melodic variation rhythm-only, said up front | No harmony data; guessing a key would be a substitution the brief forbids. |
+| PHP generates; static build hash-matches (ADR-017) | ADR-001; never substitute a variation for different notes. |
+
+## Found along the way
+
+- **Boot-order bug (fixed):** `init` went through `post`, which flushes coalesced
+  parameters first, so anything moved before the first Play (a pattern edit, a
+  fader) reached the worklet before `init` and the track loads. It was dropped or
+  refused as stale. Found by verify-editor's "an edit made before the first Play is
+  in the music".
+- **SceneStrip focus steal (fixed in 4A):** the menu's focus effect depended on an
+  `onClose` whose identity changed every render.
+- Beat-start cells hid hit fills (CSS specificity). Fixed before the first screenshot
+  review.
+
+## Gates
+
+| Gate | Result |
+|---|---|
+| `cargo test --release` | 251 pass (17 new pattern tests, 1 contract) |
+| `cargo clippy -D warnings`, `cargo fmt --check` | clean |
+| PHPUnit | 240 pass (22 new variation tests) |
+| `check:contract`, `check:scenes`, `check:editing` | pass |
+| `verify:ui` | pass (3/3 after the 4A fixes) |
+| `verify:editor` | pass (3/3) |
+| `verify:audio` | pass, including the two pattern-edit checks |
+| `verify:static` | pass, including the catalog and "unavailable" |
+
+## Skipped or deferred
+
+See the Night 4 entries in `PARKING_LOT.md` and "Not done" under Night 4 in
+`docs/ROADMAP.md`.

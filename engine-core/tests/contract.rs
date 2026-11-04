@@ -139,5 +139,8 @@ fn the_pattern_lanes_and_limits_match_the_engine() {
         assert_eq!(lane["kind"], kind, "{} kind", lane["id"]);
     }
     let order: Vec<&str> = lanes.iter().map(|l| l["id"].as_str().unwrap()).collect();
-    assert_eq!(order, ["kick", "clap", "hat", "hatOpen", "bass", "stab", "lead", "pad", "arp"]);
+    assert_eq!(
+        order,
+        ["kick", "clap", "hat", "hatOpen", "bass", "stab", "lead", "pad", "arp"]
+    );
 }

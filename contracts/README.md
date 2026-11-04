@@ -67,7 +67,8 @@ complete.)
 
 - A missing `params` key or stem field means its default. A project only needs to
   carry what differs, but writers may write everything.
-- `patterns` is reserved for Night 4 and must be empty.
+- In version 2, `patterns` is reserved and must be empty. Version 3 fills it: see
+  [Patterns (version 3)](#patterns-version-3).
 - `scenes` holds four complete snapshots: every stem, every scene parameter. Unlike
   `params`, a scene is never clamped or filled: a malformed one refuses the whole
   set, so a bad scene cannot reach the mix. Which scene is active is not saved.
@@ -83,7 +84,8 @@ complete.)
   "hat": {
     "id": "p-hat", "revision": 3, "lane": "hat", "length": 256,
     "events": [{ "id": "h2", "step": 2, "vel": 0.45 }],
-    "origin": { "kind": "variation", "generator": "php-drums-1", "seed": 42, "sourceRevision": 2 }
+    "origin": { "kind": "variation", "generator": "php-variation-1", "seed": 42, "strength": "moderate",
+                "scope": { "from": 128, "to": 191 }, "sourceRevision": 2, "sourceHash": "9c1e04d2", "mode": "drums" }
   },
   "kick": { "id": "p-kick", "revision": 2, "lane": "kick", "length": 256, "events": [] }
 },

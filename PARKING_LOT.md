@@ -197,3 +197,41 @@ not. Things to settle before or while building it:
 - **Two-finger touch (hold one pad, tap another) has only been emulated.** The fix
   that keeps a touch hold alive when focus moves is pinned by verify-ui, but a real
   device should try hold Filter → tap Drop → release.
+
+## Found during Night 4 (11-04-2026)
+
+- **The kick sub isn't retuned after a bass edit.** The engine tunes the kick's sub
+  to the track's root once, at load (`kick_root_hz`). Editing the bass so that it
+  centers on another note leaves the kick on the written root. Recompute it from the
+  live bass lane at a revision boundary, or decide that the kick follows the track's
+  key, not the bassline.
+- **The deck waveforms and the "silent this bar" stem states still describe the
+  track as written.** `soundingMap` and the deck drawing read the arrangement, not
+  the working patterns. Clear the kick in bar 9 and the kick still says it plays
+  there. Derive both from the working lanes.
+- **The editor drawer covers the scene strip on desktop.** At 1440×1000 the drawer
+  (up to 78% of the height) sits over the scene pads and Fill, so "edit, then launch
+  Drop" means Escape, launch, reopen. The verify-editor walk does exactly that. A
+  layout pass: dock the drawer, or keep the scene pads reachable above it.
+- **Keyboard velocity changes are one undo step per key press.** A drag is one step.
+  Holding an arrow on a velocity bar fills the history. Coalesce key repeats into one
+  entry, as the knobs do (`editHistory` on key-up).
+- **Pattern undo and the mix's edit log are separate.** Revert keeps a fader moved
+  during a preview, as the brief asks. But Ctrl+Z in the editor only steps through
+  pattern edits, and fader moves are still only recorded, never undone, until
+  Night 5's history.
+- **Static variations are coarse.** Three seeds per part and strength, whole parts
+  only, and none around event locks or for edited phrases (each says why). The
+  desktop app has no such limit.
+- **Melodic variation is rhythm-only, and humanize is velocity-only.** No track
+  records its key or chords as data. Pitch variation and timing humanize both wait
+  for harmonic metadata from PHP.
+- **Touch screen readers haven't been tried on the editor.** That covers the drum
+  cells (toggle buttons with roving focus), the velocity sliders, the notes (focusable
+  buttons with arrow keys) and the vertical faders. Add them to the device checklist.
+- **Stab, pad and arp are read-only.** The engine and the contract accept edits to
+  them already (`editable: false` in `contracts/patterns.json` is the only gate). The
+  piano roll needs chord entry first.
+- **The wasm here is a `--no-opt` build (270,638 bytes)** because wasm-opt can't be
+  downloaded in this environment. It isn't comparable to Night 3's 222,709-byte
+  optimized size. Measure the optimized build before release.
