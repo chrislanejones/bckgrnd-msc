@@ -264,9 +264,17 @@ export function stereoLabel(balance: number): string {
     : `Right ${Math.round((balance - 0.5) * 200)}%`;
 }
 
+/** On screen, between the ends, the side is a letter ("R 10 %"), so the amount and its
+    Reset fit under a knob in a three-across rack. Speech keeps the word. */
+function stereoShort(balance: number): { text: string; unit?: string } {
+  const full = stereoLabel(balance);
+  const m = /^(Left|Right) (\d+)%$/.exec(full);
+  return m ? { text: `${m[1][0]} ${m[2]}`, unit: '%' } : { text: full };
+}
+
 export const BALANCE: Mapping = linear(0, 1, {
   center: 0.5,
-  format: (v) => ({ text: stereoLabel(v) }),
+  format: stereoShort,
   speak: (v) => stereoLabel(v),
   parse: (t) => {
     if (/^\s*(c|centre|center|stereo)\s*$/i.test(t)) return 0.5;

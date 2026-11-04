@@ -107,7 +107,7 @@ function echoLive(inst: Instrument): boolean {
 function MasterRack({ inst }: { inst: Instrument }) {
   const { track, effects, setEffect } = inst;
   const echoOn = echoLive(inst);
-  const echoNote = !echoOn ? 'Echo is off' : inst.echo ? 'Held open by the throw' : undefined;
+  const echoNote = !echoOn ? 'Echo is off' : inst.echo ? 'Held open by the throw' : '';
 
   return (
     <>
@@ -151,7 +151,7 @@ function MasterRack({ inst }: { inst: Instrument }) {
             mapping={RESONANCE}
             defaultValue={EFFECT_DEFAULTS['fx.filterQ']}
             onChange={(v) => setEffect('fx.filterQ', v)}
-            note={inst.filter >= 0.999 ? 'Heard as it closes' : undefined}
+            note={inst.filter >= 0.999 ? 'Heard as it closes' : ''}
           />
         </div>
       </fieldset>
@@ -230,7 +230,7 @@ function MasterRack({ inst }: { inst: Instrument }) {
             defaultValue={EFFECT_DEFAULTS['fx.reverbDecay']}
             onChange={(v) => setEffect('fx.reverbDecay', v)}
             disabled={effects['fx.reverbMix'] <= 0}
-            note={effects['fx.reverbMix'] <= 0 ? 'Room is off' : undefined}
+            note={effects['fx.reverbMix'] <= 0 ? 'Room is off' : ''}
           />
         </div>
       </fieldset>
@@ -314,7 +314,7 @@ function StemControls({
           defaultValue={defaultSend(stem)}
           onChange={(v) => inst.setStemSend(stem, v)}
           disabled={!sendsOn}
-          note={sendsOn ? undefined : 'Echo time is off'}
+          note={sendsOn ? '' : 'Echo time is off'}
         />
       </div>
       <div className="inspector-pads">

@@ -1861,12 +1861,16 @@ html[data-control-drag="yes"] * {
   -webkit-user-select: none !important;
 }
 
+/* One knob is a centered column: label, dial, value, Reset, then an optional note.
+   Every part has a fixed height, and the column packs to the top rather than stretching,
+   so dials in the same row always share a line. */
 .knob {
   --knob: 3.5rem;
   user-select: none;
   -webkit-user-select: none;
   display: grid;
   justify-items: center;
+  align-content: start;
   gap: 0.15rem;
   min-width: 0;
 }
@@ -1875,30 +1879,54 @@ html[data-control-drag="yes"] * {
   --knob: 3rem;
 }
 
-.knob-head {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 0.3rem;
-  width: 100%;
-  min-height: 1.35rem;
-}
-
 .knob-label {
+  max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  text-align: center;
 }
 
-/* The reset badge only appears once the knob has moved off its default, but keeps its
-   space so the label never shifts. */
+/* The amount and its Reset share one line, centered under the dial as a pair:
+   "6.4 kHz [reset]". Reset is always there; at the default it is grayed out and inert,
+   so nothing moves when a knob is turned. */
+.knob-readout {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.15rem;
+  max-width: 100%;
+}
+
 .knob-reset {
-  padding: 0.1rem 0.35rem;
-  font-size: 0.5625rem;
+  flex: none;
+  display: grid;
+  place-items: center;
+  /* Level with the digits, not the amount's box: the box keeps room below the baseline
+     for descenders, so the digits' middle sits about 2px above the box's middle. */
+  translate: 0 -0.14rem;
+  width: 1.25rem;
+  height: 1.25rem;
+  padding: 0;
+  border: 1px solid var(--color-line);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--color-muted);
+}
+
+.knob-reset:not(:disabled):hover {
+  border-color: var(--color-acid);
+  color: var(--color-fg);
 }
 
 .knob-reset:disabled {
-  visibility: hidden;
+  opacity: 0.3;
+  cursor: default;
+}
+
+.knob-reset:focus-visible {
+  outline: 2px solid var(--color-acid);
+  outline-offset: 2px;
 }
 
 .knob-dial {
@@ -1964,9 +1992,8 @@ html[data-control-drag="yes"] * {
 }
 
 .knob-value {
-  min-width: 4.5rem;
   min-height: 1.6rem;
-  padding: 0.1rem 0.4rem;
+  padding: 0.1rem 0.2rem;
   border: 1px solid transparent;
   border-radius: 0.4rem;
   background: transparent;
@@ -1984,7 +2011,7 @@ html[data-control-drag="yes"] * {
 }
 
 .knob-edit {
-  width: 4.5rem;
+  width: 4rem;
   min-height: 1.6rem;
   padding: 0.1rem 0.3rem;
   border: 1px solid var(--color-acid);
@@ -2001,12 +2028,17 @@ html[data-control-drag="yes"] * {
   border-color: var(--color-danger);
 }
 
+/* Two lines are always held, empty or not, so a note coming or going (or wrapping in a
+   narrow column) never moves the rack below. */
 .knob-note {
+  max-width: 100%;
+  min-height: 2.4em;
   font-size: 0.625rem;
   font-weight: 600;
   line-height: 1.2;
   color: var(--color-muted);
   text-align: center;
+  text-wrap: balance;
 }
 
 .inspector-setting {
@@ -2063,6 +2095,7 @@ html[data-control-drag="yes"] * {
 .knob-row {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
+  align-items: start;
   gap: var(--space-3) var(--space-2);
 }
 

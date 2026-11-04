@@ -24,6 +24,7 @@
  *   where it started and where it ended, when the gesture is over.
  */
 
+import { RotateCcw } from 'lucide-react';
 import { memo, useCallback, useEffect, useId, useRef, useState } from 'react';
 import type { KeyboardEvent, PointerEvent as ReactPointerEvent } from 'react';
 import { editHistory } from '../lib/history';
@@ -58,7 +59,11 @@ type Props = {
   /** The parameter id finished gestures are recorded under in the edit log. */
   historyId?: string;
   disabled?: boolean;
-  /** A short line under the value, for a state that changes what the knob does. */
+  /**
+   * A short line under the value, for a state that changes what the knob does. Pass ''
+   * while there is nothing to say: the line keeps its space, so the rack does not jump
+   * when a note comes and goes.
+   */
   note?: string;
   size?: 'md' | 'sm';
 };
@@ -378,20 +383,9 @@ export const Knob = memo(function Knob({
       data-value={value}
       data-norm={norm}
     >
-      <div className="knob-head">
-        <label className="control-label knob-label" htmlFor={inputId}>
-          {label}
-        </label>
-        <button
-          type="button"
-          className="badge badge-reset knob-reset"
-          disabled={disabled || !modified}
-          aria-label={`Reset ${label.toLowerCase()}`}
-          onClick={reset}
-        >
-          Reset
-        </button>
-      </div>
+      <label className="control-label knob-label" htmlFor={inputId}>
+        {label}
+      </label>
       <div
         ref={dialRef}
         className="knob-dial"
@@ -454,47 +448,61 @@ export const Knob = memo(function Knob({
           </g>
         </svg>
       </div>
-      {editing ? (
-        <input
-          ref={editRef}
-          className="knob-edit"
-          type="text"
-          inputMode="decimal"
-          aria-label={`${label} value`}
-          aria-invalid={invalid || undefined}
-          value={draft}
-          onChange={(event) => {
-            setDraft(event.target.value);
-            setInvalid(false);
-          }}
-          onKeyDown={(event) => {
-            if (event.key === 'Enter') {
-              event.preventDefault();
-              finishEdit(true);
-            } else if (event.key === 'Escape') {
-              event.preventDefault();
-              event.stopPropagation();
-              finishEdit(false);
-            }
-          }}
-          onBlur={() => {
-            if (mapping.parse(draft) !== null) finishEdit(true);
-            else finishEdit(false);
-          }}
-        />
-      ) : (
+      {/* The amount, with Reset beside it, centered under the dial as a pair. Reset is
+          always there, grayed out at the default, so nothing moves when a knob turns. */}
+      <div className="knob-readout">
+        {editing ? (
+          <input
+            ref={editRef}
+            className="knob-edit"
+            type="text"
+            inputMode="decimal"
+            aria-label={`${label} value`}
+            aria-invalid={invalid || undefined}
+            value={draft}
+            onChange={(event) => {
+              setDraft(event.target.value);
+              setInvalid(false);
+            }}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') {
+                event.preventDefault();
+                finishEdit(true);
+              } else if (event.key === 'Escape') {
+                event.preventDefault();
+                event.stopPropagation();
+                finishEdit(false);
+              }
+            }}
+            onBlur={() => {
+              if (mapping.parse(draft) !== null) finishEdit(true);
+              else finishEdit(false);
+            }}
+          />
+        ) : (
+          <button
+            type="button"
+            className="knob-value"
+            disabled={disabled}
+            aria-label={`${label}: ${spoken}. Type a value`}
+            onClick={beginEdit}
+          >
+            {shown.text}
+            {shown.unit ? <span className="value-unit"> {shown.unit}</span> : null}
+          </button>
+        )}
         <button
           type="button"
-          className="knob-value"
-          disabled={disabled}
-          aria-label={`${label}: ${spoken}. Type a value`}
-          onClick={beginEdit}
+          className="knob-reset"
+          disabled={disabled || !modified}
+          aria-label={`Reset ${label.toLowerCase()}`}
+          title="Reset"
+          onClick={reset}
         >
-          {shown.text}
-          {shown.unit ? <span className="value-unit"> {shown.unit}</span> : null}
+          <RotateCcw aria-hidden="true" size={12} strokeWidth={2.5} />
         </button>
-      )}
-      {note ? (
+      </div>
+      {note !== undefined ? (
         <span id={noteId} className="knob-note">
           {note}
         </span>
