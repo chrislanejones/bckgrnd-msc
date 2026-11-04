@@ -33,6 +33,7 @@ type Inbound =
   | { type: 'echo'; on: boolean }
   | { type: 'echoTime'; beats: number }
   | { type: 'loop'; bars: number }
+  | { type: 'audition'; bar: number }
   | { type: 'stereo'; mode: 0 | 1 | 2 }
   | { type: 'stereoBalance'; value: number }
   | { type: 'width'; value: number }
@@ -333,6 +334,17 @@ class EngineProcessor extends AudioWorkletProcessor {
       case 'loop':
         for (const engine of this.liveEngines()) engine.set_loop(message.bars);
         return;
+
+      // Hear a bar: the one action that moves the playhead to what is being edited.
+      // A jump is a seek, so a pending pattern edit applies first (the bar plays as
+      // edited), then a one-bar loop snaps to the bar jumped to.
+      case 'audition': {
+        const live = this.engines[this.live];
+        const bar = Math.max(0, Math.min(15, Math.floor(message.bar) || 0));
+        live?.jump(bar * 16);
+        for (const engine of this.liveEngines()) engine.set_loop(1);
+        return;
+      }
 
       case 'volume':
         if (message.index >= 0 && message.index < this.stemVol.length) {

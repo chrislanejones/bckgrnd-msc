@@ -15,7 +15,7 @@ import type {
   TrackResponse,
 } from './types';
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
+export async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, {
     ...init,
     headers: {
@@ -32,10 +32,11 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     try {
       const body = (await response.json()) as {
         message?: string;
+        error?: string;
         errors?: Record<string, string[]>;
       };
       const firstError = Object.values(body.errors ?? {}).flat()[0];
-      detail = firstError ?? body.message ?? detail;
+      detail = firstError ?? body.error ?? body.message ?? detail;
     } catch {
       // A non-JSON error body (a proxy page, say) leaves the status line.
     }

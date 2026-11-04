@@ -12,6 +12,12 @@ Route::get('/tracks', [\App\Http\Controllers\TrackController::class, 'index']);
 Route::get('/tracks/{id}', [\App\Http\Controllers\TrackController::class, 'show']);
 
 /**
+ * Variations: a seeded, constrained new take on part of one lane. The browser
+ * previews it; PHP writes it (docs/NIGHT4_PROTOCOL.md, "Variations").
+ */
+Route::post('/variations', [\App\Http\Controllers\VariationController::class, 'store']);
+
+/**
  * Saved mixes. No account system: this is a desktop app, so a preset file on the
  * user's own disk is the whole model.
  */

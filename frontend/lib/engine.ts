@@ -748,6 +748,11 @@ export class EngineHost {
     this.post({ type: 'loop', bars });
   }
 
+  /** Jump the live deck to `bar` (0-based) and loop that bar: Hear Bar in the editor. */
+  audition(bar: number): void {
+    this.post({ type: 'audition', bar });
+  }
+
   // -- Deck gestures --------------------------------------------------------
 
   cue(): void {

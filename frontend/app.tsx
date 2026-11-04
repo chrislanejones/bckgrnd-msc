@@ -131,6 +131,9 @@ export function App() {
       if (event.repeat || event.metaKey || event.ctrlKey || event.altKey) return;
       const target = event.target as HTMLElement | null;
       if (target && /^(INPUT|SELECT|TEXTAREA)$/.test(target.tagName)) return;
+      // Inside the pattern editor the digits are not stem cuts (they would cut a stem
+      // while typing a value or nudging a note), and Space on a step is the step's.
+      const inEditor = Boolean(target?.closest('[data-editor]'));
       if (event.code === 'Space') {
         // Space is play/stop wherever focus is, as it always has been, so clicking a
         // Cut badge and then pressing Space doesn't cut it again. The controls that use
@@ -147,7 +150,7 @@ export function App() {
         if (slot) inst.launchScene(slot);
         return;
       }
-      if (event.shiftKey) return;
+      if (event.shiftKey || inEditor) return;
       const n = Number(event.key);
       if (n >= 1 && n <= 8) {
         const id = STEM_ORDER[n - 1];
@@ -489,10 +492,10 @@ export function App() {
       <PatternDrawer
         open={drawerOpen}
         onClose={() => setDrawerOpen(false)}
-        track={track}
+        inst={inst}
         stem={selected}
         onStem={setSelected}
-        songStep={songStep}
+        phone={phone}
       />
 
       {phone ? (

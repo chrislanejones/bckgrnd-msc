@@ -5,6 +5,7 @@
  *
  *   public/library/*.json  — the track library, exported from the PHP source so the
  *                            static and Laravel shapes cannot disagree
+ *   public/library/variations/*.json — the static variation catalog (Night 4)
  *   public/index.html      — the shell, copied from frontend/static.html
  *   dist/                  — just the files a static host serves, for Netlify
  *
@@ -33,6 +34,9 @@ if (!existsSync(resolve(root, 'vendor/autoload.php'))) {
   process.exit(1);
 }
 run('php', ['tools/export-library.php', 'public/library'], 'exporting the track library');
+// 1a. The variation catalog: what POST /api/variations answers for each track as
+//     written, keyed by the source's content hash. Generated, not committed (~3 MB).
+run('php', ['tools/export-variations.php', 'public/library/variations'], 'exporting the variation catalog');
 
 // 1b. Rebuild the app with VITE_STATIC=1, so the bundle reads the exported JSON
 //     directly instead of firing an /api request that a static host cannot answer.

@@ -46,6 +46,8 @@ import {
   type Timing,
 } from './scenes';
 import { STEM_ORDER, STEPS } from './stems';
+import type { ScenePatterns } from './patterns';
+import { usePatternWorkspace } from './workspace';
 import type { LibraryResponse, Mix, StemId, TrackArrangement, TrackSummary } from './types';
 
 /** Master level a fresh session starts at, and what its reset returns to. */
@@ -192,6 +194,16 @@ export function useInstrument() {
     generations.current[deck] += 1;
     engine.loadTrack(deck, arranged, generations.current[deck]);
   }, []);
+
+  // ---- Patterns ---------------------------------------------------------------
+  /** The edited lanes, their undo history and what the engine has confirmed. */
+  const patterns = usePatternWorkspace({
+    track,
+    liveDeck,
+    generation: () => generations.current[liveDeck],
+  });
+  const patternsRef = useRef(patterns);
+  patternsRef.current = patterns;
 
   // ---- Scenes ---------------------------------------------------------------
   /** The four stored scene slots for the live track (part of the project). */
@@ -680,6 +692,7 @@ export function useInstrument() {
   /** What an applied launch means for the active scene and the comparison. */
   function landed(request: SceneRequest) {
     const t = request.target;
+    if (request.lanes) patternsRef.current.adoptScene(sceneName(t), request.lanes);
     if (isSceneSlot(t)) {
       setActiveScene({ slot: t, mix: request.mix });
     } else if (t === 'restore') {
@@ -717,12 +730,14 @@ export function useInstrument() {
   }
 
   /** Send a mix to the live deck at the chosen timing. */
-  function requestLaunch(target: SceneRequest['target'], revision: number, mix: SceneMix) {
+  function requestLaunch(target: SceneRequest['target'], revision: number, mix: SceneMix, lanes?: ScenePatterns) {
+    const sets = lanes && Object.keys(lanes).length ? lanes : undefined;
     if (!engine.booted) {
       // Stopped and never played: apply now, without starting playback.
       const now = copyMix(mix);
       sendMix(now);
       showMix(now);
+      if (sets) patterns.adoptScene(sceneName(target), sets, true);
       setSceneRequest(null);
       landed({
         requestId: 0,
@@ -746,10 +761,20 @@ export function useInstrument() {
       timing: sceneTiming,
       status: 'sending',
       mix: copyMix(mix),
+      ...(sets ? { lanes: sets } : {}),
     };
     sceneRequestRef.current = request;
     setSceneRequest(request);
-    engine.queueScene(requestId, SCENE_TIMING[sceneTiming], sceneVector(request.mix), request.generation);
+    // The scene's lanes are compiled now, so the revision that plays is the one
+    // launched even if the slot is captured again while it waits.
+    const data = sets ? patterns.scenePayload(sets) : undefined;
+    engine.queueScene(
+      requestId,
+      SCENE_TIMING[sceneTiming],
+      sceneVector(request.mix),
+      request.generation,
+      data ? { requestId: nextRequestId.current++, data } : undefined,
+    );
   }
 
   /**
@@ -763,10 +788,17 @@ export function useInstrument() {
       cancelQueuedScene();
       return;
     }
-    if (!pending && activeScene?.slot === slot && sameMix(workingMix(), activeScene.mix)) return;
     const scene = scenes.slots.find((s) => s.slot === slot);
     if (!scene) return;
-    requestLaunch(slot, scene.revision, scene);
+    if (
+      !pending &&
+      activeScene?.slot === slot &&
+      sameMix(workingMix(), activeScene.mix) &&
+      !patterns.differsFrom(scene.patterns)
+    ) {
+      return;
+    }
+    requestLaunch(slot, scene.revision, scene, scene.patterns);
   }
 
   /** Withdraw the queued launch. Says so if it had already landed. */
@@ -796,7 +828,7 @@ export function useInstrument() {
   function captureSceneSlot(slot: SceneSlotId) {
     if (!scenes) return;
     const working = workingMix();
-    setScenes(captureScene(scenes, slot, working));
+    setScenes(captureScene(scenes, slot, working, patterns.sceneLanes()));
     if (activeScene?.slot === slot) setActiveScene({ slot, mix: working });
     setSceneStatus(`Captured the current mix into ${sceneName(slot)}`);
   }
@@ -920,6 +952,27 @@ export function useInstrument() {
     const next = echoBeats === beats ? 0 : beats;
     setEchoBeatsState(next);
     engine.setEchoTime(next);
+  }
+
+  /**
+   * Hear a bar: the explicit way to move the playhead to what is being edited. Jumps
+   * the live deck to the bar and loops it; starts playback if stopped. Editing never
+   * does this by itself. Pick the loop again to let the song run on.
+   */
+  async function auditionBar(barIndex: number) {
+    if (mixing) return;
+    if (!playing) {
+      try {
+        engine.clearError();
+        await engine.play(liveDeck);
+        setPlaying(true);
+      } catch (e) {
+        setError((e as Error).message);
+        return;
+      }
+    }
+    engine.audition(barIndex);
+    setLoopBarsState(1);
   }
 
   /** Pick a loop length; picking the lit one turns the loop off. */
@@ -1089,12 +1142,19 @@ export function useInstrument() {
     for (const id of STEM_ORDER) {
       p.stems[id] = { volume: vols[id], send: sends[id], muted: muted[id], solo: solo[id] };
     }
+    p.patterns = patterns.working;
+    p.locks = patterns.locks;
+    if (scenes) p.scenes = scenes;
     return p;
-  }, [track, vols, sends, bpm, swing, master, bands, filter, stereo, effects, echoBeats, muted, solo]);
+  }, [track, vols, sends, bpm, swing, master, bands, filter, stereo, effects, echoBeats, muted, solo, patterns.working, patterns.locks, scenes]);
 
   const edited = project && track ? !sameMusic(project, projectFromTrack(track)) : false;
+  const activeLanes = activeScene ? scenes?.slots.find((s) => s.slot === activeScene.slot)?.patterns : undefined;
   const sceneModified =
-    activeScene !== null && project !== null && !sameMix({ params: project.params, stems: project.stems }, activeScene.mix);
+    activeScene !== null &&
+    project !== null &&
+    (!sameMix({ params: project.params, stems: project.stems }, activeScene.mix) ||
+      (activeLanes !== undefined && patterns.differsFrom(activeLanes)));
 
   const actions = useStable({
     togglePlay,
@@ -1117,6 +1177,7 @@ export function useInstrument() {
     setEffect,
     pickEchoTime,
     pickLoop,
+    auditionBar,
     holdEffect,
     releaseEffect,
     releaseAllEffects,
@@ -1176,6 +1237,7 @@ export function useInstrument() {
     // project
     project,
     edited,
+    patterns,
     // scenes
     scenes,
     activeScene: activeScene?.slot ?? null,

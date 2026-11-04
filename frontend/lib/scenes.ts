@@ -27,6 +27,7 @@ import {
   type StemSettings,
 } from './contract';
 import type { StemId, TrackArrangement, TrackSummary } from './types';
+import type { ScenePatterns } from './patterns';
 
 export { factoryScenes } from './contract';
 
@@ -95,11 +96,22 @@ function withSlot(scenes: Scenes, next: Scene): Scenes {
  * revision goes up, so anything already queued from the old revision is not changed
  * by this (the engine holds its own copy).
  */
-export function captureScene(scenes: Scenes, slot: SceneSlotId, working: SceneMix): Scenes {
+export function captureScene(
+  scenes: Scenes,
+  slot: SceneSlotId,
+  working: SceneMix,
+  patterns: ScenePatterns = {},
+): Scenes {
   const old = scenes.slots.find((s) => s.slot === slot);
   if (!old) return scenes;
   const mix = copyMix(working);
-  return withSlot(scenes, { ...old, revision: old.revision + 1, params: mix.params, stems: mix.stems });
+  return withSlot(scenes, {
+    ...old,
+    revision: old.revision + 1,
+    params: mix.params,
+    stems: mix.stems,
+    patterns: JSON.parse(JSON.stringify(patterns)) as ScenePatterns,
+  });
 }
 
 /** Rename a slot. Trimmed, 1 to 40 characters; anything else is refused (null). */
@@ -117,7 +129,14 @@ export function duplicateScene(scenes: Scenes, from: SceneSlotId, to: SceneSlotI
   const dst = scenes.slots.find((s) => s.slot === to);
   if (!src || !dst || from === to) return scenes;
   const mix = copyMix(src);
-  return withSlot(scenes, { ...dst, name: src.name, revision: dst.revision + 1, params: mix.params, stems: mix.stems });
+  return withSlot(scenes, {
+    ...dst,
+    name: src.name,
+    revision: dst.revision + 1,
+    params: mix.params,
+    stems: mix.stems,
+    patterns: JSON.parse(JSON.stringify(src.patterns)) as ScenePatterns,
+  });
 }
 
 /** Put a slot back to its factory recipe for this track. */
@@ -181,6 +200,8 @@ export type SceneRequest = {
   reason?: number;
   /** The exact mix that was sent, so `applied` can become the working mix. */
   mix: SceneMix;
+  /** The lanes the launch sets (Night 4), adopted as the working patterns on `applied`. */
+  lanes?: ScenePatterns;
 };
 
 /** Engine event kinds (docs/NIGHT3_PROTOCOL.md). */
