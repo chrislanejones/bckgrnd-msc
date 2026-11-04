@@ -1646,6 +1646,8 @@ body {
 /* The pattern editor ------------------------------------------------------ */
 
 .drawer.editor.is-open {
+  /* Head, status, bars, then the body: only the body shrinks and scrolls. */
+  grid-template-rows: auto auto auto minmax(0, 1fr);
   max-height: min(44rem, 78dvh);
 }
 

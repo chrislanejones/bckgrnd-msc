@@ -161,7 +161,7 @@ testable in Rust before any UI depended on them.
 | `cargo clippy -D warnings`, `cargo fmt --check` | clean |
 | PHPUnit | 240 pass (22 new variation tests) |
 | `check:contract`, `check:scenes`, `check:editing` | pass |
-| `verify:ui` | pass (3/3 after the 4A fixes) |
+| `verify:ui` | pass (3/3 after the 4A fixes; 1 run after the editor landed) |
 | `verify:editor` | pass (3/3) |
 | `verify:audio` | pass, including the two pattern-edit checks |
 | `verify:static` | pass, including the catalog and "unavailable" |
