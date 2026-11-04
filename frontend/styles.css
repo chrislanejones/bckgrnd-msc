@@ -664,6 +664,19 @@ body {
   gap: 3px;
 }
 
+/* Pills on the knob rack's columns: the same three columns and gap as .knob-row, so
+   each group of pills sits exactly over a knob. */
+.segmented-knob-columns {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  column-gap: var(--space-2);
+}
+
+.segmented-cell {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
 .segment {
   min-width: 0;
   min-height: var(--control-sm);

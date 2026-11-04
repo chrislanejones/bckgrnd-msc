@@ -291,38 +291,63 @@ export function Segmented<T extends string | number>({
   value,
   onPick,
   hideLabel = false,
+  perKnobColumn,
 }: {
   label: string;
   options: Array<{ value: T; label: string; aria?: string }>;
   value: T;
   onPick: (value: T) => void;
   hideLabel?: boolean;
+  /**
+   * Lay the pills on the knob rack's three columns, this many to a column, so a row of
+   * pills above or below knobs lines up with them (Echo's Time over Feedback/Return).
+   */
+  perKnobColumn?: number;
 }) {
   const id = useId();
+  const pill = (o: { value: T; label: string; aria?: string }) => (
+    <button
+      key={String(o.value)}
+      type="button"
+      className="segment tap"
+      aria-pressed={value === o.value}
+      aria-label={o.aria}
+      onClick={() => onPick(o.value)}
+    >
+      {o.label}
+    </button>
+  );
+  const cells: Array<typeof options> = [];
+  if (perKnobColumn) {
+    for (let i = 0; i < options.length; i += perKnobColumn) cells.push(options.slice(i, i + perKnobColumn));
+  }
   return (
     <div className="segmented-block">
       <span id={id} className={cx('control-label', hideLabel && 'sr-only')}>
         {label}
       </span>
-      <div
-        className="segmented"
-        role="group"
-        aria-labelledby={id}
-        style={{ gridTemplateColumns: `repeat(${options.length}, minmax(0, 1fr))` }}
-      >
-        {options.map((o) => (
-          <button
-            key={String(o.value)}
-            type="button"
-            className="segment tap"
-            aria-pressed={value === o.value}
-            aria-label={o.aria}
-            onClick={() => onPick(o.value)}
-          >
-            {o.label}
-          </button>
-        ))}
-      </div>
+      {perKnobColumn ? (
+        <div className="segmented segmented-knob-columns" role="group" aria-labelledby={id}>
+          {cells.map((cell, i) => (
+            <div
+              key={i}
+              className="segmented-cell"
+              style={{ gridTemplateColumns: `repeat(${perKnobColumn}, minmax(0, 1fr))` }}
+            >
+              {cell.map(pill)}
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div
+          className="segmented"
+          role="group"
+          aria-labelledby={id}
+          style={{ gridTemplateColumns: `repeat(${options.length}, minmax(0, 1fr))` }}
+        >
+          {options.map(pill)}
+        </div>
+      )}
     </div>
   );
 }

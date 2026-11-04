@@ -110,6 +110,8 @@ function MasterRack({ inst }: { inst: Instrument }) {
   const echoOn = echoLive(inst);
   const echoNote = !echoOn ? 'Echo is off' : inst.echo ? 'Held open by the throw' : '';
   const echoNoteId = useId();
+  const roomOff = effects['fx.reverbMix'] <= 0;
+  const roomNoteId = useId();
 
   return (
     <>
@@ -190,6 +192,7 @@ function MasterRack({ inst }: { inst: Instrument }) {
           value={inst.echoBeats}
           onPick={inst.pickEchoTime}
           options={ECHO_OPTIONS}
+          perKnobColumn={2}
         />
         <span id={echoNoteId} className="sr-only">
           {echoNote}
@@ -219,7 +222,12 @@ function MasterRack({ inst }: { inst: Instrument }) {
       </fieldset>
 
       <fieldset className="inspector-group">
-        <legend className="inspector-legend">Room</legend>
+        {/* As with the echo, "off" is said once, in the heading, not as a note that
+            holds two empty lines under Decay. */}
+        <legend className="inspector-legend">{roomOff ? 'Room · off' : 'Room'}</legend>
+        <span id={roomNoteId} className="sr-only">
+          {roomOff ? 'Room is off' : ''}
+        </span>
         <div className="knob-row">
           <Knob
             label="Mix"
@@ -236,8 +244,8 @@ function MasterRack({ inst }: { inst: Instrument }) {
             mapping={DECAY}
             defaultValue={EFFECT_DEFAULTS['fx.reverbDecay']}
             onChange={(v) => setEffect('fx.reverbDecay', v)}
-            disabled={effects['fx.reverbMix'] <= 0}
-            note={effects['fx.reverbMix'] <= 0 ? 'Room is off' : ''}
+            disabled={roomOff}
+            describedBy={roomOff ? roomNoteId : undefined}
           />
         </div>
       </fieldset>
