@@ -85,6 +85,31 @@ try {
   check('no API calls — library came from static files', phpRequests.length === 0,
     phpRequests.join(', ') || 'none');
 
+  // 2b. Variations come from the exported catalog: the track as written can be
+  //     varied, and a phrase the user changed is reported as unavailable, never
+  //     replaced with a variation of different notes.
+  {
+    await page.getByRole('button', { name: 'Inspect Hats' }).click();
+    await page.getByRole('button', { name: 'Show the hats pattern' }).click();
+    const editor = page.locator('#pattern-drawer');
+    await editor.locator('.bar-button').nth(8).click();
+    await editor.getByRole('button', { name: 'Vary', exact: true }).click();
+    const vary = editor.getByRole('group', { name: 'Vary' });
+    await vary.getByRole('button', { name: 'Preview variation' }).click();
+    await editor.locator('.preview-bar').waitFor({ timeout: 8000 });
+    check('static: the catalog varies the track as written', await editor.locator('.preview-bar').isVisible());
+    await editor.getByRole('button', { name: 'Revert' }).click();
+    await page.locator('[data-drum-cell][data-lane="hat"][data-step="129"]').click();
+    await vary.getByRole('button', { name: 'Preview variation' }).click();
+    const why = editor.getByTestId('vary-unavailable');
+    await why.waitFor({ timeout: 8000 });
+    const text = (await why.textContent()) ?? '';
+    check('static: a changed phrase is unavailable, with the reason', /^Unavailable: This phrase has been changed/.test(text), text);
+    check('static: and nothing is previewed in its place', (await editor.locator('.preview-bar').count()) === 0);
+    const api = requests.filter((p) => p.startsWith('/api/'));
+    check('static: still no API calls', api.length === 0, api.join(', ') || 'none');
+  }
+
   // 3. Audio works on the static build, which is the thing most likely to differ.
   const audio = await page.evaluate(async () => {
     const ctx = new AudioContext();

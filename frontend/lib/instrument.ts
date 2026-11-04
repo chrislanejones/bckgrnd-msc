@@ -1148,6 +1148,13 @@ export function useInstrument() {
     return p;
   }, [track, vols, sends, bpm, swing, master, bands, filter, stereo, effects, echoBeats, muted, solo, patterns.working, patterns.locks, scenes]);
 
+  // The checks read the project as a save would write it, and round-trip it.
+  const projectRef = useRef(project);
+  projectRef.current = project;
+  useEffect(() => {
+    window.__BCKGRND_PROJECT__ = () => projectRef.current;
+  }, []);
+
   const edited = project && track ? !sameMusic(project, projectFromTrack(track)) : false;
   const activeLanes = activeScene ? scenes?.slots.find((s) => s.slot === activeScene.slot)?.patterns : undefined;
   const sceneModified =

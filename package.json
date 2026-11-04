@@ -23,6 +23,7 @@
     "serve:static": "php -S 0.0.0.0:8090 -t public",
     "dev": "pnpm run build:worklet --watch & vite",
     "verify:ui": "node tools/verify-ui.mjs",
+    "verify:editor": "node tools/verify-editor.mjs",
     "check:contract": "node tools/check-contract.mjs",
     "check:scenes": "node tools/check-scenes.mjs",
     "check:editing": "node tools/check-editing.mjs"

@@ -164,8 +164,9 @@ try {
     check('the pattern drawer starts closed', !(await visible(page, '#pattern-drawer')));
     await page.getByRole('button', { name: 'Show the lead pattern' }).click();
     check('the pattern drawer opens', await visible(page, '#pattern-drawer'));
-    const cells = await page.locator('.pattern-cell').count();
-    check('the drawer shows all 16 bars of 16 steps', cells === 256, `${cells} cells`);
+    // The drawer is the pattern editor now (tools/verify-editor.mjs covers editing).
+    const notes = await page.locator('.piano-roll').count();
+    check('the drawer opens on the lead lane', notes === 1 && (await page.getByTestId('editing-line').textContent()).startsWith('Lead · Bar'));
     await page.keyboard.press('Escape');
     check('Escape closes the drawer', !(await visible(page, '#pattern-drawer')));
 

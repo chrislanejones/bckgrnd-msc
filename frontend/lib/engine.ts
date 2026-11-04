@@ -203,7 +203,10 @@ export class EngineHost {
 
     // The processor needs the context's real rate, which it also knows as a global;
     // passing it explicitly keeps the two from disagreeing after a device change.
-    this.post({ type: 'init', wasm, sampleRate: ctx.sampleRate }, [wasm]);
+    // `send`, not `post`: `post` flushes the coalesced parameters first, which would
+    // put every value moved before the first Play (and a pattern edit made then)
+    // ahead of `init` and the track loads, where the worklet drops or refuses them.
+    this.send({ type: 'init', wasm, sampleRate: ctx.sampleRate }, [wasm]);
 
     // Then everything the app said before there was anything to say it to, in order,
     // and only after that the latest value of every parameter moved since: a replayed

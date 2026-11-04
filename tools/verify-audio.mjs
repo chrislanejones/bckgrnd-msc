@@ -390,6 +390,31 @@ try {
       windows: [{ name: 'drag', from: 1650, to: 2050 }],
     });
 
+    // 7. A pattern revision (Night 4): the kick alone, then an edit that empties the
+    //    kick lane, sent mid-bar for the next bar. The kick keeps playing until the bar
+    //    line (about 1.9 s at 126 BPM) and is gone after it: the edit lands on the
+    //    boundary, not when it was sent, and an empty lane is silence.
+    const emptyKick = new Float32Array(1 + 3 + 256);
+    emptyKick.set([1, 0, 0, 256]);
+    out.patternEdit = await measure({
+      ms: 3200,
+      commands: [{ type: 'solo', index: 0, value: true }],
+      timeline: [{ at: 300, message: { type: 'patterns', requestId: 7, generation: 0, timing: 2, data: emptyKick } }],
+      windows: [
+        { name: 'beforeBar', from: 1000, to: 1850 },
+        { name: 'afterBar', from: 2500, to: 3150 },
+      ],
+    });
+    // A malformed revision is refused whole: the kick keeps playing.
+    out.patternBad = await measure({
+      ms: 1500,
+      commands: [{ type: 'solo', index: 0, value: true }],
+      timeline: [
+        { at: 100, message: { type: 'patterns', requestId: 8, generation: 0, timing: 0, data: new Float32Array([1, 0, 0, 255]) } },
+      ],
+      windows: [{ name: 'after', from: 500, to: 1450 }],
+    });
+
     return out;
   }, baseUrl);
 
@@ -537,6 +562,21 @@ try {
       'scratch drags audible signal and resumes near step 64',
       r.windowPeak.drag > 0.01 && first >= 64 && first <= 72 && r.errors.length === 0,
       `drag peak ${r.windowPeak.drag.toFixed(4)}, first step after release ${first}${r.errors.length ? ` errors: ${r.errors.join('; ')}` : ''}`,
+    );
+  }
+
+  {
+    const r = result.patternEdit;
+    check(
+      'a pattern edit sent mid-bar is heard from the next bar, not before',
+      r.windowPeak.beforeBar > 0.01 && r.windowPeak.afterBar < 1e-3 && r.errors.length === 0,
+      `kick peak before the bar ${r.windowPeak.beforeBar.toFixed(4)}, after ${r.windowPeak.afterBar.toExponential(2)}`,
+    );
+    const bad = result.patternBad;
+    check(
+      'a malformed pattern revision changes nothing',
+      bad.windowPeak.after > 0.01 && bad.errors.length === 0,
+      `kick peak ${bad.windowPeak.after.toFixed(4)}`,
     );
   }
 

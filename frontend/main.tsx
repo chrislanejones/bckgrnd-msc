@@ -24,6 +24,8 @@ declare global {
     __BCKGRND_SENT__: () => Readonly<Record<string, unknown>>;
     /** The edit log: one entry per finished gesture (see lib/history.ts). */
     __BCKGRND_EDITS__: () => readonly Edit[];
+    /** The project the screen describes, as a save would write it (Night 5 saves it). */
+    __BCKGRND_PROJECT__?: () => unknown;
   }
 }
 
