@@ -23,7 +23,7 @@ import { initSync, Engine } from '@wasm';
 /** Message protocol from the main thread. */
 type Inbound =
   | { type: 'init'; wasm: ArrayBuffer; sampleRate: number }
-  | { type: 'track'; deck: DeckId; json: string }
+  | { type: 'track'; deck: DeckId; json: string; generation?: number }
   | { type: 'transport'; deck: DeckId; action: 'play' | 'stop' }
   | { type: 'bpm'; value: number }
   | { type: 'swing'; value: number }
@@ -52,8 +52,24 @@ type Inbound =
   | { type: 'scratch'; rate: number }
   | { type: 'scratchEnd'; step: number }
   | { type: 'nudge'; dir: -1 | 0 | 1 }
-  | { type: 'mix'; deck: DeckId; bpm: number; swing: number; json: string }
-  | { type: 'promote'; deck: DeckId };
+  | {
+      type: 'mix';
+      deck: DeckId;
+      bpm: number;
+      swing: number;
+      json: string;
+      generation?: number;
+    }
+  | { type: 'promote'; deck: DeckId }
+  | {
+      type: 'scene';
+      requestId: number;
+      generation: number;
+      timing: number;
+      values: ArrayLike<number>;
+      deck?: DeckId;
+    }
+  | { type: 'cancelScene'; requestId: number };
 
 type DeckId = 'a' | 'b';
 
@@ -80,6 +96,24 @@ const STEM_BASS = 3;
  */
 const MIX_ENTRY_FILTER = 0.22;
 const MIX_ENTRY_KICK = 0.45;
+
+/**
+ * Scene protocol constants (docs/NIGHT3_PROTOCOL.md). The engine owns the meaning;
+ * these are the numbers the worklet itself needs.
+ */
+const SCENE_LEN = 44;
+const SCENE_FX_FILTER = 32;
+const EVENT_WIDTH = 4;
+/** `EVENT_CAPACITY` in engine-core/src/scheduler.rs: one drain empties the ring. */
+const EVENT_CAPACITY = 64;
+const EVENT_SCENE_APPLIED = 2;
+const EVENT_SCENE_CANCELLED = 3;
+const EVENT_SCENE_REJECTED = 5;
+const REASON_INVALID = 1;
+const REASON_TRACK = 4;
+const REASON_MIXING = 6;
+const REASON_NOT_PLAYING = 7;
+const REASON_STALE = 9;
 
 class EngineProcessor extends AudioWorkletProcessor {
   /** Which deck the UI is listening to. */
@@ -120,6 +154,26 @@ class EngineProcessor extends AudioWorkletProcessor {
    */
   private stemSend = new Float32Array(8).fill(Number.NaN);
   private filterOpen = 1;
+
+  /**
+   * Each deck's loaded-track counter, as the UI numbered it in the `track` or `mix`
+   * message that loaded it. A scene request carries the generation it was made for,
+   * and one made for a track that has since been replaced is refused here.
+   */
+  private generation: Record<DeckId, number> = { a: 0, b: 0 };
+
+  /** Where an inbound scene's values are copied before the engine sees them. */
+  private sceneIn = new Float32Array(SCENE_LEN);
+  /**
+   * The values of the scene the live engine has accepted and not yet applied, and its
+   * request id (-1 for none). When `applied` comes back for it, the mirrors above and
+   * the idle deck are brought in line, so a later handover carries the scene's mix
+   * rather than the one before it.
+   */
+  private scenePending = new Float32Array(SCENE_LEN);
+  private scenePendingId = -1;
+  /** Drained engine events, reused every block. */
+  private eventBuf = new Float64Array(EVENT_CAPACITY * EVENT_WIDTH);
 
   /** Accumulated sample clock, used to schedule the auto-mix handover. */
   private frames = 0;
@@ -166,7 +220,12 @@ class EngineProcessor extends AudioWorkletProcessor {
 
       case 'track': {
         const engine = this.engines[message.deck];
+        if (typeof message.generation === 'number') {
+          this.generation[message.deck] = message.generation;
+        }
+        // Loading cancels that deck's pending scene inside the engine (`track`).
         if (engine) engine.load_track_wasm(message.json);
+        if (message.deck === this.live) this.scenePendingId = -1;
         return;
       }
 
@@ -306,7 +365,108 @@ class EngineProcessor extends AudioWorkletProcessor {
       case 'promote':
         this.promote(message.deck);
         return;
+
+      case 'scene':
+        this.queueScene(message);
+        return;
+
+      case 'cancelScene': {
+        const engine = this.engines[this.live];
+        const id = message.requestId >>> 0;
+        const cancelled = engine ? engine.cancel_scene(id) : false;
+        if (cancelled && id === this.scenePendingId) this.scenePendingId = -1;
+        // The engine reports a successful cancel as an event; a miss (already applied,
+        // replaced, or never queued) is only visible here, so say so either way.
+        this.port.postMessage({
+          type: 'sceneCancelResult',
+          deck: this.live,
+          requestId: id,
+          cancelled,
+        });
+        return;
+      }
     }
+  }
+
+  /**
+   * Hand a scene request to the live engine, or refuse it here: a vector of the
+   * wrong length (`invalid`), an auto-mix in progress (`mixing`), or a request made
+   * for a deck or track generation that is no longer live (`stale generation`).
+   * The engine validates the values themselves and reports its own outcome.
+   */
+  private queueScene(message: Extract<Inbound, { type: 'scene' }>): void {
+    const requestId = message.requestId >>> 0;
+    const values = message.values;
+    let refusal = 0;
+    if (values == null || values.length !== SCENE_LEN) refusal = REASON_INVALID;
+    else if (this.mix) refusal = REASON_MIXING;
+    else if (
+      (message.deck !== undefined && message.deck !== this.live) ||
+      message.generation !== this.generation[this.live]
+    )
+      refusal = REASON_STALE;
+    const engine = this.engines[this.live];
+    if (refusal === 0 && !engine) refusal = REASON_NOT_PLAYING;
+    if (refusal !== 0 || !engine) {
+      this.postSceneEvents(this.live, [EVENT_SCENE_REJECTED, requestId, refusal, 0]);
+      return;
+    }
+    // Copied, so the engine reads a Float32Array and nothing the UI still holds.
+    for (let i = 0; i < SCENE_LEN; i += 1) this.sceneIn[i] = Number(values[i]);
+    // Anything but 0, 1 or 2 goes in as 255, which the engine refuses (`invalid`),
+    // rather than wrapping into a valid code on the way to a u8.
+    const t = message.timing;
+    const timing = t === 0 || t === 1 || t === 2 ? t : 255;
+    const verdict = engine.queue_scene(requestId, timing, this.sceneIn);
+    if (verdict === 0) {
+      this.scenePending.set(this.sceneIn);
+      this.scenePendingId = requestId;
+    }
+  }
+
+  private postSceneEvents(deck: DeckId, events: number[]): void {
+    this.port.postMessage({ type: 'sceneEvents', deck, events });
+  }
+
+  /**
+   * After a render call, pass on whatever the engines reported.
+   *
+   * `event_count` is a cheap read, so the copy (and the message, the only allocation
+   * here) happens only on blocks that have something to say: a handful per scene.
+   */
+  private drainEvents(deck: DeckId, engine: Engine | null): void {
+    if (!engine || engine.event_count() === 0) return;
+    const n = engine.take_events_into(this.eventBuf);
+    if (n === 0) return;
+    const buf = this.eventBuf;
+    if (deck === this.live) {
+      for (let k = 0; k < n; k += 1) {
+        const kind = buf[k * EVENT_WIDTH];
+        const id = buf[k * EVENT_WIDTH + 1];
+        if (id !== this.scenePendingId) continue;
+        if (kind === EVENT_SCENE_APPLIED) {
+          this.followScene(this.scenePending);
+          this.scenePendingId = -1;
+        } else if (kind === EVENT_SCENE_CANCELLED) {
+          this.scenePendingId = -1;
+        }
+      }
+    }
+    this.postSceneEvents(deck, Array.from(buf.subarray(0, n * EVENT_WIDTH)));
+  }
+
+  /**
+   * A scene applied on the live deck: carry it into the mirrors the auto-mix reads,
+   * and onto the idle deck now, so neither restores the mix from before the scene.
+   */
+  private followScene(values: Float32Array): void {
+    for (let i = 0; i < 8; i += 1) {
+      this.stemVol[i] = values[i * 4];
+      this.stemSend[i] = values[i * 4 + 1];
+    }
+    this.filterOpen = values[SCENE_FX_FILTER];
+    const idle = this.engines[this.live === 'a' ? 'b' : 'a'];
+    idle?.set_scene(values);
   }
 
   /** Both engines once booted, so control changes reach the incoming deck too. */
@@ -340,6 +500,13 @@ class EngineProcessor extends AudioWorkletProcessor {
     const from = this.engines[this.live];
     const to = this.engines[message.deck];
     if (!from || !to || message.deck === this.live) return;
+
+    if (typeof message.generation === 'number') {
+      this.generation[message.deck] = message.generation;
+    }
+    // The outgoing deck's pending scene was for the track that is leaving (`track`).
+    from.cancel_pending(REASON_TRACK);
+    this.scenePendingId = -1;
 
     if (!from.is_playing()) {
       from.play();
@@ -391,6 +558,12 @@ class EngineProcessor extends AudioWorkletProcessor {
   }
 
   private promote(deck: DeckId): void {
+    if (deck !== this.live) {
+      // A scene pending on the deck that stops being live would land on a deck nobody
+      // is listening to: the same as a track change for it.
+      this.engines[this.live]?.cancel_pending(REASON_TRACK);
+      this.scenePendingId = -1;
+    }
     this.live = deck;
   }
 
@@ -477,6 +650,8 @@ class EngineProcessor extends AudioWorkletProcessor {
     this.peakR = peakR;
 
     this.frames += frames;
+    this.drainEvents(this.live, live);
+    this.drainEvents(this.live === 'a' ? 'b' : 'a', idle);
     this.publishTelemetry(live, frames);
   }
 

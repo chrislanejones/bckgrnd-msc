@@ -372,6 +372,16 @@ impl Master {
         self.wet.target()
     }
 
+    /// The filter position the sweep is heading for, 0..1.
+    pub fn sweep_target(&self) -> f32 {
+        self.sweep_open.target()
+    }
+
+    /// Whether the stems' echo sends feed the line (echo time is not "off").
+    pub fn sends_enabled(&self) -> bool {
+        self.sends_on
+    }
+
     /// Convert a 0..1 filter position to a cutoff, exponentially from 240 Hz to
     /// 18 kHz so the useful range is spread evenly under the finger.
     pub fn filter_freq(open: f32) -> f32 {

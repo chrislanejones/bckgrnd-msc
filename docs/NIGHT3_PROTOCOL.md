@@ -113,8 +113,9 @@ registry's `stems`). The order of 32..43 is `sceneVector` in `contracts/scenes.j
 the Rust tests read that list so the two cannot drift.
 
 The engine validates the whole vector (length, finite, each value inside its registry
-range, toggles exactly 0 or 1) **before** touching anything, and rejects it as a
-whole.
+range, toggles exactly 0 or 1, `fx.echoTime` exactly one of the registry's options)
+**before** touching anything, and rejects it as a whole. A rejected replacement leaves
+the scene already pending, pending.
 
 ## Timing
 
@@ -129,17 +130,26 @@ whole.
   fire twice or fire early. A request made exactly on a boundary's sample waits for
   the next one: late requests go to the next eligible boundary.
 - Tempo changes move no deadline: the target is musical (an onset), not a time.
+- Changing the loop while a scene is pending keeps the rule (next eligible onset) but
+  may move which step that is, so the engine reports `queued` again with the new
+  prediction.
+- `Now` reports no `queued`; its `applied` carries step -1.
 - At the boundary the order is fixed: **commit the scene**, then **activate the
   fill**, then **trigger that step's notes**. All targets change in one place; gains
   and effects glide with their existing smoothing (ADR-013), nothing jumps.
-- A scene selected while stopped applies immediately and does not start playback.
+- A scene selected while stopped applies immediately (`applied` with step -1, no
+  `queued`) and does not start playback.
+- A scene requested while a scratch is held, a brake is slowing the deck or a
+  backspin is running is rejected (`transport`): the clock is not running at its own
+  pace, and each of those gestures cancels a pending scene anyway.
 
 ## The bounded queue
 
 - At most **one pending scene** and **one pending fill** per engine.
 - Latest valid request wins. A replacement is validated first; only then is the old
-  one dropped (`replaced`). It keeps the boundary already announced unless the new
-  request is `Now`.
+  one dropped (`replaced`, `a` = the new request's id). It keeps the boundary already
+  announced unless the new request is `Now`, and the engine then reports `queued` for
+  the new request with that same boundary.
 - Cancel by request id. Cancelling something already applied returns "not pending";
   the UI says it already applied.
 - The snapshot is copied when queued, so overwriting the slot while queued does not
@@ -150,8 +160,8 @@ whole.
 | Event | Pending scene | Pending / active fill | Held gestures |
 |---|---|---|---|
 | Stop | cancelled (`stopped`) | cancelled / ended | released |
-| Cue, seek, scratch, brake, backspin | cancelled (`transport`) | cancelled / ended | kept |
-| Track load on that deck, auto-mix start | cancelled (`track`) | cancelled / ended | released |
+| Cue, seek, scratch (grab or drop), brake, backspin, Play while already playing (restarts from step 0) | cancelled (`transport`) | cancelled / ended | kept |
+| Track load on that deck, auto-mix start, `promote` to the other deck | cancelled (`track`) | cancelled / ended | released |
 | Panic | cancelled (`panic`) | cancelled / ended | released |
 
 During an auto-mix crossfade the worklet rejects new scene and fill requests
@@ -175,7 +185,9 @@ Only `applied` changes the UI's active-scene indicator. Until then the pad shows
 ### Engine events
 
 The engine keeps a fixed ring of events; the worklet drains it after each render
-call and posts them to the UI only when there are any. Each event is four numbers:
+call and posts them to the UI only when there are any, as
+`{type: 'sceneEvents', deck, events: number[]}`. Each event is four numbers,
+**`[kind, requestId, a, b]`**:
 
 | kind | name | a | b |
 |---|---|---|---|
@@ -193,6 +205,23 @@ call and posts them to the UI only when there are any. Each event is four number
 
 Reasons: 1 invalid, 2 stopped, 3 transport, 4 track, 5 panic, 6 mixing, 7 not
 playing, 8 already playing, 9 stale generation, 10 cancelled by the user.
+
+- The ring holds 64 events. If it fills between two drains (only possible with dozens
+  of requests landing between two render calls) the **oldest** event is overwritten
+  and counted (`Engine::dropped_events`). The newest events describe the one pending
+  slot, so the UI treats a `queued` or `applied` for a request as superseding any
+  older request it was still waiting on.
+- Rejections the engine makes (1 invalid, 3 transport) arrive through the ring.
+  Rejections the worklet makes before the engine sees the request (6 mixing,
+  9 stale generation, 1 for a vector that is not 44 long, 7 before the engine has
+  booted) are posted by the worklet in the same `sceneEvents` shape.
+- `cancelScene` is answered with `{type: 'sceneCancelResult', deck, requestId,
+  cancelled}`: `cancelled: false` is the "not pending" case (already applied,
+  replaced or unknown). A successful cancel also produces the `cancelled` event
+  (reason 10).
+- When a scene applies on the live deck the worklet updates its auto-mix mirrors
+  (stem volume, send, filter) and sets the same values on the idle deck at once,
+  without events, so a later handover does not restore the mix from before it.
 
 ## Fills
 

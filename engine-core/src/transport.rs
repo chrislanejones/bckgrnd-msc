@@ -73,7 +73,14 @@ impl Transport {
     }
 
     fn advance_step(&self) -> usize {
-        let next = self.step + 1;
+        self.following(self.step)
+    }
+
+    /// The step that plays after `step`, honoring the loop: the same rule the clock
+    /// itself advances by, so the scene scheduler can walk ahead and predict which
+    /// step a pending change will land on.
+    pub fn following(&self, step: usize) -> usize {
+        let next = step + 1;
         if self.loop_steps > 0 {
             let end = self.loop_start + self.loop_steps;
             if next >= end {
@@ -215,6 +222,12 @@ impl Transport {
 
     pub fn braking(&self) -> bool {
         self.brake_from > 0.0
+    }
+
+    /// A hand on the platter, a brake or a backspin is in progress: the clock is not
+    /// running at its own pace, so nothing can be scheduled against it.
+    pub fn in_gesture(&self) -> bool {
+        self.held || self.braking() || self.in_backspin()
     }
 
     /// Consume one sample of clock time. Returns the step that should fire at this

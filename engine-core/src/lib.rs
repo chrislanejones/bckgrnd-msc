@@ -64,6 +64,7 @@
 mod drums;
 mod dsp;
 mod mixer;
+mod scheduler;
 mod scratch;
 mod tone;
 mod track;
@@ -86,6 +87,17 @@ pub mod limits {
     };
 }
 pub use track::{NoteEvent, Perc, Stem, Track, TrackKind, STEPS};
+
+/// The scene vector's layout, the timing, event and reason codes, and the validator,
+/// as `docs/NIGHT3_PROTOCOL.md` defines them. Exported so tests can hold them against
+/// `contracts/scenes.json` and `contracts/parameters.json`.
+pub mod scene {
+    pub use crate::scheduler::{
+        event, reason, slot_kind, timing, valid, SlotKind, Timing, ECHO_TIME_OPTIONS,
+        EVENT_CAPACITY, EVENT_WIDTH, FX_BASE, FX_KINDS, SCENE_LEN, SCENE_PARAMS, STEM_FIELDS,
+    };
+}
+use scheduler::{reason, SCENE_LEN};
 pub use transport::Transport;
 
 #[cfg(target_arch = "wasm32")]
@@ -457,6 +469,23 @@ pub struct Engine {
     transitions: transition::Transitions,
     /// Per-sample glide coefficient for the channel faders, cuts, solos and sends.
     channel_coef: f32,
+    /// The pending scene, the onset serial and the outcome events.
+    scheduler: scheduler::Scheduler,
+    /// Samples rendered, and what happened on which of them, for the scheduling tests.
+    #[cfg(test)]
+    clock: u64,
+    #[cfg(test)]
+    trace: Vec<Trace>,
+}
+
+/// One entry in the test-only record of what the engine did on which sample.
+#[cfg(test)]
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Trace {
+    /// A scene was committed: request id, sample.
+    Apply(u32, u64),
+    /// A step's notes were triggered: step, sample.
+    Trigger(usize, u64),
 }
 
 /// How long a fader, a cut, a solo or a send takes to glide, in seconds. The browser
@@ -497,17 +526,26 @@ impl Engine {
             kick_root_hz: track.kick_root_hz(),
             transitions: transition::Transitions::new(track.kind, sr),
             channel_coef: dsp::glide_coef(CHANNEL_GLIDE, sr),
+            scheduler: scheduler::Scheduler::default(),
+            #[cfg(test)]
+            clock: 0,
+            #[cfg(test)]
+            trace: Vec::new(),
             track,
         }
     }
 
     pub fn play(&mut self) {
+        // Play while playing starts over from step 0: a seek, so a pending scene's
+        // announced bar no longer means anything.
+        self.scheduler.cancel_pending(reason::TRANSPORT);
         self.let_go_of_the_platter();
         self.transport.start();
         self.transitions.reset();
     }
 
     pub fn stop(&mut self) {
+        self.scheduler.cancel_pending(reason::STOPPED);
         self.let_go_of_the_platter();
         self.transport.stop();
         for v in self.voices.iter_mut().flatten() {
@@ -545,11 +583,16 @@ impl Engine {
         self.transport.swing = swing.clamp(0.0, 1.0);
     }
 
+    /// Set or clear the loop. A pending scene keeps its boundary (the next eligible
+    /// onset), but which step that is may have moved, so `queued` is reported again.
     pub fn set_loop(&mut self, bars: u32) {
         self.transport.set_loop(bars);
+        self.scheduler.announce(&self.transport);
     }
 
+    /// Cue or seek. Cancels a pending scene (`transport`).
     pub fn jump(&mut self, step: usize) {
+        self.scheduler.cancel_pending(reason::TRANSPORT);
         self.transport.jump(step);
     }
 
@@ -559,6 +602,9 @@ impl Engine {
 
     pub fn brake(&mut self) {
         self.transport.brake();
+        if self.transport.braking() {
+            self.scheduler.cancel_pending(reason::TRANSPORT);
+        }
         // A riser on a clock grinding to a halt sounds broken, so the transition
         // sounds get out of the way of the gesture.
         if self.transport.braking() {
@@ -581,6 +627,7 @@ impl Engine {
         if self.scratch.held() {
             return;
         }
+        self.scheduler.cancel_pending(reason::TRANSPORT);
         self.scratch
             .capture(self.ring.left.len(), self.ring.write, self.ring.filled);
         self.scratch_resume = self.transport.playing;
@@ -605,6 +652,8 @@ impl Engine {
     /// With a loop set, a step outside it is folded into the loop at the same
     /// position in the bar grid. Without a scratch in progress this is a plain jump.
     pub fn scratch_end(&mut self, step: u32) {
+        // Dropping the needle is a seek.
+        self.scheduler.cancel_pending(reason::TRANSPORT);
         let mut at = (step as usize).min(STEPS - 1);
         let t = &self.transport;
         if t.loop_steps > 0 && !(t.loop_start..t.loop_start + t.loop_steps).contains(&at) {
@@ -649,6 +698,7 @@ impl Engine {
         if self.scratch.held() || !self.transport.backspin() {
             return;
         }
+        self.scheduler.cancel_pending(reason::TRANSPORT);
         self.transitions.release();
         match self.ring.take(1.35, self.sample_rate) {
             Some((l, r)) => {
@@ -890,16 +940,118 @@ impl Engine {
         self.master.set_reverb_decay(seconds);
     }
 
+    /// Queue a scene (`docs/NIGHT3_PROTOCOL.md`). Returns 0 when accepted, otherwise
+    /// the reason it was refused, which is also reported as a `rejected` event.
+    ///
+    /// `values` is the 44-value scene vector; it is validated as a whole first, and a
+    /// refused vector changes nothing (a scene already pending stays pending).
+    /// `timing` is 0 Now, 1 Next Beat, 2 Next Bar. While stopped the scene applies
+    /// here and now and playback does not start; while a scratch, brake or backspin is
+    /// in progress it is refused (`transport`).
+    pub fn queue_scene(&mut self, request_id: u32, timing: u8, values: &[f32]) -> u8 {
+        let verdict = match scheduler::Timing::from_code(timing) {
+            None => reason::INVALID,
+            Some(_) if !scheduler::valid(values) => reason::INVALID,
+            Some(_) if self.transport.in_gesture() => reason::TRANSPORT,
+            Some(t) => {
+                if self.transport.playing {
+                    self.scheduler.queue(request_id, t, values, &self.transport);
+                } else {
+                    // Nothing can be pending while stopped (Stop cancels it), so this
+                    // replaces nothing.
+                    let mut copy = [0.0f32; SCENE_LEN];
+                    copy.copy_from_slice(&values[..SCENE_LEN]);
+                    self.commit_scene(request_id, &copy, -1);
+                }
+                reason::OK
+            }
+        };
+        if verdict != reason::OK {
+            self.scheduler.events.push(
+                scheduler::event::SCENE_REJECTED,
+                request_id,
+                verdict as f64,
+                0.0,
+            );
+        }
+        verdict
+    }
+
+    /// Set a scene's targets right away, with no scheduling and no events, whatever
+    /// the transport is doing. For the worklet's idle deck, which follows the live
+    /// deck's scenes so a later handover does not bring back the old mix. Validated
+    /// like [`Engine::queue_scene`]; false (and nothing changed) when invalid.
+    pub fn set_scene(&mut self, values: &[f32]) -> bool {
+        if !scheduler::valid(values) {
+            return false;
+        }
+        let mut copy = [0.0f32; SCENE_LEN];
+        copy.copy_from_slice(&values[..SCENE_LEN]);
+        self.commit_targets(&copy);
+        true
+    }
+
+    /// Cancel the pending scene if it is `request_id`, reported as `cancelled` with
+    /// reason 10. False when it is not pending: already applied, replaced, cancelled,
+    /// or never queued.
+    pub fn cancel_scene(&mut self, request_id: u32) -> bool {
+        self.scheduler.cancel(request_id)
+    }
+
+    /// Cancel whatever scene is pending, for a structural reason the host knows about
+    /// and the engine does not (an auto-mix starting is 4, panic is 5). False when
+    /// nothing was pending.
+    pub fn cancel_pending(&mut self, why: u8) -> bool {
+        self.scheduler.cancel_pending(why)
+    }
+
+    /// The request id of the pending scene, if one is pending.
+    pub fn pending_scene(&self) -> Option<u32> {
+        self.scheduler.pending().map(|p| p.request_id)
+    }
+
+    /// Events waiting to be drained. Cheap, so the worklet can ask every block and
+    /// only pay for [`Engine::take_events_into`] when there is something to take.
+    pub fn event_count(&self) -> u32 {
+        self.scheduler.events.len() as u32
+    }
+
+    /// Events overwritten before they were drained, since the engine was made. The
+    /// ring keeps the newest [`scene::EVENT_CAPACITY`]; anything above zero here means
+    /// requests arrived faster than the host drained them.
+    pub fn dropped_events(&self) -> u32 {
+        self.scheduler.events.dropped()
+    }
+
+    /// Move waiting events into `out`, four numbers each (`[kind, request id, a, b]`),
+    /// oldest first. Returns how many were moved; any that did not fit stay queued.
+    pub fn take_events_into(&mut self, out: &mut [f64]) -> u32 {
+        self.scheduler.events.drain_into(out)
+    }
+
     /// Render `out_l`/`out_r` in place. This is the audio callback's entry point and
     /// does no allocation on the audio path.
     pub fn process(&mut self, out_l: &mut [f32], out_r: &mut [f32]) {
         let n = out_l.len().min(out_r.len());
+        // A scene queued Now lands on the first sample of the render call after it was
+        // accepted, ahead of anything on that sample.
+        if let Some(p) = self.scheduler.take_now() {
+            self.commit_scene(p.request_id, &p.values, -1);
+        }
         for i in 0..n {
             if self.transport.tick_gesture() {
                 self.stop();
             }
             let onset = self.transport.tick();
             if let Some(step) = onset {
+                // The order on a boundary is fixed (NIGHT3_PROTOCOL.md, Timing):
+                // 1. Commit the scene, so this step's notes are already in it.
+                if let Some(p) = self.scheduler.on_onset(step) {
+                    self.commit_scene(p.request_id, &p.values, step as i32);
+                }
+                // 2. FILL: activate a pending fill here (Night 3, Task B), after the
+                //    scene and before the notes, so the fill's first step plays.
+                // 3. Trigger the step's notes.
                 if !self.transport.in_backspin() {
                     self.trigger(step);
                 }
@@ -917,6 +1069,10 @@ impl Engine {
             // Frozen under a scratch, so the reader's window stays put.
             if !self.scratch.held() {
                 self.ring.push(out_l[i], out_r[i]);
+            }
+            #[cfg(test)]
+            {
+                self.clock += 1;
             }
         }
         for (i, c) in self.channels.iter_mut().enumerate() {
@@ -998,8 +1154,47 @@ impl Engine {
         self.master.process(sum_l + direct_l, sum_r + direct_r)
     }
 
+    /// Set every target a scene holds, in one place, and report `applied` on `step`
+    /// (-1 for Now or stopped). Gains, sends and effects glide to the new targets with
+    /// their usual smoothing (ADR-013); nothing here jumps the audio. No allocation.
+    fn commit_scene(&mut self, request_id: u32, values: &[f32; SCENE_LEN], step: i32) {
+        self.commit_targets(values);
+        self.scheduler.events.push(
+            scheduler::event::SCENE_APPLIED,
+            request_id,
+            step as f64,
+            0.0,
+        );
+        #[cfg(test)]
+        self.trace.push(Trace::Apply(request_id, self.clock));
+    }
+
+    /// The scene's targets, set without scheduling or reporting anything.
+    fn commit_targets(&mut self, values: &[f32; SCENE_LEN]) {
+        for (i, c) in self.channels.iter_mut().enumerate() {
+            let v = &values[i * scheduler::STEM_FIELDS..(i + 1) * scheduler::STEM_FIELDS];
+            c.vol = v[0].clamp(0.0, 1.0);
+            c.send = v[1].clamp(0.0, 1.0);
+            c.muted = v[2] == 1.0;
+            c.solo = v[3] == 1.0;
+        }
+        let fx = &values[scheduler::FX_BASE..];
+        self.set_filter(fx[0]);
+        self.set_filter_q(fx[1]);
+        self.set_bands(fx[2], fx[3], fx[4]);
+        self.set_echo_time(fx[5]);
+        self.set_echo_feedback(fx[6]);
+        self.set_echo_return(fx[7]);
+        self.set_reverb_mix(fx[8]);
+        self.set_reverb_decay(fx[9]);
+        self.set_width(fx[10]);
+        self.set_stereo_balance(fx[11]);
+    }
+
     /// Schedule every hit on `step` into the voice pool.
     fn trigger(&mut self, step: usize) {
+        #[cfg(test)]
+        self.trace.push(Trace::Trigger(step, self.clock));
         let at = step % STEPS;
         let kind = self.track.kind;
         if let Some(vel) = self.track.hit(Stem::Kick, at) {
@@ -1132,6 +1327,7 @@ impl Engine {
     /// Replace the arrangement. Keeps transport running if it already was, and
     /// re-applies the faders so a loaded track's mix is heard immediately.
     pub fn load_track(&mut self, track: Track) {
+        self.scheduler.cancel_pending(reason::TRACK);
         self.track = track;
         self.kick_root_hz = self.track.kick_root_hz();
         for stem in Stem::ALL {
@@ -1293,6 +1489,9 @@ impl Engine {
 fn stem_from_index(index: usize) -> Option<Stem> {
     Stem::ALL.iter().copied().find(|s| s.index() == index)
 }
+
+#[cfg(test)]
+mod scene_tests;
 
 #[cfg(test)]
 mod tests {

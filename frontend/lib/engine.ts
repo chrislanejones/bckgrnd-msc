@@ -32,13 +32,70 @@ export type Telemetry = {
   clipped: boolean;
 };
 
+/** When a queued scene applies (docs/NIGHT3_PROTOCOL.md, Timing). */
+export const SCENE_TIMING = { now: 0, beat: 1, bar: 2 } as const;
+export type SceneTiming = (typeof SCENE_TIMING)[keyof typeof SCENE_TIMING];
+
+/** Length of the engine's scene vector: 8 stems x 4 fields, then 12 effects. */
+export const SCENE_VECTOR_LENGTH = 44;
+
+/** Engine event kinds, the first number of each event. */
+export const ENGINE_EVENT = {
+  sceneQueued: 1,
+  sceneApplied: 2,
+  sceneCancelled: 3,
+  sceneReplaced: 4,
+  sceneRejected: 5,
+  fillQueued: 11,
+  fillStarted: 12,
+  fillEnded: 13,
+  fillCancelled: 14,
+  fillRejected: 15,
+  gestureExpired: 21,
+} as const;
+
+/** Why a request was cancelled or rejected. */
+export const ENGINE_REASON = {
+  invalid: 1,
+  stopped: 2,
+  transport: 3,
+  track: 4,
+  panic: 5,
+  mixing: 6,
+  notPlaying: 7,
+  alreadyPlaying: 8,
+  staleGeneration: 9,
+  cancelledByUser: 10,
+} as const;
+
+/**
+ * One outcome from the audio thread. What `a` and `b` mean depends on `kind`:
+ *
+ * | kind | a | b |
+ * |---|---|---|
+ * | sceneQueued | predicted bar (1-based) | predicted step |
+ * | sceneApplied | step it applied on (-1 for Now / stopped) | 0 |
+ * | sceneCancelled, sceneRejected | reason (`ENGINE_REASON`) | 0 |
+ * | sceneReplaced | request id that replaced it | 0 |
+ */
+export type EngineEvent = {
+  deck: Deck;
+  kind: number;
+  requestId: number;
+  a: number;
+  b: number;
+};
+
 type WorkletMessage =
   | { type: 'telemetry'; frame: Float32Array }
   | { type: 'mixEnd'; deck: Deck }
-  | { type: 'error'; command: string; message: string };
+  | { type: 'error'; command: string; message: string }
+  | { type: 'sceneEvents'; deck: Deck; events: number[] }
+  | { type: 'sceneCancelResult'; deck: Deck; requestId: number; cancelled: boolean };
 
 type Listener = (telemetry: Telemetry) => void;
 type ErrorListener = (message: string) => void;
+type SceneEventListener = (events: readonly EngineEvent[]) => void;
 
 // Stamped with the build, because the file names never change and a browser that
 // had cached the old engine kept playing it after a rebuild.
@@ -50,6 +107,9 @@ export class EngineHost {
   private node: AudioWorkletNode | null = null;
   private listeners = new Set<Listener>();
   private errorListeners = new Set<ErrorListener>();
+  private sceneListeners = new Set<SceneEventListener>();
+  /** `cancelScene` callers waiting on the worklet's answer, by request id. */
+  private cancelWaiters = new Map<number, Array<(cancelled: boolean) => void>>();
 
   /**
    * The most recent fault from the audio thread, if any.
@@ -159,6 +219,27 @@ export class EngineHost {
     }
     if (message.type === 'mixEnd') {
       this.mixEndHandler?.();
+      return;
+    }
+    if (message.type === 'sceneEvents') {
+      const raw = message.events;
+      const events: EngineEvent[] = [];
+      for (let k = 0; k + 3 < raw.length; k += 4) {
+        events.push({
+          deck: message.deck,
+          kind: raw[k],
+          requestId: raw[k + 1],
+          a: raw[k + 2],
+          b: raw[k + 3],
+        });
+      }
+      if (events.length > 0) for (const listener of this.sceneListeners) listener(events);
+      return;
+    }
+    if (message.type === 'sceneCancelResult') {
+      const waiting = this.cancelWaiters.get(message.requestId);
+      this.cancelWaiters.delete(message.requestId);
+      for (const resolve of waiting ?? []) resolve(message.cancelled);
     }
   }
 
@@ -328,6 +409,8 @@ export class EngineHost {
   }
 
   async close(): Promise<void> {
+    for (const waiting of this.cancelWaiters.values()) for (const resolve of waiting) resolve(false);
+    this.cancelWaiters.clear();
     this.node?.disconnect();
     this.node = null;
     await this.ctx?.close();
@@ -349,9 +432,20 @@ export class EngineHost {
 
   // -- Track ----------------------------------------------------------------
 
-  /** Load an arranged track into a deck. The idle deck should stay silent. */
-  loadTrack(deck: Deck, arrangement: TrackArrangement): void {
-    this.post({ type: 'track', deck, json: JSON.stringify(arrangement) });
+  /**
+   * Load an arranged track into a deck. The idle deck should stay silent.
+   *
+   * `generation` is the UI's counter for that deck's loaded track. Scene requests
+   * carry the generation they were made for, and the worklet refuses one whose deck
+   * has since loaded something else. Left out, the deck keeps its previous number.
+   */
+  loadTrack(deck: Deck, arrangement: TrackArrangement, generation?: number): void {
+    this.post({
+      type: 'track',
+      deck,
+      json: JSON.stringify(arrangement),
+      ...(generation === undefined ? {} : { generation }),
+    });
   }
 
   /**
@@ -365,9 +459,66 @@ export class EngineHost {
     bpm: number,
     swing: number,
     onEnd: () => void,
+    generation?: number,
   ): void {
     this.mixEndHandler = onEnd;
-    this.post({ type: 'mix', deck, bpm, swing, json: JSON.stringify(arrangement) });
+    this.post({
+      type: 'mix',
+      deck,
+      bpm,
+      swing,
+      json: JSON.stringify(arrangement),
+      ...(generation === undefined ? {} : { generation }),
+    });
+  }
+
+  // -- Scenes ---------------------------------------------------------------
+
+  /**
+   * Ask the live deck to apply a scene (docs/NIGHT3_PROTOCOL.md).
+   *
+   * `values` is the 44-value scene vector, copied here, so changing the source after
+   * the call changes nothing. `generation` is the live deck's track generation as
+   * the UI knows it. The outcome arrives through `onSceneEvents`: `queued` (with the
+   * bar), then `applied`, or `rejected`, `cancelled` or `replaced`. Only `applied`
+   * means the scene is now the mix.
+   */
+  queueScene(
+    requestId: number,
+    timing: SceneTiming,
+    values: ArrayLike<number>,
+    generation: number,
+  ): void {
+    this.post({
+      type: 'scene',
+      requestId,
+      generation,
+      timing,
+      values: Array.from(values),
+    });
+  }
+
+  /**
+   * Withdraw a queued scene. Resolves true when it was still pending (a `cancelled`
+   * event follows), false when it was not: already applied, replaced, or unknown.
+   */
+  cancelScene(requestId: number): Promise<boolean> {
+    return new Promise((resolve) => {
+      const waiting = this.cancelWaiters.get(requestId) ?? [];
+      waiting.push(resolve);
+      this.cancelWaiters.set(requestId, waiting);
+      this.post({ type: 'cancelScene', requestId });
+    });
+  }
+
+  /**
+   * Subscribe to scene (and later fill and gesture) outcomes from the audio thread.
+   * Each call delivers the events of one render block, oldest first. Returns an
+   * unsubscribe function.
+   */
+  onSceneEvents(listener: SceneEventListener): () => void {
+    this.sceneListeners.add(listener);
+    return () => this.sceneListeners.delete(listener);
   }
 
   /**
