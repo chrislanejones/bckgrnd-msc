@@ -1921,9 +1921,6 @@ html[data-control-drag="yes"] * {
   flex: none;
   display: grid;
   place-items: center;
-  /* Level with the digits, not the amount's box: the box keeps room below the baseline
-     for descenders, so the digits' middle sits about 2px above the box's middle. */
-  translate: 0 -0.14rem;
   width: 1.25rem;
   height: 1.25rem;
   padding: 0;
@@ -2011,6 +2008,9 @@ html[data-control-drag="yes"] * {
 }
 
 .knob-value {
+  display: flex;
+  align-items: center;
+  justify-content: center;
   min-height: 1.6rem;
   padding: 0.1rem 0.2rem;
   border: 1px solid transparent;
@@ -2022,6 +2022,12 @@ html[data-control-drag="yes"] * {
   font-variant-numeric: tabular-nums;
   line-height: 1.2;
   white-space: nowrap;
+}
+
+.knob-value-text {
+  /* Center the visible letters and digits beside Reset, without font ascender or
+     descender space shifting their optical center. */
+  text-box: trim-both cap alphabetic;
 }
 
 .knob-value:hover:not(:disabled) {

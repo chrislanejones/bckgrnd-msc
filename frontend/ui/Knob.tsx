@@ -491,8 +491,10 @@ export const Knob = memo(function Knob({
             aria-label={`${label}: ${spoken}. Type a value`}
             onClick={beginEdit}
           >
-            {shown.text}
-            {shown.unit ? <span className="value-unit"> {shown.unit}</span> : null}
+            <span className="knob-value-text">
+              {shown.text}
+              {shown.unit ? <span className="value-unit"> {shown.unit}</span> : null}
+            </span>
           </button>
         )}
         <button
