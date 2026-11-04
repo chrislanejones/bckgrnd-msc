@@ -287,6 +287,9 @@ function SceneMenu({
           <input
             id={`${titleId}-name`}
             className="scene-rename-input"
+            // The Rename button this replaces had focus; without this it falls to the
+            // page and Escape no longer reaches the menu.
+            autoFocus
             value={draft}
             maxLength={40}
             aria-invalid={invalid || undefined}

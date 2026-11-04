@@ -31,7 +31,7 @@ live performance). Working protocol: `docs/NIGHT3_PROTOCOL.md`.
 | `4d74911` feat(music): one-bar fills | PHPUnit 204 pass; check-arrangement 18 tracks pass; parity 165 pass; check:contract pass |
 | `5181e98` feat(engine): musical scheduler | fmt, clippy -D warnings, cargo test 210 pass (debug + release), build:engine, build:worklet, typecheck. Wasm +6,525 bytes (+3.2%) |
 | `43a598d` feat(engine): overrides, fills, silence, panic | fmt, clippy, cargo test 236 pass (debug + release), build:engine, build:worklet, typecheck. Wasm +13,168 bytes (+6.3%); 60 s native render within noise |
-| UI commit (scene strip, compare, fill, held effects, panic) | PHPUnit 204, check:contract, check:scenes 25/25, typecheck, verify:ui pass, verify:audio pass (room check reworked + new all-cut check) |
+| `fcceeb9` feat(ui): scene strip, compare, fill, held effects, panic | PHPUnit 204, check:contract, check:scenes 25/25, typecheck, verify:ui pass, verify:audio pass (room check reworked + new all-cut check) |
 
 ## Order deviations
 
@@ -46,13 +46,16 @@ live performance). Working protocol: `docs/NIGHT3_PROTOCOL.md`.
 
 | Finding | Status |
 |---|---|
-| Before the first Play there is no worklet, so a scene picked while stopped waited forever ("Sending…") | UI applies it through the parameter path when `!engine.booted`; Silas adds the getter |
-| At boot EngineHost replayed parameters *before* the held track load, and `load_track` resets faders, sends and tempo, so anything moved before the first Play was lost (pre-existing) | Silas swapping the order (held messages first, then parameters) |
+| Before the first Play there is no worklet, so a scene picked while stopped waited forever ("Sending…") | Fixed: UI applies it through the parameter path when `!engine.booted` (getter landed in 43a598d) |
+| At boot EngineHost replayed parameters *before* the held track load, and `load_track` resets faders, sends and tempo, so anything moved before the first Play was lost (pre-existing) | Fixed in 43a598d: held messages replay first, then the latest parameters |
 | Reverb decay changes instantly on a scene change (`set_rt60`), not with the ADR-013 glide | Parking lot |
 | "Stem groups" (Full mix / No drums / No music) also sets cuts, next to the new Full scene | Left alone, flagged to Chris |
 | Capturing B left A marked "Listening" although B is what plays after its capture | Fixed: each capture marks that slot as the one heard |
 | Held effect during an auto-mix would apply to the outgoing deck and go stale | UI refuses held effects while mixing and releases them when a mix starts |
 | Panic mid-mix sends no mixEnd | UI resets its own mix state on Panic |
+| Rename… dropped focus to the page, so Escape stopped closing the menu (Tara) | Fixed: the field takes focus |
+| Keep current with a compare listen still queued let it land afterwards and replace the kept mix (Tara) | Fixed: Keep current cancels a queued listen or Exit |
+| Any focus change released a held pad, so on touch "hold Filter, tap Drop" let go of Filter (Tara found, main session fixed) | Fixed: focus loss ends keyboard holds only; pointer holds end on pointer up / cancel / lost capture. verify-ui pins it |
 
 ## Browser probes (worktree on :8180)
 
@@ -70,6 +73,30 @@ live performance). Working protocol: `docs/NIGHT3_PROTOCOL.md`.
 | Compare A → B → Exit | Each heard on the boundary; Exit restores the earlier mix; scenes intact |
 | Panic with a launch queued | Stopped, nothing queued, effects released |
 
+## Final gates (worktree build, :8180 / :8190)
+
+| Gate | Result |
+|---|---|
+| cargo fmt / clippy -D warnings | pass |
+| cargo test (Silas, after 43a598d) | **236** pass, debug and release |
+| PHPUnit | **204** pass |
+| check:contract | 16/16 fixtures, every track round-trips with scenes |
+| check:scenes | **25/25** |
+| typecheck, build, build:static | pass |
+| verify:ui | **152** ok (was 75), 0 FAIL, mutation-tested by Tara |
+| verify:audio | all pass, including balance and the new all-cut silence check |
+| verify:static | pass; static library carries the fills |
+| Listening pass | **not done: needs Chris** |
+
 ## Skipped or deferred
 
-(filled in as it happens)
+| Item | Where it went | Why |
+|---|---|---|
+| Compact and expanded mixer (was on the roadmap's Night 3 list) | Night 4 | Not in the Night 3 spec; the Night 4 editor drawer competes for the same space |
+| Stutter / beat-repeat | Night 4 | Spec: defer unless the DSP already exists; it doesn't |
+| Group pads that mute groups on the next bar | Later | The existing Stem groups still apply at once; scenes cover the quantized case |
+| Last-beat fill, Fill into Drop, Drop + Crash accents | Night 4 | Spec: one predictable one-bar fill first |
+| Timed 8-bar builds / automation | Night 4 | Spec: Build is a snapshot in Night 3 |
+| Scene ownership across a crossfade | Night 5 | Spec: launches and fills are refused during an auto-mix |
+| Saving scenes and Compare A/B to disk | Night 5 | No project save exists yet |
+| A listening pass (clicks, tails, level jumps, held-effect feel) | Chris | Can't be done by an agent; state checks pass but do not prove it sounds right |

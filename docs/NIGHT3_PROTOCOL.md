@@ -291,10 +291,11 @@ playing, 8 already playing, 9 stale generation, 10 cancelled by the user.
   the stab and lead band: untrimmed, a dense mix measured about 1 dB louder held than
   open; trimmed it is 0.5 to 1.2 dB quieter. It glides in and out with the filter's
   own 30 ms smoothing.
-- The older latched toggle (`{type: 'echo', on}`, `Engine::set_echo`) still works
-  until the UI moves to tokens. It is combined with any held Echo Throw, is not
-  leased, and survives Stop and track loads (the UI owns the latch); Release FX and
-  Panic turn it off, so the UI clears its latch on those too.
+- The older latched toggle (`{type: 'echo', on}`, `Engine::set_echo`) is no longer
+  sent by the UI, which uses gesture tokens for Echo Throw. The engine still accepts
+  it (verify-audio drives it directly): it is combined with any held Echo Throw, is
+  not leased, survives Stop and track loads, and Release FX and Panic turn it off.
+  Removing it is in PARKING_LOT.md.
 
 ## Silence, solo and transition sounds
 

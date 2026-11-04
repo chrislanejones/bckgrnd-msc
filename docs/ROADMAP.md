@@ -79,7 +79,7 @@ screen readers on a device (checklist in DESIGN_PHILOSOPHY.md).
 
 ## Night 3: performance mode, scenes, transitions
 
-- A compact and an expanded mixer (moved from Night 2).
+- A compact and an expanded mixer (moved from Night 2). *Not built; moved to Night 4.*
 
 - Quantized performance controls: trigger a break, a build or a drop on the next bar;
   a fill at the end of a phrase; momentary filter sweep, echo throw and stutter while
@@ -88,6 +88,23 @@ screen readers on a device (checklist in DESIGN_PHILOSOPHY.md).
 - Group pads that mute or restore groups of stems on the next bar.
 - Scene snapshots: several mixes of the same track, switched during playback. A/B
   between two without interrupting playback.
+
+**Status:** done 11-04-2026. Four scene slots (Full, Sparse, Build, Drop) stored as
+complete snapshots in project version 2, with a v1 migration that adds the track's
+factory scenes and applies none (ADR-014). A scheduler in the engine that commits a
+whole scene at once, Now, on the next beat or on the next bar (the default), counted
+on its own onset clock, with an explicit outcome for every request; only the engine's
+`applied` marks a scene active (ADR-015). The scene strip with Queued · Bar N,
+Active · Modified, Cancel queued and a menu for capture, rename, duplicate and reset;
+Shift+1–4. Echo throw and Filter hold as held overrides on top of the mix, Release
+FX, and Panic. A one-bar fill per track, prepared in PHP. Compare A/B for the
+session. Silence rules: a launch makes no transition sound, solo suppresses them and
+flushes the echo and room, and every stem cut fades out the returns. The working
+protocol is [NIGHT3_PROTOCOL.md](NIGHT3_PROTOCOL.md). Not done: the compact and
+expanded mixer (*moved to Night 4*), stutter (*moved to Night 4*), group pads on the
+next bar (the Stem groups buttons still apply at once; see
+[PARKING_LOT.md](../PARKING_LOT.md)), and a fill at the end of a phrase: the fill
+starts on the next bar, wherever that falls.
 
 ## Night 4: pattern editing and musical variation
 
@@ -100,6 +117,23 @@ screen readers on a device (checklist in DESIGN_PHILOSOPHY.md).
 - Humanize (velocity and timing), generated variations that respect key and harmony,
   and a "randomize mix" that only picks musically sensible levels and mutes.
 
+Picked up from Night 3:
+
+- **Pattern references in scenes.** Every scene already carries a `patterns` key that
+  must be empty; today any key in it refuses the whole set (ADR-014). Filling it is a
+  contract change: schema, both readers and the fixtures move together.
+- **Timed builds and automation.** A Build that rises over several bars instead of
+  landing on one boundary.
+- **A last-beat fill and fill-into-drop.** Today's fill starts on the next bar,
+  wherever that falls. Next: a fill that lands at the end of a phrase and leads
+  straight into a Drop launch.
+- **Drop + Crash accents.** A scene launch makes no transition sound, by design. A
+  Drop with a crash on its downbeat has to be a separate, explicit choice.
+- **Stutter / beat-repeat while held** (from Night 3's list), as another tokened
+  gesture.
+- **A compact and an expanded mixer** (moved from Night 3), sized around the scene
+  strip and the editor drawer.
+
 ## Night 5: projects, undo, export, hardening
 
 - Save, reopen, rename and delete projects. Migrate project v1 and legacy presets
@@ -108,6 +142,16 @@ screen readers on a device (checklist in DESIGN_PHILOSOPHY.md).
 - Export to WAV by rendering offline with the same engine (the MCP companion already
   does this in Node).
 - Reliability: rapid parameter changes, tab suspension, device changes, long sessions.
+
+Picked up from Night 3:
+
+- **Project save carries the scenes.** Version 2 already holds them; the active scene
+  stays session state and is never saved. Today a track change starts over on that
+  track's factory scenes.
+- **Whether Compare A/B is ever saved.** It is session-only now, and the UI says so.
+- **Scene ownership across a crossfade.** Launches wait while Auto mix runs, and the
+  incoming track starts on its factory scenes. Decide which deck's scenes the strip
+  shows during a mix and what carries over after it.
 
 ## Night 6: NativePHP packaging and MCP reconnection
 

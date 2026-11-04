@@ -4,7 +4,8 @@
  * `verify-audio` proves the engine sounds; this proves the layout described in
  * docs/DESIGN_PHILOSOPHY.md works: every width is usable without sideways scrolling,
  * focus is visible, every silent stem says why, the inspector and the pattern drawer
- * open and close, and the phone views show one view at a time.
+ * open and close, and the phone views show one view at a time. The Night 3 section holds
+ * the scene strip, Fill, held effects, Compare A/B and Panic to docs/NIGHT3_PROTOCOL.md.
  *
  * Usage: node tools/verify-ui.mjs [baseUrl]
  * Set PLAYWRIGHT_CHROMIUM to a Chromium binary if Playwright's own is not installed.
@@ -402,6 +403,504 @@ try {
       `${await fader.inputValue()} vs ${home}`);
 
     check('knobs: no page errors', errors.length === 0, errors.join('; '));
+    await page.close();
+  }
+
+  // ---- Scenes, musical timing and live performance (Night 3). ----------------
+  // docs/NIGHT3_PROTOCOL.md: a pad reads Active only once the engine applied it, a
+  // launch lands on the next bar, and held effects never reach the working mix.
+  {
+    const { page, errors } = await open(1440, 1000, { hasTouch: true });
+    try {
+      await page.waitForSelector('.scene-slot');
+      const T = { timeout: 8000 };
+      const slot = (i) => page.locator('.scene-slot').nth(i);
+      const pad = (i) => slot(i).locator('.scene-pad');
+      const stateOf = (i) => slot(i).getAttribute('data-state');
+      const lineOf = async (i) => (await slot(i).locator('.scene-line').textContent())?.trim();
+      const names = () => page.locator('.scene-name').allTextContents();
+      const statusText = async () => (await page.locator('.scene-status').textContent())?.trim();
+      const waitState = (i, states) =>
+        page.waitForFunction(
+          ([n, list]) => list.includes(document.querySelectorAll('.scene-slot')[n]?.getAttribute('data-state')),
+          [i, [].concat(states)],
+          T,
+        );
+      const waitLine = (i, re) =>
+        page.waitForFunction(
+          ([n, src]) => new RegExp(src).test(document.querySelectorAll('.scene-slot')[n]?.querySelector('.scene-line')?.textContent?.trim() ?? ''),
+          [i, re.source],
+          T,
+        );
+      const waitText = (selector, re) =>
+        page.waitForFunction(
+          ([sel, src]) => new RegExp(src).test(document.querySelector(sel)?.textContent?.trim() ?? ''),
+          [selector, re.source],
+          T,
+        );
+      const waitStatus = (re) => waitText('.scene-status', re);
+      const knob = (label) =>
+        page.locator('.knob').filter({ has: page.locator('label.knob-label', { hasText: new RegExp(`^${label}$`) }) });
+      const shown = async (label) => (await knob(label).locator('.knob-value').textContent())?.replace(/\s+/g, ' ').trim();
+      const playing = () => page.locator('.app').getAttribute('data-playing');
+      // A bar boundary, as the transport counts it: launching right after one leaves
+      // nearly a whole bar (about 1.9 s at 126 BPM) before the next.
+      const barNow = () => page.locator('.bar-readout .tabular-nums').textContent();
+      const nextBar = async () => {
+        const b = await barNow();
+        await page.waitForFunction((was) => document.querySelector('.bar-readout .tabular-nums')?.textContent !== was, b, T);
+      };
+      // Every state each pad passes through. A queued line can be brief, so watch the
+      // DOM rather than poll it.
+      await page.evaluate(() => {
+        const record = () =>
+          document.querySelectorAll('.scene-slot').forEach((el, i) => {
+            const t = `${el.getAttribute('data-state')}|${el.querySelector('.scene-line')?.textContent?.trim()}`;
+            const seen = window.__SCENE_LINES__[i];
+            if (seen.at(-1) !== t) seen.push(t);
+          });
+        window.__SCENE_LINES_RESET__ = () => {
+          window.__SCENE_LINES__ = [[], [], [], []];
+          record();
+        };
+        window.__SCENE_LINES_RESET__();
+        new MutationObserver(record).observe(document.querySelector('.scene-pads'), {
+          subtree: true,
+          childList: true,
+          characterData: true,
+          attributes: true,
+        });
+      });
+      const resetHistory = () => page.evaluate(() => window.__SCENE_LINES_RESET__());
+      const history = (i) => page.evaluate((n) => window.__SCENE_LINES__[n], i);
+      const releaseFx = page.getByRole('button', { name: 'Release FX' });
+      const fillButton = page.locator('.fill-button');
+      const filterPad = page.getByRole('button', { name: 'Filter hold, while held' });
+      const echoPad = page.getByRole('button', { name: 'Echo throw, while held' });
+      const center = async (locator) => {
+        await locator.scrollIntoViewIfNeeded();
+        const b = await locator.boundingBox();
+        return { x: b.x + b.width / 2, y: b.y + b.height / 2 };
+      };
+      const cdp = await page.context().newCDPSession(page);
+      const touch = (type, p) =>
+        cdp.send('Input.dispatchTouchEvent', { type, touchPoints: type === 'touchEnd' ? [] : [{ x: p.x, y: p.y }] });
+      const filterLegend = () =>
+        page.locator('.inspector-legend').filter({ hasText: /^Filter/ }).textContent();
+      const openMenu = async (i) => {
+        await slot(i).locator('.scene-menu-button').click();
+        await page.getByRole('dialog').waitFor();
+      };
+      const menuClosed = async () => (await page.getByRole('dialog').count()) === 0;
+
+      // Stopped, never played.
+      check('scenes: four pads, named Full, Sparse, Build, Drop',
+        JSON.stringify(await names()) === '["Full","Sparse","Build","Drop"]', (await names()).join(', '));
+      check('scenes: Bar is the default timing',
+        (await page.getByRole('button', { name: 'Launch on the next bar' }).getAttribute('aria-pressed')) === 'true');
+      check('scenes: Cancel queued is disabled with nothing queued',
+        await page.getByRole('button', { name: 'Cancel queued scene' }).isDisabled());
+      const fillTitle = await fillButton.getAttribute('title');
+      check('fill: disabled while stopped, and the title says why',
+        (await fillButton.isDisabled()) && /play/i.test(fillTitle ?? ''), fillTitle);
+      check('held effects: Release FX is disabled with nothing held', await releaseFx.isDisabled());
+
+      // A scene picked before the first Play is active at once and starts nothing.
+      await pad(1).click();
+      await waitState(1, 'active');
+      await page.waitForTimeout(400);
+      check('scenes: before the first Play a scene is Active at once',
+        (await lineOf(1)) === 'Active' && (await statusText()) === 'Sparse active', `${await lineOf(1)} / ${await statusText()}`);
+      check('scenes: and playback stays stopped', (await playing()) === 'no');
+      check('scenes: the stopped scene set the mix (Sparse cuts the kick)', (await stemState(page, 'kick')).state === 'cut');
+
+      await page.getByRole('button', { name: 'Play the track' }).click();
+      await page.waitForFunction(() => document.querySelector('.app')?.getAttribute('data-playing') === 'yes');
+      check('scenes: still active after Play', (await stateOf(1)) === 'active' && (await stemState(page, 'kick')).state === 'cut');
+
+      // The status line is for discrete changes: nothing queued, it holds still while
+      // the bars go by.
+      const statusRole = await page.locator('.scene-status').evaluate((el) => `${el.getAttribute('role')}/${el.getAttribute('aria-live')}`);
+      check('scenes: the status line is a polite live region', statusRole === 'status/polite', statusRole);
+      await page.evaluate(() => {
+        window.__STATUS_MUTATIONS__ = 0;
+        new MutationObserver((m) => {
+          window.__STATUS_MUTATIONS__ += m.length;
+        }).observe(document.querySelector('.scene-status'), { subtree: true, childList: true, characterData: true });
+      });
+      const samples = [await statusText()];
+      for (let i = 0; i < 3; i += 1) {
+        await nextBar();
+        samples.push(await statusText());
+      }
+      const statusMutations = await page.evaluate(() => window.__STATUS_MUTATIONS__);
+      check('scenes: the status line does not change every beat',
+        new Set(samples).size === 1 && statusMutations === 0, `${samples.join(' | ')}; ${statusMutations} mutations over 3 bars`);
+
+      // Drop mid-bar: Queued · Bar N, then Active on that bar, with Drop's open filter.
+      await page.getByRole('slider', { name: 'Cutoff' }).fill('500');
+      const closedCutoff = await shown('Cutoff');
+      await resetHistory();
+      await nextBar();
+      await pad(3).click();
+      await waitLine(3, /^Queued · Bar \d+$/);
+      const queuedLine = await lineOf(3);
+      const queuedAnim = await pad(3).evaluate((el) => getComputedStyle(el).animationName);
+      check('scenes: pressing Drop while playing shows Queued · Bar N', /^Queued · Bar \d+$/.test(queuedLine), queuedLine);
+      check('scenes: a queued pad pulses (with motion allowed)', queuedAnim === 'scene-queued', queuedAnim);
+      check('scenes: queued is not active yet: Sparse still is',
+        (await stateOf(3)) === 'queued' && ['active', 'modified'].includes(await stateOf(1)), `Drop ${await stateOf(3)}, Sparse ${await stateOf(1)}`);
+      await waitState(3, 'active');
+      check('scenes: Drop becomes Active on the next bar', (await lineOf(3)) === 'Active' && (await statusText()) === 'Drop active', await statusText());
+      // The transport's readout trails the engine's applied event by one telemetry tick.
+      const announced = queuedLine.replace(/\D+/g, '').padStart(2, '0');
+      const onTime = await page
+        .waitForFunction((n) => document.querySelector('.bar-readout .tabular-nums')?.textContent === n, announced, { timeout: 500 })
+        .then(() => true, () => false);
+      check('scenes: it landed on the bar it announced', onTime, `announced ${queuedLine}, transport at bar ${await barNow()}`);
+      check("scenes: the Cutoff knob shows Drop's open filter", (await shown('Cutoff')) === 'Open', `${closedCutoff} -> ${await shown('Cutoff')}`);
+      const dropSeen = await history(3);
+      check('scenes: the pad said Sending, then Queued, then Active',
+        dropSeen.findIndex((s) => s.startsWith('sending')) < dropSeen.findIndex((s) => s.startsWith('queued')) &&
+          dropSeen.findIndex((s) => s.startsWith('queued')) < dropSeen.findIndex((s) => s.startsWith('active')) &&
+          dropSeen.some((s) => s.startsWith('sending')),
+        dropSeen.join(' > '));
+
+      // A knob moved afterwards: Active · Modified.
+      await page.getByRole('slider', { name: 'Resonance' }).fill('600');
+      await waitState(3, 'modified');
+      check('scenes: moving a knob after a launch shows Active · Modified', (await lineOf(3)) === 'Active · Modified', await lineOf(3));
+
+      // Build, then Sparse before the boundary: only Sparse lands, on Build's bar.
+      await resetHistory();
+      await nextBar();
+      await pad(2).click();
+      await waitLine(2, /^Queued · Bar \d+$/);
+      const buildLine = await lineOf(2);
+      await pad(1).click();
+      await waitLine(1, /^Queued · Bar \d+$/);
+      check("scenes: a second launch clears the first one's line",
+        (await lineOf(2)) === '' && (await stateOf(2)) === 'available', `${await stateOf(2)} "${await lineOf(2)}"`);
+      check("scenes: the replacement keeps the bar already announced", (await lineOf(1)) === buildLine, `${buildLine} vs ${await lineOf(1)}`);
+      await waitState(1, 'active');
+      const buildSeen = await history(2);
+      check('scenes: only Sparse becomes active; Build never does',
+        !buildSeen.some((s) => s.startsWith('active')) && (await stateOf(2)) === 'available' && (await stateOf(3)) === 'available',
+        buildSeen.join(' > '));
+
+      // Queue, then Cancel queued: nothing changes.
+      await nextBar();
+      await pad(0).click();
+      await waitLine(0, /^Queued · Bar \d+$/);
+      await page.getByRole('button', { name: 'Cancel queued Full' }).click();
+      await waitStatus(/^Full cancelled$/);
+      check('scenes: Cancel queued clears the queued line', (await lineOf(0)) === '' && (await stateOf(0)) === 'available');
+      await nextBar();
+      await page.waitForTimeout(300);
+      check('scenes: after Cancel queued the previous scene is still the active one',
+        (await stateOf(1)) === 'active' && (await stateOf(0)) === 'available', `Full ${await stateOf(0)}, Sparse ${await stateOf(1)}`);
+      check('scenes: status says it was cancelled', (await statusText()) === 'Full cancelled', await statusText());
+      check('scenes: Cancel queued goes back to disabled', await page.getByRole('button', { name: 'Cancel queued scene' }).isDisabled());
+
+      // Pressing the queued pad again cancels it too.
+      await nextBar();
+      await pad(0).click();
+      await waitStatus(/^Full queued for bar \d+$/);
+      await pad(0).click();
+      const padCancelled = await waitStatus(/^Full cancelled$/).then(() => true, () => false);
+      await nextBar();
+      await page.waitForTimeout(300);
+      check('scenes: pressing the queued pad again cancels it',
+        padCancelled && (await stateOf(1)) === 'active' && (await stateOf(0)) === 'available',
+        `${await statusText()}; Full ${await stateOf(0)}, Sparse ${await stateOf(1)}`);
+
+      // Shift+1..4 launch by physical key. Each replaces the one before; then cancel.
+      await page.locator('body').click({ position: { x: 5, y: 600 } });
+      await resetHistory();
+      await nextBar();
+      for (let d = 1; d <= 4; d += 1) {
+        await page.keyboard.press(`Shift+Digit${d}`);
+        await waitState(d - 1, ['sending', 'queued']);
+      }
+      const shiftSeen = await Promise.all([0, 1, 2, 3].map(history));
+      await page.getByRole('button', { name: 'Cancel queued Drop' }).click();
+      await waitStatus(/^Drop cancelled$/);
+      check('scenes: Shift+1..4 launch the four pads',
+        shiftSeen.every((seen) => seen.some((s) => /^(sending|queued)/.test(s))), shiftSeen.map((s) => s.join(' > ')).join(' || '));
+
+      // The menu: capture, rename (blank refused), duplicate, reset, Escape.
+      await openMenu(3);
+      await page.getByRole('button', { name: 'Capture current mix' }).click();
+      check('menu: Capture current mix stores into the slot and closes',
+        (await statusText()) === 'Captured the current mix into Drop' && (await menuClosed()), await statusText());
+      await openMenu(0);
+      await page.getByRole('button', { name: 'Rename…' }).click();
+      const nameField = page.getByRole('textbox', { name: 'Scene name' });
+      check('menu: Rename… puts focus in the name field', await nameField.evaluate((el) => el === document.activeElement));
+      await nameField.fill('   ');
+      await page.getByRole('button', { name: 'Save name' }).click();
+      check('menu: a blank name is refused (aria-invalid) and the menu stays open',
+        (await nameField.getAttribute('aria-invalid')) === 'true' && !(await menuClosed()) && (await names())[0] === 'Full');
+      await nameField.fill('');
+      await nameField.focus();
+      await resetHistory();
+      await page.keyboard.press('Shift+Digit3');
+      await page.waitForTimeout(250);
+      const typedSeen = await Promise.all([0, 1, 2, 3].map(history));
+      check('scenes: Shift+digit typed into the rename field types, and launches nothing',
+        (await nameField.inputValue()) === '#' && typedSeen.every((seen) => !seen.some((s) => /^(sending|queued)/.test(s))),
+        `field "${await nameField.inputValue()}"; ${typedSeen.map((s) => s.join(' > ')).join(' || ')}`);
+      await nameField.fill('Intro');
+      await page.getByRole('button', { name: 'Save name' }).click();
+      check('menu: a valid name shows on the pad', (await names())[0] === 'Intro' && (await menuClosed()), (await names()).join(', '));
+      await openMenu(3);
+      await page.getByRole('button', { name: 'Duplicate Drop into the Build slot' }).click();
+      check('menu: Duplicate copies into another slot',
+        JSON.stringify(await names()) === '["Intro","Sparse","Drop","Drop"]' && (await menuClosed()), (await names()).join(', '));
+      await openMenu(0);
+      await page.getByRole('button', { name: 'Reset to factory' }).click();
+      await openMenu(2);
+      await page.getByRole('button', { name: 'Reset to factory' }).click();
+      check('menu: Reset to factory restores the recipe name',
+        JSON.stringify(await names()) === '["Full","Sparse","Build","Drop"]' && (await statusText()) === 'Build is back to its factory mix',
+        `${(await names()).join(', ')} / ${await statusText()}`);
+      await openMenu(1);
+      await page.keyboard.press('Escape');
+      check('menu: Escape closes it', (await menuClosed()) && (await slot(1).locator('.scene-menu-button').getAttribute('aria-expanded')) === 'false');
+      await openMenu(1);
+      await page.getByRole('button', { name: 'Rename…' }).click();
+      await page.keyboard.press('Escape');
+      check('menu: Escape closes it from the rename field too, renaming nothing',
+        (await menuClosed()) && (await names())[1] === 'Sparse');
+
+      // Fill: first press queues, second cancels; then one plays its bar and returns.
+      await nextBar();
+      await fillButton.click();
+      await waitText('.fill-button', /^Fill · Bar \d+$/);
+      check('fill: the first press queues it for the next bar', /^Fill · Bar \d+$/.test(await fillButton.textContent()), await fillButton.textContent());
+      await fillButton.click();
+      await page.waitForFunction(() => document.querySelector('.fill-button')?.getAttribute('data-state') === 'idle', null, T);
+      check('fill: a second press before it starts cancels it',
+        (await fillButton.textContent()) === 'Fill' && (await statusText()) === 'Fill cancelled', await statusText());
+      await nextBar();
+      await fillButton.click();
+      await page.waitForFunction(() => document.querySelector('.fill-button')?.getAttribute('data-state') === 'playing', null, T);
+      check('fill: it plays its bar, and the button is disabled meanwhile', await fillButton.isDisabled());
+      await page.waitForFunction(() => document.querySelector('.fill-button')?.getAttribute('data-state') === 'idle', null, T);
+      check('fill: then it returns to idle', (await fillButton.textContent()) === 'Fill' && !(await fillButton.isDisabled()));
+
+      // Held Filter: pressed while the pointer is down (and captured), the knob keeps
+      // showing the mix underneath, letting go releases it.
+      await page.getByRole('slider', { name: 'Cutoff' }).fill('900');
+      const baseCutoff = await shown('Cutoff');
+      const f = await center(filterPad);
+      await page.mouse.move(f.x, f.y);
+      await page.mouse.down();
+      await page.waitForFunction(() => document.querySelector('[aria-label="Filter hold, while held"]')?.getAttribute('aria-pressed') === 'true', null, T);
+      const captured = await filterPad.evaluate((el) => el.hasPointerCapture(1));
+      check('held: holding Filter presses the pad, with the pointer captured', captured);
+      check('held: the Filter heading says held', (await filterLegend()) === 'Filter · held', await filterLegend());
+      check('held: the Cutoff knob still shows its base value', (await shown('Cutoff')) === baseCutoff, `${baseCutoff} vs ${await shown('Cutoff')}`);
+      check('held: Release FX is enabled while something is held', await releaseFx.isEnabled());
+      await page.mouse.move(f.x + 220, f.y - 160);
+      check('held: sliding off the pad keeps it held', (await filterPad.getAttribute('aria-pressed')) === 'true');
+      await page.mouse.up();
+      await page.waitForFunction(() => document.querySelector('[aria-label="Filter hold, while held"]')?.getAttribute('aria-pressed') === 'false', null, T);
+      check('held: letting go releases it', (await filterLegend()) === 'Filter' && (await releaseFx.isDisabled()));
+
+      // Held Echo, then the window loses focus: released.
+      const e = await center(echoPad);
+      await page.mouse.move(e.x, e.y);
+      await page.mouse.down();
+      await page.waitForFunction(() => document.querySelector('[aria-label="Echo throw, while held"]')?.getAttribute('aria-pressed') === 'true', null, T);
+      await page.evaluate(() => window.dispatchEvent(new Event('blur')));
+      await page.waitForFunction(() => document.querySelector('[aria-label="Echo throw, while held"]')?.getAttribute('aria-pressed') === 'false', null, T);
+      check('held: the window losing focus releases a held Echo', await releaseFx.isDisabled());
+      await page.mouse.up();
+
+      // Release FX lets go while a finger still holds the pad. (The pad must not have
+      // focus: a focused pad releases on blur, which would pass this for the wrong reason.)
+      const touchHold = async () => {
+        await page.evaluate(() => document.activeElement?.blur());
+        const at = await center(filterPad);
+        await touch('touchStart', at);
+        await page.waitForFunction(() => document.querySelector('[aria-label="Filter hold, while held"]')?.getAttribute('aria-pressed') === 'true', null, T);
+        return at;
+      };
+      let finger = await touchHold();
+      await page.locator('body').click({ position: { x: 5, y: 600 } });
+      check('held: a click elsewhere does not release a held pad', (await filterPad.getAttribute('aria-pressed')) === 'true');
+      // A second finger tapping another control moves focus off the held pad. A touch
+      // hold must survive that (hold Filter, tap Drop); only a keyboard hold ends on blur.
+      await page.evaluate(() => {
+        const pad = document.querySelector('[aria-label="Filter hold, while held"]');
+        pad?.focus();
+        document.querySelector('.scene-pad')?.focus();
+      });
+      check('held: focus moving to another control does not end a touch hold', (await filterPad.getAttribute('aria-pressed')) === 'true');
+      await releaseFx.click();
+      check('held: Release FX releases a held effect',
+        (await filterPad.getAttribute('aria-pressed')) === 'false' && (await filterLegend()) === 'Filter' && (await releaseFx.isDisabled()));
+      check('held: Release FX leaves the working mix alone', (await shown('Cutoff')) === baseCutoff, await shown('Cutoff'));
+      await touch('touchEnd', finger);
+
+      // Capture during a held Filter stores the base, not the held treatment.
+      finger = await touchHold();
+      await openMenu(0);
+      await page.getByRole('button', { name: 'Capture current mix' }).click();
+      const heldAtCapture = await filterPad.getAttribute('aria-pressed');
+      await touch('touchEnd', finger);
+      await page.getByRole('button', { name: 'Reset cutoff' }).click();
+      await page.getByRole('button', { name: 'Launch now' }).click();
+      await pad(0).click();
+      await waitState(0, 'active');
+      check('held: a capture during a held Filter stores the base Cutoff',
+        heldAtCapture === 'true' && (await shown('Cutoff')) === baseCutoff, `held ${heldAtCapture}; launched Full shows ${await shown('Cutoff')}, base ${baseCutoff}`);
+
+      // Compare A/B on the bar: capture A, change, capture B, hear each, Exit.
+      await page.getByRole('button', { name: 'Launch on the next bar' }).click();
+      const chip = (i) => page.locator('.compare-chip').nth(i);
+      const chipText = async (i) => (await chip(i).textContent())?.trim();
+      const waitChip = (i, text) =>
+        page.waitForFunction(([n, t]) => document.querySelectorAll('.compare-chip')[n]?.textContent?.trim() === t, [i, text], T);
+      const beforeCutoff = await shown('Cutoff');
+      const beforeRes = await shown('Resonance');
+      const namesBefore = JSON.stringify(await names());
+      await page.getByRole('button', { name: 'Capture A' }).click();
+      check('compare: Capture A, and A is what is heard', (await chipText(0)) === 'A · Listening', await chipText(0));
+      await page.getByRole('slider', { name: 'Cutoff' }).fill('300');
+      const bCutoff = await shown('Cutoff');
+      check('compare: editing after capture shows A · Modified', (await chipText(0)) === 'A · Modified', await chipText(0));
+      await page.getByRole('button', { name: 'Capture B' }).click();
+      check('compare: Capture B shows B · Listening',
+        (await chipText(1)) === 'B · Listening' && (await chipText(0)) === 'A', `${await chipText(0)} / ${await chipText(1)}`);
+      await nextBar();
+      await chip(0).click();
+      await waitChip(0, 'A · Queued');
+      await waitChip(0, 'A · Listening');
+      check('compare: listening to A lands on the bar and brings its knob back', (await shown('Cutoff')) === beforeCutoff, `${bCutoff} -> ${await shown('Cutoff')}`);
+      await nextBar();
+      await chip(1).click();
+      await waitChip(1, 'B · Listening');
+      check('compare: listening to B brings B back', (await shown('Cutoff')) === bCutoff, await shown('Cutoff'));
+      await page.getByRole('slider', { name: 'Resonance' }).fill('250');
+      await waitChip(1, 'B · Modified');
+      await page.getByRole('button', { name: 'Update B' }).click();
+      check('compare: Update B replaces B with what is playing', (await chipText(1)) === 'B · Listening', await chipText(1));
+      await nextBar();
+      await page.getByRole('button', { name: 'Exit comparison' }).click();
+      await page.getByRole('button', { name: 'Capture A' }).waitFor(T);
+      check('compare: Exit comparison brings back the mix from before Capture A',
+        (await shown('Cutoff')) === beforeCutoff && (await shown('Resonance')) === beforeRes,
+        `${await shown('Cutoff')} / ${await shown('Resonance')} vs ${beforeCutoff} / ${beforeRes}`);
+      check('compare: the scene slots are unchanged, and Full is active again',
+        JSON.stringify(await names()) === namesBefore && (await stateOf(0)) === 'active', `${(await names()).join(', ')}; Full ${await stateOf(0)}`);
+      await page.getByRole('button', { name: 'Capture A' }).click();
+      await page.getByRole('slider', { name: 'Cutoff' }).fill('400');
+      const keptCutoff = await shown('Cutoff');
+      await page.getByRole('button', { name: 'Keep current' }).click();
+      check('compare: Keep current closes the comparison and keeps the mix',
+        (await chipText(0)) === 'Capture A' && (await shown('Cutoff')) === keptCutoff && (await statusText()) === 'Kept the current mix',
+        `${await chipText(0)} / ${await shown('Cutoff')} / ${await statusText()}`);
+      // Keep current while a listen is still queued: what is heard now is kept, and the
+      // queued one never lands over it.
+      await page.getByRole('button', { name: 'Capture A' }).click();
+      await page.getByRole('slider', { name: 'Cutoff' }).fill('600');
+      await page.getByRole('button', { name: 'Capture B' }).click();
+      const heardCutoff = await shown('Cutoff');
+      await nextBar();
+      await chip(0).click();
+      await waitChip(0, 'A · Queued');
+      await page.getByRole('button', { name: 'Keep current' }).click();
+      await nextBar();
+      await page.waitForTimeout(300);
+      check('compare: Keep current with a listen queued keeps what was heard',
+        (await shown('Cutoff')) === heardCutoff && (await chipText(0)) === 'Capture A',
+        `${heardCutoff} -> ${await shown('Cutoff')}; ${await statusText()}`);
+
+      // Panic with a launch queued: stopped, nothing queued, says Panic.
+      await nextBar();
+      await pad(3).click();
+      await waitLine(3, /^Queued · Bar \d+$/);
+      await page.getByRole('button', { name: 'Panic', exact: true }).click();
+      await page.waitForFunction(() => document.querySelector('.app')?.getAttribute('data-playing') === 'no', null, T);
+      await page.waitForTimeout(300);
+      check('panic: stops playback, and the queued line clears',
+        (await lineOf(3)) === '' && (await stateOf(3)) === 'available', `${await stateOf(3)} "${await lineOf(3)}"`);
+      check('panic: the status line says Panic', /Panic/.test(await statusText()), await statusText());
+      check('panic: nothing is left to cancel', await page.getByRole('button', { name: 'Cancel queued scene' }).isDisabled());
+
+    } catch (e) {
+      check('scenes: the walk-through ran to the end', false, String(e.message).split('\n')[0]);
+    }
+    check('scenes: no page errors', errors.length === 0, errors.join('; '));
+    await page.close();
+  }
+
+  // ---- Scenes with reduced motion: a queued pad holds still but still says so. --
+  {
+    const { page, errors } = await open(1440, 1000, { reducedMotion: 'reduce' });
+    try {
+      await page.getByRole('button', { name: 'Play the track' }).click();
+      await page.waitForFunction(() => document.querySelector('.app')?.getAttribute('data-playing') === 'yes');
+      const b = await page.locator('.bar-readout .tabular-nums').textContent();
+      await page.waitForFunction((was) => document.querySelector('.bar-readout .tabular-nums')?.textContent !== was, b, { timeout: 8000 });
+      const drop = page.locator('.scene-slot').nth(3);
+      await drop.locator('.scene-pad').click();
+      await page.waitForFunction(() => /^Queued · Bar \d+$/.test(document.querySelectorAll('.scene-slot')[3]?.querySelector('.scene-line')?.textContent?.trim() ?? ''), null, { timeout: 8000 });
+      const anim = await drop.locator('.scene-pad').evaluate((el) => getComputedStyle(el).animationName);
+      const line = (await drop.locator('.scene-line').textContent())?.trim();
+      check('reduced motion: a queued pad does not animate', anim === 'none', anim);
+      check('reduced motion: it still says Queued · Bar N', /^Queued · Bar \d+$/.test(line ?? ''), line);
+    } catch (e) {
+      check('reduced motion: the walk-through ran to the end', false, String(e.message).split('\n')[0]);
+    }
+    check('reduced motion: no page errors', errors.length === 0, errors.join('; '));
+    await page.close();
+  }
+
+  // ---- Scenes during an auto-mix: launching waits, and says so. ----------------
+  {
+    const { page, errors } = await open(1440, 1000);
+    try {
+      await page.waitForSelector('.scene-slot');
+      await page.getByRole('button', { name: 'Play the track' }).click();
+      await page.waitForFunction(() => document.querySelector('.app')?.getAttribute('data-playing') === 'yes');
+      await page.getByRole('button', { name: 'Capture A' }).click();
+      await page.getByRole('button', { name: /^Auto mix/ }).click();
+      await page.waitForFunction(() => document.querySelector('.scene-pad')?.disabled === true, null, { timeout: 8000 });
+      const lines = (await page.locator('.scene-line').allTextContents()).map((t) => t.trim());
+      const padsOff = await page.locator('.scene-pad').evaluateAll((els) => els.every((el) => el.disabled));
+      check('mixing: every scene pad is disabled and says Available after mix',
+        padsOff && lines.every((t) => t === 'Available after mix'), lines.join(' | '));
+      const chipA = page.locator('.compare-chip').nth(0);
+      check('mixing: Compare listen and Exit are disabled, and say why',
+        (await chipA.isDisabled()) && (await chipA.getAttribute('title')) === 'Available after mix' &&
+          (await page.getByRole('button', { name: 'Exit comparison' }).isDisabled()));
+      const fill = page.locator('.fill-button');
+      check('mixing: Fill is disabled, and says why',
+        (await fill.isDisabled()) && (await fill.getAttribute('title')) === 'Available after mix', await fill.getAttribute('title'));
+      await page.locator('body').click({ position: { x: 5, y: 600 } });
+      await page.keyboard.press('Shift+Digit2');
+      await page.waitForTimeout(200);
+      check('mixing: Shift+2 launches nothing', (await page.locator('.scene-slot').nth(1).getAttribute('data-state')) === 'unavailable');
+      const filterPad = page.getByRole('button', { name: 'Filter hold, while held' });
+      await filterPad.scrollIntoViewIfNeeded();
+      const fb = await filterPad.boundingBox();
+      await page.mouse.move(fb.x + fb.width / 2, fb.y + fb.height / 2);
+      await page.mouse.down();
+      await page.waitForTimeout(200);
+      check('mixing: a held effect is refused', (await filterPad.getAttribute('aria-pressed')) !== 'true');
+      await page.mouse.up();
+      await page.getByRole('button', { name: 'Panic', exact: true }).click();
+      await page.waitForFunction(() => document.querySelector('.scene-pad')?.disabled === false, null, { timeout: 8000 });
+      check('mixing: Panic abandons the mix and the pads come back',
+        (await page.locator('.app').getAttribute('data-playing')) === 'no' &&
+          (await page.locator('.scene-pad').evaluateAll((els) => els.every((el) => !el.disabled))));
+    } catch (e) {
+      check('mixing: the walk-through ran to the end', false, String(e.message).split('\n')[0]);
+    }
+    check('mixing: no page errors', errors.length === 0, errors.join('; '));
     await page.close();
   }
 

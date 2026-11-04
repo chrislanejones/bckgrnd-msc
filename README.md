@@ -75,7 +75,7 @@ read `netlify.toml`.
 |---|---|
 | Transport (top, always visible) | Play/stop, the track, the song part and bar, the tempo, the master meter with a clip light, and whether the mix differs from the track as written. Nothing is saved yet, so it says so. |
 | Library (left) | Tracks by section and style, with a star to keep favorites (stored in this browser only). On narrower screens it opens from the button in the transport. |
-| Performance area (middle) | The two decks, the stems, the jog wheel and pads, loop, and mixing to the next track. |
+| Performance area (middle) | The two decks, the scene strip, the stems, the jog wheel and pads, loop, Release FX and Panic, and mixing to the next track. |
 | Inspector (right) | **Master**: the effects rack, all knobs except the echo's note divisions. Select a stem's name to see that stem instead: its fader, its echo send, Solo and Cut. |
 | Pattern drawer (bottom) | Opened from **Pattern** or the inspector. One stem's pattern across all 16 bars, with the playhead. Read-only for now. Escape closes it. |
 
@@ -137,7 +137,92 @@ The state says why a stem is or isn't sounding:
 | Solo | You soloed it. |
 | Off: solo on Bass | Silent because another stem is soloed. |
 
-Three group buttons above the stems: **Full mix**, **No drums**, **No music**.
+Three group buttons above the stems: **Full mix**, **No drums**, **No music**. They
+apply at once, not on the bar.
+
+Cut every stem and the echo and room tails fade out with them, in about 30 ms. Cut
+just one and its tail rings out as usual. Solo a stem and the echo and room are
+cleared first, so you hear that stem alone and not the tail of the one before it.
+
+## Scenes
+
+The scene strip sits above the stems: four pads, each holding a whole mix of the
+track that's playing. Press one and the mix changes on the beat.
+
+| Scene | What it does |
+|---|---|
+| Full | The track as written. Every stem at its own level, the effects at their defaults. |
+| Sparse | The breakdown. Kick, clap, stab, lead and arp cut; hats, bass and pad carry it, with a little more room. |
+| Build | The bass under half, the kick and top parts eased back, the filter closed to about 3.5 kHz with some resonance, the lows trimmed, the echo repeating longer. |
+| Drop | The return. Kick and bass back at the track's level, the filter open, the pad and arp tucked under, the echo and room drier. |
+
+The factory scenes are written relative to each track's own mix, so Drop never
+pushes a stem past the track's level and never touches **Master**.
+
+A scene holds every stem's level, echo send, Cut and Solo, and twelve knobs: Cutoff,
+Resonance, Low, Mid, High, Echo time, Feedback, Return, Room mix, Decay, Width and
+Balance. Tempo, swing, Master, the loop and the playhead stay out of it, so a launch
+never moves the beat or the volume.
+
+**Launch at** picks when a pad lands: **Now**, the next **Beat**, or the next **Bar**,
+which is the default. The engine keeps the time on its own sample clock, not the
+browser's, so a launch lands on the step, before that step's notes, at any tempo and
+through a loop. The levels and effects glide in, the same as when you move them by
+hand.
+
+| What the pad says | Meaning |
+|---|---|
+| Sending… | The request is on its way to the engine. |
+| Queued · Bar 5 | It lands at the start of bar 5. Press the same pad again to cancel it. Press another pad and that one launches instead, on the same bar. |
+| Active | The engine applied it. A pad never reads Active before the sound has changed. |
+| Active · Modified | A knob or fader has moved since. Press the pad to go back to the scene. |
+| Available after mix | Scenes wait while Auto mix is running. |
+
+While stopped, a scene applies at once and playback stays stopped.
+
+**Cancel queued** withdraws the launch that's waiting. If it had already landed, the
+strip says so.
+
+**Shift+1–4** launch Full, Sparse, Build and Drop, on the Launch at timing. They do
+nothing while you're typing in a field or have a knob focused.
+
+A pad press only ever launches, so a click in the middle of a set can't overwrite a
+scene. Everything else is in each pad's `…` menu:
+
+| Menu item | What it does |
+|---|---|
+| (the description) | What the factory version of that scene does. |
+| Capture current mix | Stores the current mix in that slot. A held Echo or Filter isn't part of it, only the mix under it. |
+| Rename… | Up to 40 characters. A blank name is refused. |
+| Duplicate to | Copies this scene into one of the other three slots. |
+| Reset to factory | Puts the factory version back. |
+
+Scenes stay with the track while it's loaded. Nothing saves them yet, and loading
+another track starts it on its own factory scenes.
+
+### Fill
+
+**Fill** plays the track's one-bar drum fill, starting on the next bar, then drops
+back into the groove as it is by then. Each track's fill is its own phrase-ending
+bar with a change on the last beat, so it sounds like that track and not a stock drum
+break. It only replaces the kick, clap and hats patterns, and it never brings back a
+stem you cut.
+
+The button reads **Fill · Bar 5** while it waits. Press it again to cancel. It's
+disabled while the fill plays, while Auto mix runs, and while stopped, because a fill
+needs playback.
+
+### Compare A/B
+
+Under the pads. It has nothing to do with Deck A and Deck B: it's two mixes of the
+same track, on the same deck and the same playhead, for this session only.
+
+Capture **A**, change something, capture **B**, then flip between them. Each switch
+lands on the Launch at timing, same as a scene. Move something while listening to B
+and it reads **B · Modified**; **Update B** stores the change. A works the same way.
+**Keep current** keeps what you're hearing and closes the comparison. **Exit
+comparison** goes back to the mix from before the first capture. No scene is
+overwritten either way, and loading another track closes the comparison.
 
 ## The decks
 
@@ -170,9 +255,23 @@ The label turns at 33⅓ rpm while the deck plays, except under reduced motion.
 |---|---|
 | Cue | Jumps the playhead back to the start. |
 | Brake | Slows the transport to a stop on a curve. |
-| Echo | The echo throw: feeds the whole mix into the delay and opens the feedback up. |
+| Echo | The echo throw, while held: feeds the whole mix into the delay and opens the feedback up. Let go and the repeats ring out. |
+| Filter | While held, closes the filter to about 880 Hz with a resonant edge, 1.5 dB quieter so it isn't louder than open. The inspector's heading reads **Filter · held**, and the knob keeps showing the mix under it. |
 | Bend + / Bend − | Pushes the tempo while held, then returns it. |
 | Backspin | Reverses the last 1.35 s of output and spins it back. |
+
+Echo and Filter sit on top of the mix instead of changing it. Let go and you hear the
+mix as it is now: hold Filter, launch Drop, let go, and it's Drop's open filter that
+comes back. They also let go on their own when the window loses focus or the tab is
+hidden, and they're off while Auto mix runs.
+
+Three ways out, kept apart on purpose:
+
+| Button | What it does |
+|---|---|
+| Cancel queued (scene strip) | Withdraws the scene launch that's waiting. Nothing else changes. |
+| Release FX (under the pads) | Lets go of a held Echo or Filter. The mix stays exactly as it is. |
+| Panic (under the pads) | Stops both decks, cancels the queued scene and fill, lets go of every held effect, clears the echo and room tails, and abandons a running Auto mix. |
 
 ## Controls
 
@@ -196,7 +295,7 @@ The continuous controls in the inspector are knobs. Each one:
 | Low / Mid / High | Isolators: low shelf 180 Hz, mid bell 1 kHz, high shelf 3.2 kHz. Unity at twelve o'clock, **Kill** at the bottom, +2.9 dB at the top. |
 | Echo time | 1/16, 1/8T, 1/8, 1/8. (default), 1/4, 1/4. — the stem echo's delay. Click the lit one to turn the echo off; what's already in it rings out. |
 | Feedback | How long the echo keeps repeating, 0–90%. |
-| Return | How loud the echo comes back. The echo throw holds feedback and return open while it is on and gives them back after. With the echo off, both are disabled: they have nothing to act on. |
+| Return | How loud the echo comes back. The echo throw holds feedback and return open while you hold it and gives them back after. With the echo off, both are disabled: they have nothing to act on. |
 | Room mix / Decay | The room under the mix: 0–50%, and 0.2 to 2.5 s. |
 | Width | 0% is mono, 100% as mixed, up to 150%. |
 | Balance | Turn it left and the right speaker fades out; turn it right and the left one does. Both play at full in the middle. Reads **R 10 %** on screen between the ends. |
@@ -205,6 +304,7 @@ The continuous controls in the inspector are knobs. Each one:
 | Echo send (per stem) | How much of the stem feeds the echo. Each stem starts at its own amount and goes back there with a new track. |
 | Master meter | Left and right peak of what leaves the engine, in the transport. Turns amber near the limiter. The **Clip** light holds for two seconds after any sample goes past full scale, which can only happen while a crossfade adds two decks together. |
 | Space | Play / stop. |
+| Shift+1–4 | Launch Full, Sparse, Build or Drop, on the Launch at timing. Not while typing or with a knob focused. |
 
 Nothing moves the sound in a step. Every fader, cut, solo, send and knob glides
 over 12–30 ms in the engine, so cutting a stem mid-note, slamming a fader or
@@ -226,7 +326,7 @@ Besides the stems, the engine adds a few things of its own.
 
 | What | Where it's heard |
 |---|---|
-| Transitions | A noise riser into the Drop, a crash on its downbeat, a downsweep into the Break. Darker and quieter on lofi. They sit outside the stems, so no cut or solo stops them, and they only fire when playback actually crosses the seam — not on a jump, and not when a loop wraps back to one. |
+| Transitions | A noise riser into the Drop, a crash on its downbeat, a downsweep into the Break. Darker and quieter on lofi. They sit outside the stems, so no cut or solo stops them, and they only fire when playback actually crosses the seam — not on a jump, and not when a loop wraps back to one. None plays while a stem is soloed, and launching a scene never makes one. |
 | Master chain | Stereo-linked compressor, saturator, the isolators and filter, then a safety limiter with a −0.3 dBFS ceiling. |
 | Echo | A stereo ping-pong: repeats alternate left and right. |
 
@@ -261,7 +361,7 @@ files on disk ([ADR-002](docs/adr/002-laravel-runs-stateless.md)).
 | `pnpm run build:static` | The PHP-free shell, `public/index.html`. |
 | `pnpm run build:netlify` | Engine, app and static export, assembled into `dist/`. |
 | `pnpm run dev` | Vite dev server with the worklet on watch. |
-| `composer test` | PHPUnit, Rust tests, parity, arrangement, the contract, `verify:audio` and `verify:ui`. The last two need the app running on `:8080`. |
+| `composer test` | PHPUnit, Rust tests, parity, arrangement, the contract, the scene logic, `verify:audio` and `verify:ui`. The last two need the app running on `:8080`. |
 
 ## Checks
 
@@ -272,7 +372,8 @@ files on disk ([ADR-002](docs/adr/002-laravel-runs-stateless.md)).
 | `cargo test --release --manifest-path engine-core/Cargo.toml` | The engine. |
 | `pnpm run typecheck` | `tsc --noEmit`. |
 | `composer test:php` | PHPUnit: the song form for every track, the API, the static export matching the API, presets, and the project contract. |
-| `pnpm run check:contract` | The UI's project reader against the same fixtures as PHP's. |
+| `pnpm run check:contract` | The UI's project reader against the same fixtures as PHP's, scenes included. |
+| `pnpm run check:scenes` | The scene logic: the vector order, captures copied and not shared, revisions, and a settled request staying settled. |
 | `pnpm run verify:ui` | The layout at five widths, keyboard focus, the stem states, the inspector, the drawer and the phone views. |
 | `pnpm run verify:audio` | Drives the real worklet in Chromium and asserts audio. |
 | `pnpm run verify:static` | The same, against the static build, plus no API calls. |

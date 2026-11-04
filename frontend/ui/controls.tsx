@@ -128,10 +128,18 @@ export function PerformancePad({
   size?: 'md' | 'lg';
 }) {
   const held = useRef(false);
+  /**
+   * What started the hold. Focus leaving the pad ends a *keyboard* hold (the key-up
+   * would go elsewhere), but not a pointer hold: pointer capture, cancel and lost
+   * capture already end those, and on a touchscreen a second finger tapping another
+   * control moves focus while the first is still down (hold Filter, tap Drop).
+   */
+  const heldBy = useRef<'pointer' | 'key' | null>(null);
   const momentary = Boolean(onHoldStart);
   const release = () => {
     if (!held.current) return;
     held.current = false;
+    heldBy.current = null;
     onHoldEnd?.();
   };
   // The pointer and key paths above cover the pad itself. These cover the rest: the
@@ -171,6 +179,7 @@ export function PerformancePad({
                 /* pointer already released */
               }
               held.current = true;
+              heldBy.current = 'pointer';
               onHoldStart?.();
             }
           : undefined
@@ -183,7 +192,9 @@ export function PerformancePad({
           ? (event) => {
               if ((event.key === ' ' || event.key === 'Enter') && !event.repeat) {
                 event.preventDefault();
+                if (held.current) return;
                 held.current = true;
+                heldBy.current = 'key';
                 onHoldStart?.();
               }
             }
@@ -196,7 +207,7 @@ export function PerformancePad({
             }
           : undefined
       }
-      onBlur={momentary ? release : undefined}
+      onBlur={momentary ? () => heldBy.current === 'key' && release() : undefined}
     >
       <span className="pad-label">{label}</span>
       {hint ? <span className="pad-hint">{hint}</span> : null}

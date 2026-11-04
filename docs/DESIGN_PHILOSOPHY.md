@@ -88,7 +88,7 @@ these states, with the same words and the same treatment everywhere:
 | **Cut** | You cut it. | Filled neutral dot, "Cut". Strip dimmed. Cut badge lit. |
 | **Soloed** | You soloed it. | Acid dot, "Solo". Solo badge lit. |
 | **Off by solo** | Silent because *another* stem is soloed. | Warning dot, "Off: solo on Bass". Strip dimmed. Cut badge lit. |
-| **Queued** | A change waiting for the next bar or phrase. | Reserved for Night 3 (quantized performance). Pulsing outline, "Next bar". |
+| **Queued** | A scene or fill waiting for its boundary. | Scene pads and the Fill button (Night 3): dashed acid outline that pulses (no pulse under reduced motion), "Queued · Bar 9" or "Fill · Bar 9". |
 
 The same rule applies everywhere else. A disabled control says why. A deck that
 can't be scratched says "Mixing". The save indicator says whether your changes

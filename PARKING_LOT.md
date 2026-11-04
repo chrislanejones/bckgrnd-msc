@@ -159,3 +159,41 @@ not. Things to settle before or while building it:
   has run the checklist in [docs/DESIGN_PHILOSOPHY.md](docs/DESIGN_PHILOSOPHY.md) on
   an iPhone or an Android phone yet. Do it with the mobile compatibility check.
 
+
+## Found on Night 3 (11-04-2026)
+
+- **Reverb decay changes instantly on a scene change.** `Reverb::set_rt60` retunes the
+  combs' feedback at once instead of gliding, so a scene that moves `fx.reverbDecay`
+  steps the tail's decay rate on the boundary. Nothing clicks (delay lengths don't
+  move), but it is the one scene parameter outside ADR-013's smoothing.
+- **Remove the old `set_echo(bool)` latch.** The UI now holds Echo through gesture
+  tokens and no longer sends `{type: 'echo'}`. The worklet message, `Engine::set_echo`
+  and `Mixer::set_echo` are still there (and Release FX and Panic still clear the
+  latch), and `docs/NIGHT3_PROTOCOL.md` still says it works "until the UI moves to
+  tokens". Delete all three together and update the protocol.
+- **The solo flush leaves a −46 dB echo residue for about 100 ms.** Entering solo ducks
+  and clears the echo and room (16 ms out, 48 ms hold, 16 ms back), but a little of
+  the other stems' echo is still audible after it comes back.
+- **"Stem groups" (Full mix / No drums / No music) overlaps the scenes.** The group
+  buttons sit next to the new **Full** scene, also set cuts, and apply at once rather
+  than on the bar (Night 3's "group pads on the next bar" wasn't built). Decide the
+  naming and whether groups become scenes, quantized pads, or go.
+- **Filter Hold and the solo flush were tuned by measurement only.** Filter Hold is
+  0.3 of the travel (about 880 Hz), Q 3.0, −1.5 dB trim; the flush is 16/48/16 ms.
+  Nobody has listened to either on speakers yet. Do a listening pass before release.
+- **Touch screen readers haven't been tried on the new controls** either: the scene
+  pads and their menu, Fill, Compare A/B, the held Echo and Filter pads, Release FX
+  and Panic. Add them to the device checklist from Night 2.
+- **The wasm grew 203 KB → 223 KB over Night 3 (+9.7%):** 203,016 → 222,709 bytes
+  across the two engine commits. The fill parser is about 3.5 KB of it.
+- **One status line for two outcomes:** Stop with a scene and a fill both queued ends
+  on "Fill cancelled: playback stopped"; the scene's cancel message is overwritten.
+  Both are true, but only one is announced.
+- **A held effect refused during an auto-mix gives no feedback.** The scene pads say
+  "Available after mix"; the Echo and Filter pads just don't latch.
+- **On a 1440×900 screen the Echo and Filter pads sit below the fold** while the scene
+  pads are near the top, so "hold Filter, tap Drop" on a touchscreen means scrolling.
+  A layout pass (Lacey) on where the held pads live relative to the scene strip.
+- **Two-finger touch (hold one pad, tap another) has only been emulated.** The fix
+  that keeps a touch hold alive when focus moves is pinned by verify-ui, but a real
+  device should try hold Filter → tap Drop → release.

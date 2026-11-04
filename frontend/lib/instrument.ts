@@ -834,6 +834,8 @@ export function useInstrument() {
 
   /** Keep what is playing as the working mix and close the comparison. */
   function keepCompare() {
+    // A listen (or Exit) still queued would land over the mix being kept.
+    if (isPending(sceneRequest) && !isSceneSlot(sceneRequest.target)) cancelQueuedScene();
     setCompare(null);
     setSceneStatus('Kept the current mix');
   }
