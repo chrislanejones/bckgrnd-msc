@@ -63,6 +63,7 @@
 
 mod drums;
 mod dsp;
+mod gesture;
 mod mixer;
 mod scheduler;
 mod scratch;
@@ -86,7 +87,14 @@ pub mod limits {
         VERB_WET, VERB_WET_MAX, WIDTH_MAX,
     };
 }
-pub use track::{NoteEvent, Perc, Stem, Track, TrackKind, STEPS};
+pub use track::{DrumStep, Fill, NoteEvent, Perc, Stem, Track, TrackKind, FILL_STEPS, STEPS};
+
+/// Performance gestures (`docs/NIGHT3_PROTOCOL.md`, Gestures): the kinds, the
+/// capacity, the lease, and what Filter Hold does.
+pub mod perform {
+    pub use crate::gesture::{kind, LEASE_SECONDS, MAX_GESTURES};
+    pub use crate::mixer::{FILTER_HOLD_OPEN, FILTER_HOLD_Q, FILTER_HOLD_TRIM};
+}
 
 /// The scene vector's layout, the timing, event and reason codes, and the validator,
 /// as `docs/NIGHT3_PROTOCOL.md` defines them. Exported so tests can hold them against
@@ -459,7 +467,17 @@ pub struct Engine {
     music_step: f32,
     /// Level per stem for the UI meters, post-fader.
     levels: Vec<f32>,
-    echo_on: bool,
+    /// The latched echo throw from the older `set_echo(bool)` path. Combined with any
+    /// Echo Throw gesture; not leased, and not released by Stop or a track load (the
+    /// UI holds the latch), only by `release_gestures` and `panic`.
+    echo_latch: bool,
+    /// Held Echo Throw and Filter Hold overrides, over the base values in `master`.
+    gestures: gesture::Gestures,
+    /// Whether any stem was soloed on the previous sample, to catch entering solo.
+    solo_was: bool,
+    /// The all-cut gate, 0..1, and how far it moves per sample. See `render_sample`.
+    cut_gate: f32,
+    cut_step: f32,
     /// Post-master trim, for crossfading two engines in the worklet.
     output_gain: f32,
     /// The kick sub's pitch for the loaded track, worked out once at load so the
@@ -486,12 +504,17 @@ enum Trace {
     Apply(u32, u64),
     /// A step's notes were triggered: step, sample.
     Trigger(usize, u64),
+    /// A drum voice was spawned: stem index, step, velocity.
+    Drum(usize, usize, f32),
 }
 
 /// How long a fader, a cut, a solo or a send takes to glide, in seconds. The browser
 /// original used `setTargetAtTime` with 12-20 ms; a cut still lands within a beat's
 /// sixteenth at any tempo (5 time constants is 60 ms).
 const CHANNEL_GLIDE: f32 = 0.012;
+
+/// How long the all-cut gate takes to close or open, in seconds.
+const CUT_FADE_SECONDS: f32 = 0.03;
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen)]
 impl Engine {
@@ -521,7 +544,11 @@ impl Engine {
             music_target: 1.0,
             music_step: 1.0 / (scratch::FADE_SECONDS * sr).max(1.0),
             levels: vec![0.0; 8],
-            echo_on: false,
+            echo_latch: false,
+            gestures: gesture::Gestures::new(sr),
+            solo_was: false,
+            cut_gate: 1.0,
+            cut_step: 1.0 / (CUT_FADE_SECONDS * sr).max(1.0),
             output_gain: 1.0,
             kick_root_hz: track.kick_root_hz(),
             transitions: transition::Transitions::new(track.kind, sr),
@@ -538,14 +565,15 @@ impl Engine {
     pub fn play(&mut self) {
         // Play while playing starts over from step 0: a seek, so a pending scene's
         // announced bar no longer means anything.
-        self.scheduler.cancel_pending(reason::TRANSPORT);
+        self.interrupt(reason::TRANSPORT);
         self.let_go_of_the_platter();
         self.transport.start();
         self.transitions.reset();
     }
 
     pub fn stop(&mut self) {
-        self.scheduler.cancel_pending(reason::STOPPED);
+        self.interrupt(reason::STOPPED);
+        self.release_overrides();
         self.let_go_of_the_platter();
         self.transport.stop();
         for v in self.voices.iter_mut().flatten() {
@@ -588,11 +616,13 @@ impl Engine {
     pub fn set_loop(&mut self, bars: u32) {
         self.transport.set_loop(bars);
         self.scheduler.announce(&self.transport);
+        self.scheduler.announce_fill(&self.transport);
     }
 
-    /// Cue or seek. Cancels a pending scene (`transport`).
+    /// Cue or seek. Cancels a pending scene and fill and ends an active fill
+    /// (`transport`).
     pub fn jump(&mut self, step: usize) {
-        self.scheduler.cancel_pending(reason::TRANSPORT);
+        self.interrupt(reason::TRANSPORT);
         self.transport.jump(step);
     }
 
@@ -603,7 +633,7 @@ impl Engine {
     pub fn brake(&mut self) {
         self.transport.brake();
         if self.transport.braking() {
-            self.scheduler.cancel_pending(reason::TRANSPORT);
+            self.interrupt(reason::TRANSPORT);
         }
         // A riser on a clock grinding to a halt sounds broken, so the transition
         // sounds get out of the way of the gesture.
@@ -627,7 +657,7 @@ impl Engine {
         if self.scratch.held() {
             return;
         }
-        self.scheduler.cancel_pending(reason::TRANSPORT);
+        self.interrupt(reason::TRANSPORT);
         self.scratch
             .capture(self.ring.left.len(), self.ring.write, self.ring.filled);
         self.scratch_resume = self.transport.playing;
@@ -653,7 +683,7 @@ impl Engine {
     /// position in the bar grid. Without a scratch in progress this is a plain jump.
     pub fn scratch_end(&mut self, step: u32) {
         // Dropping the needle is a seek.
-        self.scheduler.cancel_pending(reason::TRANSPORT);
+        self.interrupt(reason::TRANSPORT);
         let mut at = (step as usize).min(STEPS - 1);
         let t = &self.transport;
         if t.loop_steps > 0 && !(t.loop_start..t.loop_start + t.loop_steps).contains(&at) {
@@ -698,7 +728,7 @@ impl Engine {
         if self.scratch.held() || !self.transport.backspin() {
             return;
         }
-        self.scheduler.cancel_pending(reason::TRANSPORT);
+        self.interrupt(reason::TRANSPORT);
         self.transitions.release();
         match self.ring.take(1.35, self.sample_rate) {
             Some((l, r)) => {
@@ -867,9 +897,11 @@ impl Engine {
         self.master.set_filter(open);
     }
 
+    /// The latched echo throw (the older UI toggle). Kept alongside the Echo Throw
+    /// gesture: the throw is engaged while this is on or any Echo Throw is held.
     pub fn set_echo(&mut self, on: bool) {
-        self.echo_on = on;
-        self.master.set_echo(on);
+        self.echo_latch = on;
+        self.apply_overrides();
     }
 
     /// Echo time in beats: 0.25 a sixteenth, 0.75 a dotted eighth (the default), 1 a
@@ -880,8 +912,10 @@ impl Engine {
             .set_delay_beats(beats, self.transport.bpm, self.transport.rate);
     }
 
+    /// Whether the latched throw is on. Says nothing about held gestures: nothing
+    /// here reads an override back as if it were the base.
     pub fn echo_enabled(&self) -> bool {
-        self.echo_on
+        self.echo_latch
     }
 
     /// Three-band isolator, given as 0..1 amounts per band.
@@ -998,11 +1032,109 @@ impl Engine {
         self.scheduler.cancel(request_id)
     }
 
-    /// Cancel whatever scene is pending, for a structural reason the host knows about
-    /// and the engine does not (an auto-mix starting is 4, panic is 5). False when
-    /// nothing was pending.
+    /// Cancel whatever scene and fill are pending, and cut short an active fill, for
+    /// a structural reason the host knows about and the engine does not (an auto-mix
+    /// starting or a promote is 4). False when there was none of those. Held
+    /// gestures are not touched; see [`Engine::release_gestures`].
     pub fn cancel_pending(&mut self, why: u8) -> bool {
-        self.scheduler.cancel_pending(why)
+        self.interrupt(why)
+    }
+
+    /// Queue fill `index` of the loaded track for the next bar line
+    /// (`docs/NIGHT3_PROTOCOL.md`, Fills). Returns 0 when accepted, otherwise the
+    /// reason, also reported as `fill rejected` (15): 1 no such fill, 7 not playing,
+    /// 3 a scratch, brake or backspin is running, 8 a fill is already queued or
+    /// playing (no stacking, and no replacing: the queued one keeps its bar; the UI
+    /// cancels it with [`Engine::cancel_fill`]).
+    ///
+    /// It starts on the first bar onset after the request (the onset-serial rule
+    /// scenes use), plays exactly sixteen steps, and the track's own drums carry on
+    /// from the step after.
+    pub fn queue_fill(&mut self, request_id: u32, index: u32) -> u8 {
+        let verdict = if index as usize >= self.track.fills.len() {
+            reason::INVALID
+        } else if !self.transport.playing {
+            reason::NOT_PLAYING
+        } else if self.transport.in_gesture() {
+            reason::TRANSPORT
+        } else if self.scheduler.fill_busy() {
+            reason::ALREADY_PLAYING
+        } else {
+            self.scheduler
+                .queue_fill(request_id, index, &self.transport);
+            reason::OK
+        };
+        if verdict != reason::OK {
+            self.scheduler.events.push(
+                scheduler::event::FILL_REJECTED,
+                request_id,
+                verdict as f64,
+                0.0,
+            );
+        }
+        verdict
+    }
+
+    /// Cancel the queued fill if it is `request_id` (`fill cancelled`, reason 10).
+    /// False when it is not queued: never queued, already started (a playing fill
+    /// runs its bar), or already cancelled.
+    pub fn cancel_fill(&mut self, request_id: u32) -> bool {
+        self.scheduler.cancel_fill(request_id)
+    }
+
+    /// The request id of the queued fill, if one is waiting for its bar.
+    pub fn pending_fill(&self) -> Option<u32> {
+        self.scheduler.pending_fill().map(|f| f.request_id)
+    }
+
+    /// The request id of the fill playing now, if one is.
+    pub fn active_fill(&self) -> Option<u32> {
+        self.scheduler.active_fill().map(|f| f.request_id)
+    }
+
+    /// Begin a temporary override (`docs/NIGHT3_PROTOCOL.md`, Gestures): kind 1 Echo
+    /// Throw, 2 Filter Hold. False (nothing changed) for an unknown kind, a token
+    /// already held, or when four are already held. The override expires after 3 s
+    /// of rendered audio unless [`Engine::gesture_renew`] is called (event 21).
+    pub fn gesture_begin(&mut self, token: u32, kind: u8) -> bool {
+        let began = self.gestures.begin(token, kind);
+        if began {
+            self.apply_overrides();
+        }
+        began
+    }
+
+    /// End `token`'s override only, revealing the next held one of its kind or the
+    /// base as it is now. False when the token is not held.
+    pub fn gesture_end(&mut self, token: u32) -> bool {
+        let ended = self.gestures.end(token);
+        if ended {
+            self.apply_overrides();
+        }
+        ended
+    }
+
+    /// Restart `token`'s 3 s lease. False when the token is not held.
+    pub fn gesture_renew(&mut self, token: u32) -> bool {
+        self.gestures.renew(token)
+    }
+
+    /// End every override, and the latched echo throw, leaving the working mix as it
+    /// is: Release FX. Echo repeats already in the line ring out on the base feedback.
+    pub fn release_gestures(&mut self) {
+        self.echo_latch = false;
+        self.release_overrides();
+    }
+
+    /// Panic: cancel the pending scene and fill (`panic`), cut short an active fill,
+    /// release every gesture and the latched throw, stop playback and clear the
+    /// tails. Not the same as [`Engine::cancel_pending`], which only withdraws what
+    /// is queued.
+    pub fn panic(&mut self) {
+        self.interrupt(reason::PANIC);
+        self.release_gestures();
+        self.stop();
+        self.transitions.reset();
     }
 
     /// The request id of the pending scene, if one is pending.
@@ -1049,18 +1181,21 @@ impl Engine {
                 if let Some(p) = self.scheduler.on_onset(step) {
                     self.commit_scene(p.request_id, &p.values, step as i32);
                 }
-                // 2. FILL: activate a pending fill here (Night 3, Task B), after the
-                //    scene and before the notes, so the fill's first step plays.
+                // 2. End a fill that has played its bar, and start one due here, after
+                //    the scene and before the notes, so the fill's first step plays.
+                self.scheduler.fill_onset(step);
                 // 3. Trigger the step's notes.
                 if !self.transport.in_backspin() {
                     self.trigger(step);
                 }
                 // The transition sounds fire only on ordinary playback. A step the
                 // spin or the brake raced through breaks the chain of crossings.
+                // Under a solo they are counted but stay quiet.
                 if self.transport.in_backspin() || self.transport.braking() {
                     self.transitions.forget();
                 } else {
-                    self.transitions.on_step(step, &self.transport);
+                    let quiet = self.any_solo();
+                    self.transitions.on_step(step, &self.transport, quiet);
                 }
             }
             let (l, r) = self.render_sample();
@@ -1079,6 +1214,42 @@ impl Engine {
             c.meter();
             self.levels[i] = c.level;
         }
+        // Leases count rendered audio, once per call.
+        if self.gestures.tick(n as u32, &mut self.scheduler.events) {
+            self.apply_overrides();
+        }
+    }
+
+    /// Whether any stem is soloed.
+    #[inline]
+    fn any_solo(&self) -> bool {
+        self.channels.iter().any(|c| c.solo)
+    }
+
+    /// Cancel the pending scene and fill and cut short an active fill, all with
+    /// `why`. True if there was any of those.
+    fn interrupt(&mut self, why: u8) -> bool {
+        let scene = self.scheduler.cancel_pending(why);
+        let fill = self.scheduler.end_fills(why);
+        scene || fill
+    }
+
+    /// End every held gesture (not the latch) and put the base back.
+    fn release_overrides(&mut self) {
+        self.gestures.clear();
+        self.apply_overrides();
+    }
+
+    /// Point the master at the base or at the overrides held over it. The master
+    /// keeps the base values itself; this only says which treatment is on.
+    #[inline(never)]
+    fn apply_overrides(&mut self) {
+        let echo = self.echo_latch || self.gestures.holds(gesture::kind::ECHO_THROW);
+        if echo != self.master.echo_on() {
+            self.master.set_echo(echo);
+        }
+        self.master
+            .set_filter_hold(self.gestures.holds(gesture::kind::FILTER_HOLD));
     }
 
     /// Advance every voice and bus by one sample.
@@ -1087,8 +1258,11 @@ impl Engine {
             c.clear();
         }
         // Voices with no stem bypass the channel strips and are held back to be added
-        // to the master sum directly, after the faders have been applied below.
-        let (mut direct_l, mut direct_r) = self.transitions.process(&self.transport);
+        // to the master sum directly, after the faders have been applied below. The
+        // transitions are kept apart from them: the silence policy treats the two
+        // differently.
+        let (mut fx_l, mut fx_r) = self.transitions.process(&self.transport);
+        let (mut direct_l, mut direct_r) = (0.0f32, 0.0f32);
         for slot in self.voices.iter_mut() {
             let Some(voice) = slot.as_mut() else { continue };
             let stem = voice.stem();
@@ -1129,13 +1303,43 @@ impl Engine {
         }
         direct_l *= self.music;
         direct_r *= self.music;
+        fx_l *= self.music;
+        fx_r *= self.music;
         if self.scratch.active() {
             let (l, r) = self.scratch.process(&self.ring.left, &self.ring.right);
             direct_l += l;
             direct_r += r;
         }
 
-        let any_solo = Stem::ALL.iter().any(|s| self.channels[s.index()].solo);
+        // Silence policy (docs/NIGHT3_PROTOCOL.md, Silence, solo and transition sounds):
+        //
+        // - Entering solo (none to some) ducks and clears the echo and room history,
+        //   and fades out any transition sound; while soloed none start.
+        // - Every stem cut (muted, faded to 0, or left out by another's solo) closes
+        //   the all-cut gate over 30 ms. It scales the stem sum, the transition sounds
+        //   and the echo and room returns. One stem cut does nothing here: the tails
+        //   decay as they always did.
+        // - The gesture voices, the backspin take and the scratch reader (`direct`), are
+        //   never gated: they are deliberate sounds made with every stem cut, and
+        //   only their echo and room returns follow the gate.
+        let any_solo = self.any_solo();
+        if any_solo && !self.solo_was {
+            self.master.flush_returns();
+            self.transitions.silence();
+        }
+        self.solo_was = any_solo;
+        let all_cut = self
+            .channels
+            .iter()
+            .all(|c| !c.audible(any_solo) || c.vol <= 0.0);
+        if all_cut {
+            self.cut_gate = (self.cut_gate - self.cut_step).max(0.0);
+        } else if self.cut_gate < 1.0 {
+            self.cut_gate = (self.cut_gate + self.cut_step).min(1.0);
+        }
+        let gate = self.cut_gate;
+        self.master.set_returns_gate(gate);
+
         let mut sum_l = 0.0f32;
         let mut sum_r = 0.0f32;
         let coef = self.channel_coef;
@@ -1151,7 +1355,10 @@ impl Engine {
             sum_l += c.bus.left;
             sum_r += c.bus.right;
         }
-        self.master.process(sum_l + direct_l, sum_r + direct_r)
+        self.master.process(
+            (sum_l + fx_l) * gate + direct_l,
+            (sum_r + fx_r) * gate + direct_r,
+        )
     }
 
     /// Set every target a scene holds, in one place, and report `applied` on `step`
@@ -1197,20 +1404,33 @@ impl Engine {
         self.trace.push(Trace::Trigger(step, self.clock));
         let at = step % STEPS;
         let kind = self.track.kind;
-        if let Some(vel) = self.track.hit(Stem::Kick, at) {
+        // A fill replaces the drum lanes its recipe defines for its bar; every stem's
+        // level, cut and solo still apply, since the voices go through the channels.
+        let fill = self
+            .scheduler
+            .active_fill()
+            .map(|f| (f.index as usize, f.pos));
+        let drums = self.track.drums(at, fill);
+        #[cfg(test)]
+        for (stem, vel) in [(0, drums.kick), (1, drums.clap), (2, drums.hat)] {
+            if vel > 0.0 {
+                self.trace.push(Trace::Drum(stem, at, vel));
+            }
+        }
+        if drums.kick > 0.0 {
+            let vel = drums.kick;
             self.spawn(Voice::Kick(drums::KickVoice::new(
                 vel,
                 self.sample_rate,
                 kind == TrackKind::Lofi,
                 self.kick_root_hz,
             )));
-            if self.channels[Stem::Kick.index()]
-                .audible(Stem::ALL.iter().any(|s| self.channels[s.index()].solo))
-            {
+            if self.channels[Stem::Kick.index()].audible(self.any_solo()) {
                 self.ducker.trigger(self.transport.bpm, self.sample_rate);
             }
         }
-        if let Some(vel) = self.track.hit(Stem::Clap, at) {
+        if drums.clap > 0.0 {
+            let vel = drums.clap;
             let freq = match kind {
                 TrackKind::Lofi => 780.0,
                 TrackKind::Deep => 1250.0,
@@ -1223,12 +1443,11 @@ impl Engine {
                 kind == TrackKind::Lofi,
             )));
         }
-        if let Some(vel) = self.track.hit(Stem::Hats, at) {
-            let open = self.track.hat_open.get(at).copied().unwrap_or(0.0) > 0.0;
+        if drums.hat > 0.0 {
             self.spawn(Voice::Hat(drums::HatVoice::new(
-                vel,
+                drums.hat,
                 self.sample_rate,
-                open,
+                drums.hat_open,
                 kind,
             )));
         }
@@ -1327,7 +1546,8 @@ impl Engine {
     /// Replace the arrangement. Keeps transport running if it already was, and
     /// re-applies the faders so a loaded track's mix is heard immediately.
     pub fn load_track(&mut self, track: Track) {
-        self.scheduler.cancel_pending(reason::TRACK);
+        self.interrupt(reason::TRACK);
+        self.release_overrides();
         self.track = track;
         self.kick_root_hz = self.track.kick_root_hz();
         for stem in Stem::ALL {
@@ -1492,6 +1712,9 @@ fn stem_from_index(index: usize) -> Option<Stem> {
 
 #[cfg(test)]
 mod scene_tests;
+
+#[cfg(test)]
+mod perform_tests;
 
 #[cfg(test)]
 mod tests {
@@ -2349,14 +2572,15 @@ mod tests {
     }
 
     /// The transitions alone, from the Break through into the Drop, with every stem
-    /// cut: they bypass the strips, like the backspin.
+    /// but the (empty) kick cut: they bypass the strips, like the backspin. Not every
+    /// stem: with all eight cut the all-cut gate silences them too.
     fn transitions_only(kind: TrackKind) -> (f32, f32) {
         let mut t = Track::silence("fx");
         t.kind = kind;
         t.bpm = 126.0;
         let mut e = Engine::new(48_000.0);
         e.load_track(t);
-        for s in Stem::ALL {
+        for s in Stem::ALL.into_iter().skip(1) {
             e.set_muted(s, true);
         }
         e.play();
@@ -2364,8 +2588,8 @@ mod tests {
         loudness(&mut e, blocks_for(100, 126.0))
     }
 
-    /// The transitions are noticeable but no louder than a modest clap, with every
-    /// stem cut, which they ignore.
+    /// The transitions are noticeable but no louder than a modest clap, with the stems
+    /// cut, which they ignore.
     #[test]
     fn transitions_bypass_the_stems_and_sit_under_the_clap() {
         for kind in [

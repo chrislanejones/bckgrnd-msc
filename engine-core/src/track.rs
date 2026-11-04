@@ -278,6 +278,49 @@ pub struct Track {
     /// Shaker, rim and congas, on the hats stem. Absent in older JSON.
     #[serde(default)]
     pub perc: Perc,
+    /// One-bar drum fills prepared by the PHP music layer (`Fills.php`), one per
+    /// track in Night 3. Absent in older JSON. Read here, at load, and never parsed
+    /// or built on the audio path.
+    #[serde(default)]
+    pub fills: Vec<Fill>,
+}
+
+/// Steps a fill lasts: one bar.
+pub const FILL_STEPS: usize = 16;
+
+/// A one-bar drum variation (docs/NIGHT3_PROTOCOL.md, Fills).
+///
+/// JSON: `{"id": "roll", "name": "Clap roll", "kick": [16], "clap": [16], "hat": [16],
+/// "hatOpen": [16]}`, velocities 0..1. Only the lanes are read: `id` and `name` are
+/// the UI's, and leaving them out of the engine keeps its parser smaller. A lane the
+/// recipe leaves out (or sends empty) is not replaced: the track's own lane plays
+/// through the fill. A short lane is silent past its end.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct Fill {
+    pub kick: Vec<Hit>,
+    pub clap: Vec<Hit>,
+    pub hat: Vec<Hit>,
+    pub hat_open: Vec<Hit>,
+}
+
+/// A lane's velocity at `i`: silent past the end, and anything not a positive finite
+/// number is silent too.
+fn velocity(lane: &[Hit], i: usize) -> Hit {
+    lane.get(i)
+        .copied()
+        .filter(|v| *v > 0.0 && v.is_finite())
+        .unwrap_or(0.0)
+}
+
+/// The drums one step plays: kick, clap and hats velocities (0 is silent), and
+/// whether the hat is the open one.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct DrumStep {
+    pub kick: Hit,
+    pub clap: Hit,
+    pub hat: Hit,
+    pub hat_open: bool,
 }
 
 pub const STEPS: usize = 256;
@@ -302,6 +345,27 @@ impl Track {
             pad: vec![None; STEPS],
             arp: vec![None; STEPS],
             perc: Perc::default(),
+            fills: Vec::new(),
+        }
+    }
+
+    /// The drums on `step`, with fill `fill` at position `pos` (0..16) replacing the
+    /// lanes it defines, or the track's own when `fill` is `None` or out of range.
+    /// The hats fold open over closed, as [`Track::hit`] does, each from whichever
+    /// source owns that lane.
+    pub fn drums(&self, step: usize, fill: Option<(usize, usize)>) -> DrumStep {
+        let recipe = fill.and_then(|(i, pos)| self.fills.get(i).map(|f| (f, pos)));
+        let lane = |own: &[Hit], pick: fn(&Fill) -> &[Hit]| match recipe {
+            Some((f, pos)) if !pick(f).is_empty() => velocity(pick(f), pos),
+            _ => velocity(own, step),
+        };
+        let open = lane(&self.hat_open, |f| &f.hat_open);
+        let closed = lane(&self.hat, |f| &f.hat);
+        DrumStep {
+            kick: lane(&self.kick, |f| &f.kick),
+            clap: lane(&self.clap, |f| &f.clap),
+            hat: if open > 0.0 { open } else { closed },
+            hat_open: open > 0.0,
         }
     }
 
@@ -562,5 +626,70 @@ mod tests {
         json["perc"] = serde_json::json!({});
         let t: Track = serde_json::from_value(json).unwrap();
         assert!(!t.perc.any());
+    }
+
+    #[test]
+    fn fills_load_from_the_exported_shape_and_default_when_missing() {
+        let mut json: serde_json::Value = serde_json::to_value(Track::silence("f")).unwrap();
+        json.as_object_mut().unwrap().remove("fills");
+        let t: Track = serde_json::from_value(json.clone()).expect("JSON from before fills");
+        assert!(t.fills.is_empty());
+
+        let mut clap = vec![0.0f32; 16];
+        clap[12] = 0.5;
+        json["fills"] = serde_json::json!([{
+            "id": "roll", "name": "Clap roll",
+            "kick": vec![0.0; 16], "clap": clap, "hat": vec![0.0; 16], "hatOpen": vec![0.0; 16],
+        }]);
+        let t: Track = serde_json::from_value(json).unwrap();
+        assert_eq!(t.fills.len(), 1);
+        assert_eq!(t.fills[0].clap[12], 0.5);
+    }
+
+    #[test]
+    fn a_fill_replaces_only_the_lanes_it_defines() {
+        let mut t = Track::silence("f");
+        t.kick[20] = 1.0;
+        t.hat[20] = 0.4;
+        t.hat_open[21] = 0.6;
+        let mut clap = vec![0.0f32; 16];
+        clap[4] = 0.8;
+        t.fills = vec![Fill {
+            clap,
+            hat: vec![0.0; 16],
+            ..Fill::default()
+        }];
+        // Outside a fill: the track's own.
+        assert_eq!(
+            t.drums(20, None),
+            DrumStep {
+                kick: 1.0,
+                clap: 0.0,
+                hat: 0.4,
+                hat_open: false
+            }
+        );
+        // Inside, at position 4: the fill's clap and (silent) closed hat, the track's
+        // kick, and the track's open hat, which the recipe left out.
+        assert_eq!(
+            t.drums(20, Some((0, 4))),
+            DrumStep {
+                kick: 1.0,
+                clap: 0.8,
+                hat: 0.0,
+                hat_open: false
+            }
+        );
+        assert_eq!(
+            t.drums(21, Some((0, 5))),
+            DrumStep {
+                kick: 0.0,
+                clap: 0.0,
+                hat: 0.6,
+                hat_open: true
+            }
+        );
+        // An index past the fills plays the track.
+        assert_eq!(t.drums(20, Some((3, 4))), t.drums(20, None));
     }
 }

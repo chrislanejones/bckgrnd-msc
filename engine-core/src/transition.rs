@@ -499,6 +499,15 @@ impl Transitions {
         self.last = None;
     }
 
+    /// Fade out whatever is sounding, as [`Transitions::release`] does, but keep
+    /// counting crossings: entering solo, where the song carries on underneath.
+    pub fn silence(&mut self) {
+        let sr = self.sample_rate;
+        self.riser.release(RELEASE_SECONDS, sr);
+        self.sweep.release(RELEASE_SECONDS, sr);
+        self.crash.release(RELEASE_SECONDS * 2.0, sr);
+    }
+
     /// A step went by unheard (under a backspin or a brake), so the next one heard is
     /// not a crossing.
     pub fn forget(&mut self) {
@@ -510,8 +519,9 @@ impl Transitions {
         t.loop_steps == 0 || (t.loop_start < DROP_STEP && t.loop_start + t.loop_steps > DROP_STEP)
     }
 
-    /// A step has just fired in ordinary playback.
-    pub fn on_step(&mut self, step: usize, t: &Transport) {
+    /// A step has just fired in ordinary playback. With `quiet` (a stem is soloed)
+    /// the crossing is counted but nothing new starts.
+    pub fn on_step(&mut self, step: usize, t: &Transport, quiet: bool) {
         let sr = self.sample_rate;
         let crossing = self.last.is_some_and(|p| (p + 1) % STEPS == step);
         self.last = Some(step);
@@ -527,7 +537,7 @@ impl Transitions {
         if self.sweep.active && !crossing {
             self.sweep.release(RELEASE_SECONDS, sr);
         }
-        if !crossing {
+        if !crossing || quiet {
             return;
         }
 
@@ -606,7 +616,7 @@ mod tests {
         fn tick(&mut self) -> (Option<usize>, f32, f32) {
             let fired = self.t.tick();
             if let Some(s) = fired {
-                self.fx.on_step(s, &self.t);
+                self.fx.on_step(s, &self.t, false);
             }
             let (l, r) = self.fx.process(&self.t);
             assert!(

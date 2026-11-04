@@ -592,6 +592,11 @@ impl Delay {
         self.target_feedback = gain.clamp(0.0, 0.95);
     }
 
+    #[cfg(test)]
+    pub fn feedback_target(&self) -> f32 {
+        self.target_feedback
+    }
+
     pub fn reset(&mut self) {
         self.buf.fill(0.0);
         self.buf_r.fill(0.0);

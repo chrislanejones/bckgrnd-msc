@@ -69,7 +69,14 @@ type Inbound =
       values: ArrayLike<number>;
       deck?: DeckId;
     }
-  | { type: 'cancelScene'; requestId: number };
+  | { type: 'cancelScene'; requestId: number }
+  | { type: 'fill'; requestId: number; generation: number; index: number; deck?: DeckId }
+  | { type: 'cancelFill'; requestId: number }
+  | { type: 'gestureBegin'; token: number; kind: number }
+  | { type: 'gestureEnd'; token: number }
+  | { type: 'gestureRenew'; token: number }
+  | { type: 'releaseGestures' }
+  | { type: 'panic' };
 
 type DeckId = 'a' | 'b';
 
@@ -109,6 +116,7 @@ const EVENT_CAPACITY = 64;
 const EVENT_SCENE_APPLIED = 2;
 const EVENT_SCENE_CANCELLED = 3;
 const EVENT_SCENE_REJECTED = 5;
+const EVENT_FILL_REJECTED = 15;
 const REASON_INVALID = 1;
 const REASON_TRACK = 4;
 const REASON_MIXING = 6;
@@ -223,7 +231,8 @@ class EngineProcessor extends AudioWorkletProcessor {
         if (typeof message.generation === 'number') {
           this.generation[message.deck] = message.generation;
         }
-        // Loading cancels that deck's pending scene inside the engine (`track`).
+        // Loading cancels that deck's pending scene and fill, ends an active fill and
+        // releases its held gestures, all inside the engine (`track`).
         if (engine) engine.load_track_wasm(message.json);
         if (message.deck === this.live) this.scenePendingId = -1;
         return;
@@ -368,6 +377,49 @@ class EngineProcessor extends AudioWorkletProcessor {
 
       case 'scene':
         this.queueScene(message);
+        // A stopped deck applies a scene on the spot. Drain now rather than wait for
+        // the next render call, which never comes while the context is suspended.
+        this.drainEvents(this.live, this.engines[this.live]);
+        return;
+
+      case 'fill':
+        this.queueFill(message);
+        this.drainEvents(this.live, this.engines[this.live]);
+        return;
+
+      case 'cancelFill': {
+        const engine = this.engines[this.live];
+        const id = message.requestId >>> 0;
+        const cancelled = engine ? engine.cancel_fill(id) : false;
+        this.port.postMessage({ type: 'fillCancelResult', deck: this.live, requestId: id, cancelled });
+        return;
+      }
+
+      // Gestures are the live deck's: they are something the performer is doing to
+      // what they hear. The outgoing deck's are released when a mix starts.
+      case 'gestureBegin': {
+        const engine = this.engines[this.live];
+        const token = message.token >>> 0;
+        const kind = message.kind === 1 || message.kind === 2 ? message.kind : 255;
+        const accepted = engine ? engine.gesture_begin(token, kind) : false;
+        this.port.postMessage({ type: 'gestureBeginResult', deck: this.live, token, accepted });
+        return;
+      }
+
+      case 'gestureEnd':
+        this.engines[this.live]?.gesture_end(message.token >>> 0);
+        return;
+
+      case 'gestureRenew':
+        this.engines[this.live]?.gesture_renew(message.token >>> 0);
+        return;
+
+      case 'releaseGestures':
+        for (const engine of this.liveEngines()) engine.release_gestures();
+        return;
+
+      case 'panic':
+        this.panic();
         return;
 
       case 'cancelScene': {
@@ -422,6 +474,48 @@ class EngineProcessor extends AudioWorkletProcessor {
       this.scenePending.set(this.sceneIn);
       this.scenePendingId = requestId;
     }
+  }
+
+  /**
+   * Hand a fill request to the live engine, or refuse it here, in the same shape as
+   * the engine's own `fill rejected` (15): an auto-mix in progress (`mixing`), a
+   * stale deck or generation, or no engine yet (`not playing`).
+   */
+  private queueFill(message: Extract<Inbound, { type: 'fill' }>): void {
+    const requestId = message.requestId >>> 0;
+    let refusal = 0;
+    if (this.mix) refusal = REASON_MIXING;
+    else if (
+      (message.deck !== undefined && message.deck !== this.live) ||
+      message.generation !== this.generation[this.live]
+    )
+      refusal = REASON_STALE;
+    const engine = this.engines[this.live];
+    if (refusal === 0 && !engine) refusal = REASON_NOT_PLAYING;
+    if (refusal !== 0 || !engine) {
+      this.postSceneEvents(this.live, [EVENT_FILL_REJECTED, requestId, refusal, 0]);
+      return;
+    }
+    const index = Number.isInteger(message.index) && message.index >= 0 ? message.index : 0xffffffff;
+    engine.queue_fill(requestId, index >>> 0);
+  }
+
+  /**
+   * Panic: both decks. Any auto-mix is abandoned where it is, with the live deck
+   * back at full trim and the other silent, and each engine cancels what it had
+   * queued (`panic`), ends its fill, releases its gestures, stops and clears its
+   * tails. The UI gets the engine's events; `mixEnd` is not sent for an abandoned mix.
+   */
+  private panic(): void {
+    if (this.mix) {
+      this.mix = null;
+      this.engines[this.live]?.set_output_gain(1);
+      this.engines[this.live === 'a' ? 'b' : 'a']?.set_output_gain(0);
+    }
+    this.scenePendingId = -1;
+    for (const engine of this.liveEngines()) engine.panic();
+    this.drainEvents('a', this.engines.a);
+    this.drainEvents('b', this.engines.b);
   }
 
   private postSceneEvents(deck: DeckId, events: number[]): void {
@@ -504,8 +598,10 @@ class EngineProcessor extends AudioWorkletProcessor {
     if (typeof message.generation === 'number') {
       this.generation[message.deck] = message.generation;
     }
-    // The outgoing deck's pending scene was for the track that is leaving (`track`).
+    // The outgoing deck's pending scene and fill were for the track that is leaving
+    // (`track`), and its held gestures go with it.
     from.cancel_pending(REASON_TRACK);
+    from.release_gestures();
     this.scenePendingId = -1;
 
     if (!from.is_playing()) {
@@ -559,9 +655,11 @@ class EngineProcessor extends AudioWorkletProcessor {
 
   private promote(deck: DeckId): void {
     if (deck !== this.live) {
-      // A scene pending on the deck that stops being live would land on a deck nobody
-      // is listening to: the same as a track change for it.
+      // A scene or fill pending on the deck that stops being live would land on a deck
+      // nobody is listening to: the same as a track change for it. Its held gestures
+      // are released for the same reason.
       this.engines[this.live]?.cancel_pending(REASON_TRACK);
+      this.engines[this.live]?.release_gestures();
       this.scenePendingId = -1;
     }
     this.live = deck;

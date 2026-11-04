@@ -68,15 +68,23 @@ export const ENGINE_REASON = {
   cancelledByUser: 10,
 } as const;
 
+/** Held-gesture kinds (docs/NIGHT3_PROTOCOL.md, Gestures). */
+export const GESTURE_KIND = { echoThrow: 1, filterHold: 2 } as const;
+export type GestureKind = (typeof GESTURE_KIND)[keyof typeof GESTURE_KIND];
+
 /**
- * One outcome from the audio thread. What `a` and `b` mean depends on `kind`:
+ * One outcome from the audio thread. What `a` and `b` mean depends on `kind`;
+ * `requestId` is the gesture's token for `gestureExpired`:
  *
  * | kind | a | b |
  * |---|---|---|
- * | sceneQueued | predicted bar (1-based) | predicted step |
+ * | sceneQueued, fillQueued | predicted bar (1-based) | predicted step |
  * | sceneApplied | step it applied on (-1 for Now / stopped) | 0 |
- * | sceneCancelled, sceneRejected | reason (`ENGINE_REASON`) | 0 |
+ * | sceneCancelled, sceneRejected, fillCancelled, fillRejected | reason (`ENGINE_REASON`) | 0 |
  * | sceneReplaced | request id that replaced it | 0 |
+ * | fillStarted | step | 0 |
+ * | fillEnded | step the track's drums resume on (-1 when cut short) | 0, or the reason it was cut short |
+ * | gestureExpired | gesture kind (`GESTURE_KIND`) | 0 |
  */
 export type EngineEvent = {
   deck: Deck;
@@ -91,7 +99,9 @@ type WorkletMessage =
   | { type: 'mixEnd'; deck: Deck }
   | { type: 'error'; command: string; message: string }
   | { type: 'sceneEvents'; deck: Deck; events: number[] }
-  | { type: 'sceneCancelResult'; deck: Deck; requestId: number; cancelled: boolean };
+  | { type: 'sceneCancelResult'; deck: Deck; requestId: number; cancelled: boolean }
+  | { type: 'fillCancelResult'; deck: Deck; requestId: number; cancelled: boolean }
+  | { type: 'gestureBeginResult'; deck: Deck; token: number; accepted: boolean };
 
 type Listener = (telemetry: Telemetry) => void;
 type ErrorListener = (message: string) => void;
@@ -110,6 +120,10 @@ export class EngineHost {
   private sceneListeners = new Set<SceneEventListener>();
   /** `cancelScene` callers waiting on the worklet's answer, by request id. */
   private cancelWaiters = new Map<number, Array<(cancelled: boolean) => void>>();
+  /** `cancelFill` callers, kept apart: scene and fill ids may coincide. */
+  private fillCancelWaiters = new Map<number, Array<(cancelled: boolean) => void>>();
+  /** `gestureBegin` callers waiting to hear whether the engine took it, by token. */
+  private gestureWaiters = new Map<number, Array<(accepted: boolean) => void>>();
 
   /**
    * The most recent fault from the audio thread, if any.
@@ -132,7 +146,7 @@ export class EngineHost {
     clipped: false,
   };
 
-  private booted: Promise<void> | null = null;
+  private bootPromise: Promise<void> | null = null;
 
   private mixEndHandler: (() => void) | null = null;
 
@@ -143,8 +157,8 @@ export class EngineHost {
    * starts suspended, and a suspended context cannot run the processor.
    */
   async boot(): Promise<void> {
-    this.booted ??= this.create();
-    return this.booted;
+    this.bootPromise ??= this.create();
+    return this.bootPromise;
   }
 
   private async create(): Promise<void> {
@@ -190,11 +204,22 @@ export class EngineHost {
     this.post({ type: 'init', wasm, sampleRate: ctx.sampleRate }, [wasm]);
 
     // Then everything the app said before there was anything to say it to, in order,
-    // and the latest value of every parameter moved since.
-    this.flushParams();
+    // and only after that the latest value of every parameter moved since: a replayed
+    // `track` load resets the faders, sends and tempo, so parameters sent first would
+    // be overwritten by it. `send`, not `post`, so nothing is flushed in between.
     const queued = this.pending;
     this.pending = [];
-    for (const item of queued) this.post(item.message, item.transfer);
+    for (const item of queued) this.send(item.message, item.transfer);
+    this.flushParams();
+  }
+
+  /**
+   * Whether the worklet exists. Until the first Play there is none, so requests that
+   * wait on an answer from the audio thread (a scene's `applied`) would sit in the
+   * pre-boot queue; the UI applies those through the plain setters instead.
+   */
+  get booted(): boolean {
+    return this.node !== null;
   }
 
   private onMessage(message: WorkletMessage): void {
@@ -237,9 +262,15 @@ export class EngineHost {
       return;
     }
     if (message.type === 'sceneCancelResult') {
-      const waiting = this.cancelWaiters.get(message.requestId);
-      this.cancelWaiters.delete(message.requestId);
-      for (const resolve of waiting ?? []) resolve(message.cancelled);
+      settle(this.cancelWaiters, message.requestId, message.cancelled);
+      return;
+    }
+    if (message.type === 'fillCancelResult') {
+      settle(this.fillCancelWaiters, message.requestId, message.cancelled);
+      return;
+    }
+    if (message.type === 'gestureBeginResult') {
+      settle(this.gestureWaiters, message.token, message.accepted);
     }
   }
 
@@ -409,13 +440,15 @@ export class EngineHost {
   }
 
   async close(): Promise<void> {
-    for (const waiting of this.cancelWaiters.values()) for (const resolve of waiting) resolve(false);
-    this.cancelWaiters.clear();
+    for (const map of [this.cancelWaiters, this.fillCancelWaiters, this.gestureWaiters]) {
+      for (const waiting of map.values()) for (const resolve of waiting) resolve(false);
+      map.clear();
+    }
     this.node?.disconnect();
     this.node = null;
     await this.ctx?.close();
     this.ctx = null;
-    this.booted = null;
+    this.bootPromise = null;
   }
 
   // -- Transport ------------------------------------------------------------
@@ -503,16 +536,83 @@ export class EngineHost {
    * event follows), false when it was not: already applied, replaced, or unknown.
    */
   cancelScene(requestId: number): Promise<boolean> {
+    return this.ask(this.cancelWaiters, requestId, { type: 'cancelScene', requestId });
+  }
+
+  // -- Fills ----------------------------------------------------------------
+
+  /**
+   * Ask the live deck to play fill `index` of its track (0 in Night 3) from the next
+   * bar line, for one bar. Outcomes arrive through `onSceneEvents`: `fillQueued`,
+   * `fillStarted`, `fillEnded`, or `fillRejected` (not playing, already queued or
+   * playing, mixing, stale generation, no such fill) or `fillCancelled`.
+   */
+  queueFill(requestId: number, index: number, generation: number): void {
+    this.post({ type: 'fill', requestId, generation, index });
+  }
+
+  /**
+   * Withdraw a queued fill. Resolves true when it was still waiting for its bar (a
+   * `fillCancelled` event follows), false otherwise; a fill already playing runs its bar.
+   */
+  cancelFill(requestId: number): Promise<boolean> {
+    return this.ask(this.fillCancelWaiters, requestId, { type: 'cancelFill', requestId });
+  }
+
+  // -- Gestures -------------------------------------------------------------
+
+  /**
+   * Begin a held override on the live deck under a token unique to this press.
+   * Resolves false when the engine refused it (four already held, the token in use,
+   * or an unknown kind). The engine drops it after 3 s of audio unless renewed, and
+   * reports that as `gestureExpired`; renew while held, and end on release, blur and
+   * visibility change (a suspended context renders nothing, so the lease cannot run
+   * out on its own there).
+   */
+  gestureBegin(token: number, kind: GestureKind): Promise<boolean> {
+    return this.ask(this.gestureWaiters, token, { type: 'gestureBegin', token, kind });
+  }
+
+  /** End one held override; the next held one of its kind, or the base, is heard. */
+  gestureEnd(token: number): void {
+    this.post({ type: 'gestureEnd', token });
+  }
+
+  /** Restart a held override's 3 s lease. */
+  gestureRenew(token: number): void {
+    this.post({ type: 'gestureRenew', token });
+  }
+
+  /** Release FX: end every held override and the latched echo throw; the mix is untouched. */
+  releaseGestures(): void {
+    this.post({ type: 'releaseGestures' });
+  }
+
+  /**
+   * Panic: cancel whatever is queued, end a playing fill, release every gesture and
+   * the latched echo throw, stop both decks and clear the tails. An auto-mix in
+   * progress is abandoned (no `mixEnd` follows).
+   */
+  panic(): void {
+    this.post({ type: 'panic' });
+  }
+
+  /** Post `message` and resolve with the worklet's yes/no answer for `key`. */
+  private ask(
+    waiters: Map<number, Array<(answer: boolean) => void>>,
+    key: number,
+    message: Record<string, unknown>,
+  ): Promise<boolean> {
     return new Promise((resolve) => {
-      const waiting = this.cancelWaiters.get(requestId) ?? [];
+      const waiting = waiters.get(key) ?? [];
       waiting.push(resolve);
-      this.cancelWaiters.set(requestId, waiting);
-      this.post({ type: 'cancelScene', requestId });
+      waiters.set(key, waiting);
+      this.post(message);
     });
   }
 
   /**
-   * Subscribe to scene (and later fill and gesture) outcomes from the audio thread.
+   * Subscribe to scene, fill and gesture outcomes from the audio thread.
    * Each call delivers the events of one render block, oldest first. Returns an
    * unsubscribe function.
    */
@@ -660,6 +760,17 @@ export class EngineHost {
   nudge(dir: -1 | 0 | 1): void {
     this.post({ type: 'nudge', dir });
   }
+}
+
+/** Resolve everyone waiting on `key` with `answer`. */
+function settle(
+  waiters: Map<number, Array<(answer: boolean) => void>>,
+  key: number,
+  answer: boolean,
+): void {
+  const waiting = waiters.get(key);
+  waiters.delete(key);
+  for (const resolve of waiting ?? []) resolve(answer);
 }
 
 export const engine = new EngineHost();

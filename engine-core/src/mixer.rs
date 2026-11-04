@@ -175,7 +175,9 @@ pub struct Master {
     /// Whether the per-stem sends reach the echo. Off by choosing echo time 0; the
     /// echo throw is a separate feed and still works.
     sends_on: bool,
-    filter_gain: f32,
+    /// Make-up trim on the output while Filter Hold is on ([`FILTER_HOLD_TRIM`]),
+    /// gliding, so the held treatment is darker without being louder.
+    filter_trim: Smoothed,
     /// Rumble filter on the sum, before the dynamics stage.
     hp: StereoBiquad,
     comp: Compressor,
@@ -208,6 +210,20 @@ pub struct Master {
     /// Output safety ceiling, the very last stage. The EQ, tape filter and master gain
     /// all sit after the compressor and can lift the sum past full scale.
     limiter: Limiter,
+    /// The filter position and resonance as the setters and scenes wrote them: the
+    /// base. Filter Hold overrides what the sweep glides to, never these.
+    filter_base: f32,
+    q_base: f32,
+    filter_hold: bool,
+    /// Gain on the echo and room returns from the engine's all-cut gate, 0..1, set
+    /// every sample before [`Master::process`].
+    returns_gate: f32,
+    /// The solo flush: samples into it, or `None` when idle. See
+    /// [`Master::flush_returns`].
+    flush: Option<u32>,
+    /// The flush's duck, hold and restore lengths, in samples.
+    flush_duck: u32,
+    flush_hold: u32,
 }
 
 /// The reverb's wet level, and the highpasses either side of the send.
@@ -230,6 +246,20 @@ pub const FILTER_Q_MAX: f32 = 6.0;
 const FILTER_OPEN_Q: f32 = 0.45;
 /// The widest the stereo width goes.
 pub const WIDTH_MAX: f32 = 1.5;
+/// Filter Hold: the filter closes to this position (about 880 Hz on the 240 Hz to
+/// 18 kHz sweep), or stays where the base has it if that is already darker.
+pub const FILTER_HOLD_OPEN: f32 = 0.3;
+/// Filter Hold: the resonance it holds at, or the base's if that is already higher.
+pub const FILTER_HOLD_Q: f32 = 3.0;
+/// Filter Hold: output trim while held, -1.5 dB. The resonant peak sits on the stab
+/// and lead band, and without this a dense mix measured about 1 dB *louder* held
+/// than open, which reads as a boost rather than the filter closing.
+pub const FILTER_HOLD_TRIM: f32 = 0.84;
+/// The solo flush: the returns duck over this, are held silent while the other stems'
+/// faders finish gliding out (five time constants of the channel glide), have their
+/// history cleared, and come back over the duck time again.
+const FLUSH_DUCK_SECONDS: f32 = 0.016;
+const FLUSH_HOLD_SECONDS: f32 = 0.048;
 /// How often, in samples, the filter and EQ coefficients may be recomputed while they
 /// move. Recomputing them every sample cost a `powf`, a `sin` and a `cos` per sample
 /// for no audible gain; at this rate and these glide times each step is far below a
@@ -294,7 +324,7 @@ impl Master {
             control: 0,
             delay_beats: DELAY_BEATS_DEFAULT,
             sends_on: true,
-            filter_gain: 1.0,
+            filter_trim: Smoothed::new(1.0, FILTER_GLIDE, sample_rate),
             hp,
             // The dynamics stage's settings are the load-bearing part of this chain, so
             // they are named once here rather than spread through the process method.
@@ -312,7 +342,118 @@ impl Master {
             shaper_prev: [0.0; 2],
             send_acc: 0.0,
             limiter: Limiter::new(sample_rate, LIMIT_KNEE_DB, LIMIT_CEILING_DB, LIMIT_RELEASE),
+            filter_base: 1.0,
+            q_base: FILTER_Q,
+            filter_hold: false,
+            returns_gate: 1.0,
+            flush: None,
+            flush_duck: ((FLUSH_DUCK_SECONDS * sample_rate) as u32).max(1),
+            flush_hold: ((FLUSH_HOLD_SECONDS * sample_rate) as u32).max(1),
         }
+    }
+
+    /// Clear the echo and room history: both lines, the room, and the filters that
+    /// feed them. No glide; callers duck the returns first.
+    fn clear_returns(&mut self) {
+        self.delay.reset();
+        self.verb.reset();
+        self.verb_pre.reset();
+        self.echo_hp.reset();
+    }
+
+    /// Duck the echo and room returns, clear their history, and bring them back:
+    /// entering solo, so the soloed stem is not heard over another stem's tail.
+    ///
+    /// The returns fall to silence over 16 ms, stay there 48 ms while the other
+    /// stems' faders finish gliding out (their sends are post-fader), are cleared,
+    /// and return over 16 ms with nothing in them. Nothing jumps: the clear happens at
+    /// zero gain. Called again mid-flush, it carries on from the gain it is at.
+    pub fn flush_returns(&mut self) {
+        let gain = self.flush_gain();
+        self.flush = Some(((1.0 - gain) * self.flush_duck as f32) as u32);
+    }
+
+    /// The flush's gain on the returns now, 1 when idle.
+    fn flush_gain(&self) -> f32 {
+        let Some(t) = self.flush else { return 1.0 };
+        let (duck, hold) = (self.flush_duck, self.flush_hold);
+        if t < duck {
+            1.0 - t as f32 / duck as f32
+        } else if t < duck + hold {
+            0.0
+        } else {
+            ((t - duck - hold) as f32 / duck as f32).min(1.0)
+        }
+    }
+
+    /// Step the flush one sample and return its gain on the returns.
+    #[inline]
+    fn step_flush(&mut self) -> f32 {
+        let Some(t) = self.flush else { return 1.0 };
+        let g = self.flush_gain();
+        if t == self.flush_duck + self.flush_hold {
+            self.clear_returns();
+        }
+        self.flush = if t >= 2 * self.flush_duck + self.flush_hold {
+            None
+        } else {
+            Some(t + 1)
+        };
+        g
+    }
+
+    /// The engine's all-cut gate on the returns, 0..1.
+    #[inline]
+    pub fn set_returns_gate(&mut self, gate: f32) {
+        self.returns_gate = gate;
+    }
+
+    /// Hold the filter dark and resonant ([`FILTER_HOLD_OPEN`], [`FILTER_HOLD_Q`]) or
+    /// let it back to the base. The sweep glides either way.
+    pub fn set_filter_hold(&mut self, on: bool) {
+        if self.filter_hold != on {
+            self.filter_hold = on;
+            self.retarget_filter();
+        }
+    }
+
+    /// Point the sweep at the base, or at the hold's treatment of it. Out of line:
+    /// every filter setter and scene commit calls it.
+    #[inline(never)]
+    fn retarget_filter(&mut self) {
+        if self.filter_hold {
+            self.sweep_open.set(self.filter_base.min(FILTER_HOLD_OPEN));
+            self.sweep_q.set(self.q_base.max(FILTER_HOLD_Q));
+            self.filter_trim.set(FILTER_HOLD_TRIM);
+        } else {
+            self.sweep_open.set(self.filter_base);
+            self.sweep_q.set(self.q_base);
+            self.filter_trim.set(1.0);
+        }
+    }
+
+    /// The filter position as the setters left it, whatever a hold is doing.
+    #[cfg(test)]
+    pub fn filter_base(&self) -> f32 {
+        self.filter_base
+    }
+
+    /// Where the sweep actually is now.
+    #[cfg(test)]
+    pub fn sweep_open_value(&self) -> f32 {
+        self.sweep_open.value()
+    }
+
+    /// The resonance the sweep is heading for (held or base).
+    #[cfg(test)]
+    pub fn sweep_q_target(&self) -> f32 {
+        self.sweep_q.target()
+    }
+
+    /// The feedback the echo line is heading for.
+    #[cfg(test)]
+    pub fn feedback_target(&self) -> f32 {
+        self.delay.feedback_target()
     }
 
     pub fn reset(&mut self) {
@@ -389,9 +530,12 @@ impl Master {
         240.0 * (18_000.0_f32 / 240.0).powf(a)
     }
 
+    /// The base filter position. Under a Filter Hold this is stored and the hold
+    /// re-derived from it, so letting go lands here.
     pub fn set_filter(&mut self, open: f32) {
         if open.is_finite() {
-            self.sweep_open.set(open.clamp(0.0, 1.0));
+            self.filter_base = open.clamp(0.0, 1.0);
+            self.retarget_filter();
         }
     }
 
@@ -399,7 +543,8 @@ impl Master {
     /// filter all the way still fades it to a transparent 0.45, whatever this is.
     pub fn set_filter_q(&mut self, q: f32) {
         if q.is_finite() {
-            self.sweep_q.set(q.clamp(FILTER_Q_MIN, FILTER_Q_MAX));
+            self.q_base = q.clamp(FILTER_Q_MIN, FILTER_Q_MAX);
+            self.retarget_filter();
         }
     }
 
@@ -604,9 +749,11 @@ impl Master {
         let (send_l, send_r) = self.verb_pre.process(left, right);
         let (verb_l, verb_r) = self.verb.process(send_l, send_r);
 
-        // --- Rumble filter, taking the sum and every wet return together.
-        let verb_wet = self.verb_wet.next();
-        let wet = self.wet.next();
+        // --- Rumble filter, taking the sum and every wet return together. The returns
+        // carry the solo flush and the all-cut gate on top of their own levels.
+        let returns = self.step_flush() * self.returns_gate;
+        let verb_wet = self.verb_wet.next() * returns;
+        let wet = self.wet.next() * returns;
         let (mut l, mut r) = self.hp.process(
             left + verb_l * verb_wet + wet_l * wet,
             right + verb_r * verb_wet + wet_r * wet,
@@ -651,8 +798,9 @@ impl Master {
         let gain_r = (2.0 * b).min(1.0);
         let mut out_l = l * gain_l;
         let mut out_r = r * gain_r;
-        out_l *= self.filter_gain;
-        out_r *= self.filter_gain;
+        let trim = self.filter_trim.next();
+        out_l *= trim;
+        out_r *= trim;
 
         // --- The safety ceiling, last of all, so nothing upstream can clip the output.
         (out_l, out_r) = self.limiter.process(out_l, out_r);

@@ -17,8 +17,11 @@
 //! Nothing here allocates. The pending slot and the ring are fixed-size arrays, and
 //! the per-onset check is two comparisons.
 
-use crate::track::STEPS;
+use crate::track::{FILL_STEPS, STEPS};
 use crate::transport::Transport;
+
+/// Fills start on bar lines.
+const FILL_GRID: usize = 16;
 
 /// Length of the scene vector: 8 stems x (volume, send, muted, solo), then 12 effects.
 pub const SCENE_LEN: usize = 44;
@@ -289,13 +292,35 @@ pub struct PendingScene {
     pub values: [f32; SCENE_LEN],
 }
 
-/// The scheduler's state: the onset serial, the pending scene and the event ring.
+/// The one fill waiting for its bar.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PendingFill {
+    pub request_id: u32,
+    /// Index into the track's `fills`.
+    pub index: u32,
+    /// The onset serial when it was queued; only a later bar onset can start it.
+    queued_at: u64,
+}
+
+/// The fill playing now.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ActiveFill {
+    pub request_id: u32,
+    pub index: u32,
+    /// Which of its sixteen steps the current onset plays, 0..16.
+    pub pos: usize,
+}
+
+/// The scheduler's state: the onset serial, the pending scene, the pending and
+/// active fill, and the event ring.
 #[derive(Default)]
 pub struct Scheduler {
     /// Onsets fired since the engine was made. Never reset, never wraps in practice
     /// (2^64 sixteenths).
     serial: u64,
     scene: Option<PendingScene>,
+    fill: Option<PendingFill>,
+    active_fill: Option<ActiveFill>,
     pub events: EventRing,
 }
 
@@ -349,6 +374,109 @@ impl Scheduler {
             (step / 16 + 1) as f64,
             step as f64,
         );
+    }
+
+    /// Report `fill queued` for the pending fill with a fresh prediction.
+    #[inline(never)]
+    pub fn announce_fill(&mut self, t: &Transport) {
+        let Some(f) = self.fill.as_ref() else { return };
+        let step = predict(t, FILL_GRID);
+        self.events.push(
+            event::FILL_QUEUED,
+            f.request_id,
+            (step / 16 + 1) as f64,
+            step as f64,
+        );
+    }
+
+    /// Whether a fill is queued or playing. A second one is refused while either is.
+    pub fn fill_busy(&self) -> bool {
+        self.fill.is_some() || self.active_fill.is_some()
+    }
+
+    pub fn pending_fill(&self) -> Option<&PendingFill> {
+        self.fill.as_ref()
+    }
+
+    pub fn active_fill(&self) -> Option<&ActiveFill> {
+        self.active_fill.as_ref()
+    }
+
+    /// Queue fill `index` (already checked against the track) for the first bar
+    /// onset after now, and report `fill queued`. The caller has already refused a
+    /// request while [`Scheduler::fill_busy`].
+    pub fn queue_fill(&mut self, request_id: u32, index: u32, t: &Transport) {
+        self.fill = Some(PendingFill {
+            request_id,
+            index,
+            queued_at: self.serial,
+        });
+        self.announce_fill(t);
+    }
+
+    /// The fill's part of an onset, run after [`Scheduler::on_onset`] has counted it
+    /// and after any scene due here has been committed: end an active fill that has
+    /// played its sixteen steps, then start a pending one whose bar this is. Leaves
+    /// [`Scheduler::active_fill`] describing what this onset's drums play.
+    #[inline]
+    pub fn fill_onset(&mut self, step: usize) {
+        if let Some(a) = self.active_fill.as_mut() {
+            a.pos += 1;
+            if a.pos >= FILL_STEPS {
+                let id = a.request_id;
+                self.active_fill = None;
+                self.events
+                    .push(event::FILL_ENDED, id, step as f64, reason::OK as f64);
+            }
+        }
+        let due = self
+            .fill
+            .as_ref()
+            .is_some_and(|f| self.serial > f.queued_at && step.is_multiple_of(FILL_GRID));
+        if due {
+            if let Some(f) = self.fill.take() {
+                self.active_fill = Some(ActiveFill {
+                    request_id: f.request_id,
+                    index: f.index,
+                    pos: 0,
+                });
+                self.events
+                    .push(event::FILL_STARTED, f.request_id, step as f64, 0.0);
+            }
+        }
+    }
+
+    /// Cancel the pending fill if it is `request_id` (reason 10). False when it is
+    /// not pending: never queued, already started, or already cancelled. A fill that
+    /// is playing is not cut short by this; it runs its bar.
+    pub fn cancel_fill(&mut self, request_id: u32) -> bool {
+        match self.fill {
+            Some(f) if f.request_id == request_id => {
+                self.fill = None;
+                self.events
+                    .push(event::FILL_CANCELLED, request_id, reason::USER as f64, 0.0);
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// Cancel a pending fill (`fill cancelled`, reason `why`) and cut short an active
+    /// one (`fill ended` with step -1 and `why`). True if there was either.
+    #[inline(never)]
+    pub fn end_fills(&mut self, why: u8) -> bool {
+        let mut any = false;
+        if let Some(f) = self.fill.take() {
+            self.events
+                .push(event::FILL_CANCELLED, f.request_id, why as f64, 0.0);
+            any = true;
+        }
+        if let Some(a) = self.active_fill.take() {
+            self.events
+                .push(event::FILL_ENDED, a.request_id, -1.0, why as f64);
+            any = true;
+        }
+        any
     }
 
     /// Count an onset on `step` and hand back the pending scene if this onset is its

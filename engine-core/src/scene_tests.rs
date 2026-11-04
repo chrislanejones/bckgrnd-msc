@@ -6,9 +6,9 @@ use super::*;
 use crate::scheduler::{event, reason, timing, EVENT_CAPACITY, EVENT_WIDTH, FX_BASE};
 
 /// The rates that turn up in the field (see `tests/sample_rates.rs`).
-const RATES: [f32; 3] = [44_100.0, 48_000.0, 96_000.0];
+pub(crate) const RATES: [f32; 3] = [44_100.0, 48_000.0, 96_000.0];
 
-fn groove() -> Track {
+pub(crate) fn groove() -> Track {
     let mut t = Track::silence("scenes");
     t.bpm = 123.0;
     t.swing = 0.22;
@@ -19,14 +19,14 @@ fn groove() -> Track {
     t
 }
 
-fn engine(sr: f32) -> Engine {
+pub(crate) fn engine(sr: f32) -> Engine {
     let mut e = Engine::new(sr);
     e.load_track(groove());
     e
 }
 
 /// A valid scene whose kick fader is `kick` and every other value is the default.
-fn scene(kick: f32) -> Vec<f32> {
+pub(crate) fn scene(kick: f32) -> Vec<f32> {
     let mut v = vec![0.0f32; SCENE_LEN];
     for (i, stem) in Stem::ALL.iter().enumerate() {
         v[i * 4] = 0.6;
@@ -38,7 +38,7 @@ fn scene(kick: f32) -> Vec<f32> {
 }
 
 /// Render `frames` samples in blocks of `block`.
-fn render(e: &mut Engine, frames: usize, block: usize) {
+pub(crate) fn render(e: &mut Engine, frames: usize, block: usize) {
     let mut l = vec![0.0f32; block];
     let mut r = vec![0.0f32; block];
     let mut left = frames;
@@ -51,7 +51,7 @@ fn render(e: &mut Engine, frames: usize, block: usize) {
 
 /// Render one sample at a time until `step` has just fired (its onset was the last
 /// sample rendered).
-fn render_until_fired(e: &mut Engine, step: i32) {
+pub(crate) fn render_until_fired(e: &mut Engine, step: i32) {
     let mut l = [0.0f32; 1];
     let mut r = [0.0f32; 1];
     for _ in 0..(e.sample_rate as usize * 20) {
@@ -65,7 +65,7 @@ fn render_until_fired(e: &mut Engine, step: i32) {
 }
 
 /// Render blocks of 128 until a scene has been committed, or `max_blocks` pass.
-fn render_until_applied(e: &mut Engine, max_blocks: usize) -> Option<(u32, u64)> {
+pub(crate) fn render_until_applied(e: &mut Engine, max_blocks: usize) -> Option<(u32, u64)> {
     for _ in 0..max_blocks {
         render(e, 128, 128);
         if let Some(found) = applies(e).first() {
@@ -75,18 +75,18 @@ fn render_until_applied(e: &mut Engine, max_blocks: usize) -> Option<(u32, u64)>
     None
 }
 
-fn applies(e: &Engine) -> Vec<(u32, u64)> {
+pub(crate) fn applies(e: &Engine) -> Vec<(u32, u64)> {
     e.trace
         .iter()
         .filter_map(|t| match *t {
             Trace::Apply(id, at) => Some((id, at)),
-            Trace::Trigger(..) => None,
+            _ => None,
         })
         .collect()
 }
 
 /// The steps triggered on `sample`, in order.
-fn triggers_at(e: &Engine, sample: u64) -> Vec<usize> {
+pub(crate) fn triggers_at(e: &Engine, sample: u64) -> Vec<usize> {
     e.trace
         .iter()
         .filter_map(|t| match *t {
@@ -96,13 +96,13 @@ fn triggers_at(e: &Engine, sample: u64) -> Vec<usize> {
         .collect()
 }
 
-fn events(e: &mut Engine) -> Vec<[f64; 4]> {
+pub(crate) fn events(e: &mut Engine) -> Vec<[f64; 4]> {
     let mut out = [0.0f64; EVENT_CAPACITY * EVENT_WIDTH];
     let n = e.take_events_into(&mut out) as usize;
     out.as_chunks::<4>().0[..n].to_vec()
 }
 
-fn ev(kind: u8, id: u32, a: f64, b: f64) -> [f64; 4] {
+pub(crate) fn ev(kind: u8, id: u32, a: f64, b: f64) -> [f64; 4] {
     [kind as f64, id as f64, a, b]
 }
 

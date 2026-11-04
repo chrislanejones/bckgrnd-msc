@@ -159,7 +159,7 @@ the scene already pending, pending.
 
 | Event | Pending scene | Pending / active fill | Held gestures |
 |---|---|---|---|
-| Stop | cancelled (`stopped`) | cancelled / ended | released |
+| Stop (including a brake that runs to a halt) | cancelled (`stopped`) | cancelled / ended | released |
 | Cue, seek, scratch (grab or drop), brake, backspin, Play while already playing (restarts from step 0) | cancelled (`transport`) | cancelled / ended | kept |
 | Track load on that deck, auto-mix start, `promote` to the other deck | cancelled (`track`) | cancelled / ended | released |
 | Panic | cancelled (`panic`) | cancelled / ended | released |
@@ -198,10 +198,10 @@ call and posts them to the UI only when there are any, as
 | 5 | scene rejected | reason | 0 |
 | 11 | fill queued | predicted bar | predicted step |
 | 12 | fill started | step | 0 |
-| 13 | fill ended | step | 0 |
+| 13 | fill ended | step the track's drums resume on (-1 when cut short) | 0 when it played its bar, else the reason it was cut short |
 | 14 | fill cancelled | reason | 0 |
 | 15 | fill rejected | reason | 0 |
-| 21 | gesture expired (lease ran out) | gesture kind | 0 |
+| 21 | gesture expired (lease ran out); `requestId` is the token | gesture kind | 0 |
 
 Reasons: 1 invalid, 2 stopped, 3 transport, 4 track, 5 panic, 6 mixing, 7 not
 playing, 8 already playing, 9 stale generation, 10 cancelled by the user.
@@ -218,7 +218,10 @@ playing, 8 already playing, 9 stale generation, 10 cancelled by the user.
 - `cancelScene` is answered with `{type: 'sceneCancelResult', deck, requestId,
   cancelled}`: `cancelled: false` is the "not pending" case (already applied,
   replaced or unknown). A successful cancel also produces the `cancelled` event
-  (reason 10).
+  (reason 10). `cancelFill` is answered the same way with `fillCancelResult`.
+- The worklet drains the live engine's events straight after handling a `scene` or
+  `fill` message as well as after every render call, so a scene applied on a stopped
+  deck reports `applied` even while the context is suspended.
 - When a scene applies on the live deck the worklet updates its auto-mix mirrors
   (stem volume, send, filter) and sets the same values on the idle deck at once,
   without events, so a later handover does not restore the mix from before it.
@@ -236,6 +239,22 @@ playing, 8 already playing, 9 stale generation, 10 cancelled by the user.
 - First press queues; a second press before it starts cancels; a press while it
   plays is refused (`already playing`). A fill while stopped is refused (`not
   playing`) and the UI says playback is needed.
+- A second `fill` request that reaches the engine while one is **queued** is refused
+  the same way (`already playing`, 8): the queued fill keeps the bar it announced. The
+  engine never replaces or stacks fills; cancelling is the UI's job.
+- Refusals, as `fill rejected` (15): 1 no such fill index, 3 a scratch, brake or
+  backspin is running, 7 not playing, 8 one already queued or playing (all from the
+  engine); 6 mixing, 9 stale generation, 7 engine not booted (from the worklet).
+- `cancelFill` withdraws a queued fill only. A fill that has started runs its bar;
+  cancelling it answers `cancelled: false`.
+- The bar is counted in onsets, so a tempo change moves neither end; a loop change
+  re-announces a queued fill (`fill queued` again).
+- The engine reads only the four lanes from the exported recipe (`id` and `name` are
+  the UI's). A lane that is missing or empty is not replaced: the track's own lane
+  plays through the fill. Hats fold open over closed as they always do, each from
+  whichever source owns that lane.
+- Host messages: `{type: 'fill', requestId, generation, index, deck?}` and
+  `{type: 'cancelFill', requestId}`; events come back on `sceneEvents`.
 
 ## Gestures (temporary overrides)
 
@@ -251,6 +270,31 @@ playing, 8 already playing, 9 stale generation, 10 cancelled by the user.
   samples does not advance while the context is suspended.
 - **Release FX** ends every gesture and leaves the working mix alone.
 - Capture never sees an override: it reads the base.
+- `gestureBegin` is refused (answered `{type: 'gestureBeginResult', deck, token,
+  accepted: false}`) for an unknown kind, a token already held, or a fifth gesture.
+  `gestureEnd` and `gestureRenew` for an unknown token do nothing. Gestures act on the
+  live deck; a track load, auto-mix start or `promote` releases the outgoing deck's.
+- The lease is counted once per render call, so it runs out at the end of the call in
+  which its 3 s are reached (within 128 samples).
+- The two kinds control different parameters, so "most recently begun wins" only
+  ever chooses between overrides of the same kind, which apply the same treatment:
+  a parameter is overridden while any gesture of its kind is held.
+- **Echo Throw** is the throw the engine always had: an extra feed off the summed bus
+  into the echo, the dry at 0.55 and the return at 0.95, and the feedback opened to at
+  least 0.78 (`THROW_FEEDBACK`, never above the 0.9 the knob allows). Releasing it puts
+  the dry, the return and the feedback back on the base; repeats already in the line
+  ring out on that feedback.
+- **Filter Hold** closes the tape filter to 0.3 of its travel (about 880 Hz on the
+  240 Hz to 18 kHz sweep) at a resonance of Q 3.0, and trims the output by 1.5 dB while
+  held. If the base filter is already darker it stays where it is, and if the base Q
+  is already higher that is kept. The trim is there because the resonant peak sits on
+  the stab and lead band: untrimmed, a dense mix measured about 1 dB louder held than
+  open; trimmed it is 0.5 to 1.2 dB quieter. It glides in and out with the filter's
+  own 30 ms smoothing.
+- The older latched toggle (`{type: 'echo', on}`, `Engine::set_echo`) still works
+  until the UI moves to tokens. It is combined with any held Echo Throw, is not
+  leased, and survives Stop and track loads (the UI owns the latch); Release FX and
+  Panic turn it off, so the UI clears its latch on those too.
 
 ## Silence, solo and transition sounds
 
@@ -261,9 +305,27 @@ playing, 8 already playing, 9 stale generation, 10 cancelled by the user.
   stem is heard alone and not over another stem's tail.
 - Every stem cut: the final output fades to silence (about 30 ms), wet returns and
   transition sounds included. A single cut still lets existing tails decay.
-- Scratch and backspin are not gated by any of this.
+  "Cut" means the stem cannot be heard: muted, its fader at 0, or left out by another
+  stem's solo. Un-cutting fades back over the same 30 ms.
+- Scratch and backspin are not gated by any of this. The policy is explicit in
+  `Engine::render_sample`: the all-cut gate scales the stem sum, the transition sounds
+  and the echo and room returns; the backspin take and the scratch reader are added
+  after it, ungated. (Their own echo and room, if any, are returns, so those follow
+  the gate.)
+- The solo flush: the echo and room returns duck to silence over 16 ms, stay there
+  48 ms while the other stems' faders finish gliding out (their sends are post-fader),
+  have their history cleared at zero gain, and come back over 16 ms. Any transition
+  sound in flight fades out (60 ms) and none start while a stem is soloed; the song's
+  seams are still counted, so leaving solo needs nothing special.
 - **Panic** cancels everything queued, releases every gesture, stops playback and
-  clears the tails. It is not the same as Cancel Queued.
+  clears the tails. It is not the same as Cancel Queued. In the engine: the pending
+  scene `cancelled` and the queued fill `fill cancelled` with reason 5, a playing fill
+  `fill ended` (-1, 5), every gesture and the echo latch released, Stop, transition
+  sounds silenced. The worklet panics both decks and abandons an auto-mix in progress
+  where it is (live deck at full trim, the other silent; no `mixEnd` is sent).
+- `Engine::cancel_pending(reason)`, the host's structural cancel (auto-mix start,
+  `promote`), withdraws the pending scene **and** fill and ends an active fill. It does
+  not touch gestures; the host calls `release_gestures` for that.
 
 ## Compare A/B
 
