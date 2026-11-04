@@ -100,3 +100,16 @@ live performance). Working protocol: `docs/NIGHT3_PROTOCOL.md`.
 | Scene ownership across a crossfade | Night 5 | Spec: launches and fills are refused during an auto-mix |
 | Saving scenes and Compare A/B to disk | Night 5 | No project save exists yet |
 | A listening pass (clicks, tails, level jumps, held-effect feel) | Chris | Can't be done by an agent; state checks pass but do not prove it sounds right |
+
+## Session saved 11-04-2026
+
+| Item | State |
+|---|---|
+| Branch | `night3/scenes-performance`, 6 commits on `a8917a2`, **not pushed, not merged** |
+| Worktree servers | `php artisan serve` on 127.0.0.1:8180, static `php -S` on :8190 (main checkout stays on 8080 / 8090) |
+| Waiting on Chris | Listening pass (the spec's final demonstration), then "push" and/or "merge" |
+| Open decisions | Stem groups next to the Full scene (keep, rename, remove); accept ADR 014 and 015; compact mixer in Night 4 or 5 |
+
+Next session: run Chris's listening notes as fixes on this branch, re-run the full gates
+(cargo, PHPUnit, check:contract, check:scenes, typecheck, build, build:static, verify:ui,
+verify:audio, verify:static), then push or merge only on an explicit word.
