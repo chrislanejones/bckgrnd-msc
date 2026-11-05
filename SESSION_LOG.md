@@ -1,3 +1,5 @@
+Latest handoff: [2026-11-05 — Stems, scenes, and pattern editor](docs/sessions/2026-11-05-stems-scenes-ui.md).
+
 # Night 3 session log
 
 Branch `night3/scenes-performance`, worktree `~/ai-repo/bckgrnd-msc-night3`, started
