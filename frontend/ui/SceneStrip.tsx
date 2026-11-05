@@ -1,6 +1,6 @@
 /**
- * The scene strip: four scene pads above the stem mixer, one shared timing selector,
- * the one-bar Fill, and Cancel Queued.
+ * The scene strip: four scene pads after the stem mixer, one shared timing selector,
+ * the one-bar Fill, and Cancel to restore the mix from before scene choices.
  *
  * A pad press only ever *launches*. Saving, renaming, duplicating and resetting live
  * in each pad's own menu, so a performance click can never overwrite a scene.
@@ -13,7 +13,9 @@ import { useEffect, useId, useRef, useState } from 'react';
 import { MoreHorizontal, X } from 'lucide-react';
 import type { Scene, SceneSlotId } from '../lib/contract';
 import { SCENE_SLOTS } from '../lib/contract';
-import { isPending, isSceneSlot, sceneDescription, type SceneRequest, type Timing } from '../lib/scenes';
+import { isPending, isSceneSlot, sceneLevels, scenePreview, type SceneRequest, type Timing } from '../lib/scenes';
+import { STEM_ORDER, STEM_NAMES } from '../lib/stems';
+import type { TrackSummary } from '../lib/types';
 import { cx, Segmented } from './controls';
 import type { ReactNode } from 'react';
 
@@ -21,6 +23,7 @@ export type FillState = 'idle' | 'sending' | 'queued' | 'playing';
 
 type Props = {
   scenes: Scene[];
+  track: TrackSummary;
   /** The slot the engine last applied, or null. */
   active: SceneSlotId | null;
   /** The working mix differs from what the active scene applied. */
@@ -57,34 +60,10 @@ export function SceneStrip(props: Props) {
 
   return (
     <section className="scene-strip" aria-label="Scenes">
-      <div className="scene-strip-head">
-        <Segmented<Timing>
-          label="Launch at"
-          value={timing}
-          onPick={props.onTiming}
-          options={[
-            { value: 'now', label: 'Now', aria: 'Launch now' },
-            { value: 'beat', label: 'Beat', aria: 'Launch on the next beat' },
-            { value: 'bar', label: 'Bar', aria: 'Launch on the next bar' },
-          ]}
-        />
-        <div className="scene-strip-actions">
-          {props.onFill ? <FillButton {...props} /> : null}
-          <button
-            type="button"
-            className="text-button"
-            disabled={!pending}
-            onClick={props.onCancel}
-            aria-label={pending ? `Cancel queued ${sceneName(scenes, pending.target)}` : 'Cancel queued scene'}
-          >
-            Cancel queued
-          </button>
-        </div>
-      </div>
-
       <div className="scene-pads">
         {SCENE_SLOTS.map((slot, i) => {
           const scene = scenes.find((s) => s.slot === slot)!;
+          const preview = scenePreview(scene, props.track);
           const isActive = active === slot;
           const isQueued = pending?.target === slot;
           const state = unavailable
@@ -116,11 +95,29 @@ export function SceneStrip(props: Props) {
                 type="button"
                 className="scene-pad tap"
                 disabled={state === 'unavailable'}
+                aria-label={`Launch ${scene.name}`}
+                aria-pressed={isActive}
                 aria-keyshortcuts={`Shift+${i + 1}`}
-                aria-describedby={`scene-line-${slot}`}
+                aria-describedby={`scene-summary-${slot} scene-line-${slot}`}
+                title={preview.description}
                 onClick={() => props.onLaunch(slot)}
               >
-                <span className="scene-name">{scene.name}</span>
+                <span className="scene-pad-heading">
+                  <span className="scene-shortcut" aria-hidden="true">⇧{i + 1}</span>
+                  <span className="scene-name">{scene.name}</span>
+                </span>
+                <span id={`scene-summary-${slot}`} className="scene-summary">{preview.summary}</span>
+                <span className="scene-mix-preview" aria-hidden="true">
+                  {sceneLevels(scene).map((level, index) => (
+                    <span
+                      key={STEM_ORDER[index]}
+                      className="scene-mix-track"
+                      title={`${STEM_NAMES[STEM_ORDER[index]!]}: ${level > 0 ? `${Math.round(level * 100)}%` : 'off'}`}
+                    >
+                      <span className="scene-mix-level" style={{ transform: `scaleY(${level})` }} />
+                    </span>
+                  ))}
+                </span>
                 <span id={`scene-line-${slot}`} className="scene-line">
                   {line || ' '}
                 </span>
@@ -139,6 +136,7 @@ export function SceneStrip(props: Props) {
                 <SceneMenu
                   scene={scene}
                   scenes={scenes}
+                  description={preview.description}
                   onClose={() => setMenuFor(null)}
                   onCapture={() => {
                     props.onCapture(slot);
@@ -159,17 +157,38 @@ export function SceneStrip(props: Props) {
           );
         })}
       </div>
-      {props.children}
+      <div className="scene-strip-head">
+        <Segmented<Timing>
+          label="Switch on"
+          value={timing}
+          onPick={props.onTiming}
+          options={[
+            { value: 'now', label: 'Now', aria: 'Launch now' },
+            { value: 'beat', label: 'Next beat', aria: 'Launch on the next beat' },
+            { value: 'bar', label: 'Next bar', aria: 'Launch on the next bar' },
+          ]}
+        />
+        <div className="scene-strip-actions">
+          {props.onFill ? <FillButton {...props} /> : null}
+          <button
+            type="button"
+            className="text-button scene-cancel"
+            disabled={Boolean(unavailable) || (!pending && active === null)}
+            onClick={props.onCancel}
+            aria-label="Cancel scene"
+            title={unavailable ?? (pending || active !== null ? 'Clear the scene and restore your previous mix' : 'No scene selected')}
+          >
+            <X size={12} aria-hidden="true" /> Cancel
+          </button>
+        </div>
+      </div>
       {/* Discrete changes only ("Drop queued", "Drop active"), never every beat. */}
       <p className="scene-status" role="status" aria-live="polite">
         {status}
       </p>
+      {props.children}
     </section>
   );
-}
-
-function sceneName(scenes: Scene[], target: string): string {
-  return scenes.find((s) => s.slot === target)?.name ?? target;
 }
 
 function queuedLine(r: SceneRequest): string {
@@ -188,7 +207,7 @@ function FillButton(props: Props) {
           : 'Fill queued'
         : fill === 'sending'
           ? 'Fill…'
-          : 'Fill';
+          : 'Drum fill';
   const aria =
     fill === 'playing'
       ? `${fillName} is playing`
@@ -213,6 +232,7 @@ function FillButton(props: Props) {
 function SceneMenu({
   scene,
   scenes,
+  description,
   onClose,
   onCapture,
   onRename,
@@ -221,6 +241,7 @@ function SceneMenu({
 }: {
   scene: Scene;
   scenes: Scene[];
+  description: string;
   onClose: () => void;
   onCapture: () => void;
   onRename: (name: string) => boolean;
@@ -274,7 +295,7 @@ function SceneMenu({
           <X aria-hidden="true" size={14} />
         </button>
       </div>
-      <p className="scene-menu-desc">{sceneDescription(scene)}</p>
+      <p className="scene-menu-desc">{description}</p>
       <button type="button" className="scene-menu-item" onClick={onCapture}>
         Capture current mix
       </button>

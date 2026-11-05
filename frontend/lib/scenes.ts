@@ -150,9 +150,35 @@ export function resetScene(
   return withSlot(scenes, factoryScene(track, old.factory, slot, old.revision + 1));
 }
 
-/** The short description shown in a slot's menu. */
-export function sceneDescription(scene: Scene): string {
-  return FACTORY_SCENES.find((r) => r.id === scene.factory)?.description ?? '';
+/** Stored levels for the miniature mixer, accounting for both cuts and solos. */
+export function sceneLevels(scene: SceneMix): number[] {
+  const soloing = STEMS.some((id) => scene.stems[id].solo);
+  return STEMS.map((id) => {
+    const stem = scene.stems[id];
+    return stem.muted || (soloing && !stem.solo) ? 0 : stem.volume;
+  });
+}
+
+const SCENE_SUMMARIES: Record<string, string> = {
+  full: 'All eight sounds',
+  sparse: 'Hats, bass & pad',
+  build: 'Less bass, more echo',
+  drop: 'Kick & bass return',
+};
+
+/** Describe the stored mix, not the slot's original recipe after a capture or copy. */
+export function scenePreview(scene: Scene, track: TrackSummary | TrackArrangement) {
+  const recipe = Object.keys(scene.patterns).length === 0
+    ? FACTORY_SCENES.find((r) => sameMix(scene, factoryScene(track, r.id, scene.slot)))
+    : undefined;
+  if (recipe) {
+    return { summary: SCENE_SUMMARIES[recipe.id] ?? recipe.name, description: recipe.description };
+  }
+  const count = sceneLevels(scene).filter((level) => level > 0).length;
+  return {
+    summary: `${count} sound${count === 1 ? '' : 's'} · custom mix`,
+    description: 'Your captured levels, effects and patterns. Reset to factory restores this slot’s original mix.',
+  };
 }
 
 // ---- Requests and what the engine says about them ---------------------------
@@ -162,13 +188,13 @@ export const TIMING_CODE: Record<Timing, number> = { now: 0, beat: 1, bar: 2 };
 
 /**
  * What a launch is of: a scene slot, one of the session-only compare slots, or the
- * working mix from before a comparison began (Exit Comparison).
+ * working mix from before a comparison or scene selection began.
  */
-export type LaunchTarget = SceneSlotId | 'compareA' | 'compareB' | 'restore';
+export type LaunchTarget = SceneSlotId | 'compareA' | 'compareB' | 'restore' | 'restoreScene';
 
 /** Whether a launch target is one of the four scene slots. */
 export const isSceneSlot = (t: LaunchTarget): t is SceneSlotId =>
-  t !== 'compareA' && t !== 'compareB' && t !== 'restore';
+  SCENE_SLOTS.includes(t as SceneSlotId);
 
 /**
  * Compare A/B: two session-only mixes of the same track on the same engine and
@@ -179,7 +205,7 @@ export type Compare = {
   b: SceneMix | null;
   /** Which one the engine last applied, or null before either was heard. */
   listening: 'a' | 'b' | null;
-  /** The working mix when the comparison began, for Exit Comparison. */
+  /** Exit's return point: the first capture, or the mix restored by Cancel scene. */
   before: SceneMix;
   /** The scene that was active then, restored with it. */
   beforeActive: { slot: SceneSlotId; mix: SceneMix } | null;

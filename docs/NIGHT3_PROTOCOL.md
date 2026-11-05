@@ -150,8 +150,15 @@ the scene already pending, pending.
   one dropped (`replaced`, `a` = the new request's id). It keeps the boundary already
   announced unless the new request is `Now`, and the engine then reports `queued` for
   the new request with that same boundary.
-- Cancel by request id. Cancelling something already applied returns "not pending";
-  the UI says it already applied.
+- Pressing a queued pad again cancels by request id. Cancelling something already
+  applied returns "not pending"; the UI says it already applied.
+- The strip's **Cancel** button clears the active scene as well as a queued launch.
+  The UI remembers the mix before the first scene choice and any pattern lanes
+  those scenes replaced. Cancel restores that snapshot through a new `Now` scene
+  request, replacing a pending launch atomically. Only the engine's `applied`
+  event clears the active selection and the return point. A later scene choice
+  starts a fresh return point; track changes discard it. A/B captures remain
+  available, but exiting comparison cannot restore a cancelled scene selection.
 - The snapshot is copied when queued, so overwriting the slot while queued does not
   change what launches (its `revision` is pinned in the request).
 
@@ -319,7 +326,8 @@ playing, 8 already playing, 9 stale generation, 10 cancelled by the user.
   sound in flight fades out (60 ms) and none start while a stem is soloed; the song's
   seams are still counted, so leaving solo needs nothing special.
 - **Panic** cancels everything queued, releases every gesture, stops playback and
-  clears the tails. It is not the same as Cancel Queued. In the engine: the pending
+  clears the tails. Scene Cancel restores the earlier mix without stopping playback.
+  In the engine: the pending
   scene `cancelled` and the queued fill `fill cancelled` with reason 5, a playing fill
   `fill ended` (-1, 5), every gesture and the echo latch released, Stop, transition
   sounds silenced. The worklet panics both decks and abandons an auto-mix in progress

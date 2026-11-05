@@ -439,12 +439,16 @@ try {
     await frame();
     check('typing 64 sets 64%', Math.abs((await level()) - 0.64) < 1e-9 && (await channel.locator('.vfader-readout').textContent()) === '64%');
     // Cutting the stem dims it but leaves the cap at the stored level.
-    const capBefore = await channel.locator('.vfader-cap').boundingBox();
+    // Measure against the rail, not the viewport: clicking Cut may scroll it into view.
+    const capPosition = () => fader.evaluate((el) =>
+      el.querySelector('.vfader-cap').getBoundingClientRect().y -
+      el.querySelector('.vfader-rail').getBoundingClientRect().y);
+    const capBefore = await capPosition();
     await page.getByRole('button', { name: 'Cut Kick' }).click();
     await frame();
-    const capAfter = await channel.locator('.vfader-cap').boundingBox();
+    const capAfter = await capPosition();
     check('a cut leaves the fader cap where the level is stored',
-      Math.abs(capAfter.y - capBefore.y) < 0.5 && (await level()) === 0.64 &&
+      Math.abs(capAfter - capBefore) < 0.5 && (await level()) === 0.64 &&
       (await channel.locator('.channel-meter').getAttribute('class')).includes('is-dimmed'));
     await page.getByRole('button', { name: 'Bring in Kick' }).click();
     // Reset: the visible button, then double-click, both to the track's own level.
@@ -498,6 +502,12 @@ try {
         page.locator('.knob').filter({ has: page.locator('label.knob-label', { hasText: new RegExp(`^${label}$`) }) });
       const shown = async (label) => (await knob(label).locator('.knob-value').textContent())?.replace(/\s+/g, ' ').trim();
       const playing = () => page.locator('.app').getAttribute('data-playing');
+      const cancelScene = page.getByRole('button', { name: 'Cancel scene', exact: true });
+      const selectedScenes = () => page.locator('.scene-pad[aria-pressed="true"]').count();
+      const sceneMix = () => page.evaluate(() => {
+        const { params, stems } = window.__BCKGRND_PROJECT__();
+        return JSON.stringify({ stems, params: Object.fromEntries(Object.entries(params).filter(([id]) => id.startsWith('fx.'))) });
+      });
       // A bar boundary, as the transport counts it: launching right after one leaves
       // nearly a whole bar (about 1.9 s at 126 BPM) before the next.
       const barNow = () => page.locator('.bar-readout .tabular-nums').textContent();
@@ -553,14 +563,15 @@ try {
         JSON.stringify(await names()) === '["Full","Sparse","Build","Drop"]', (await names()).join(', '));
       check('scenes: Bar is the default timing',
         (await page.getByRole('button', { name: 'Launch on the next bar' }).getAttribute('aria-pressed')) === 'true');
-      check('scenes: Cancel queued is disabled with nothing queued',
-        await page.getByRole('button', { name: 'Cancel queued scene' }).isDisabled());
+      check('scenes: Cancel is disabled with no selection or queue', await cancelScene.isDisabled());
       const fillTitle = await fillButton.getAttribute('title');
       check('fill: disabled while stopped, and the title says why',
         (await fillButton.isDisabled()) && /play/i.test(fillTitle ?? ''), fillTitle);
       check('held effects: Release FX is disabled with nothing held', await releaseFx.isDisabled());
 
       // A scene picked before the first Play is active at once and starts nothing.
+      await page.getByRole('slider', { name: 'Cutoff' }).fill('450');
+      const beforeScenes = await sceneMix();
       await pad(1).click();
       await waitState(1, 'active');
       await page.waitForTimeout(400);
@@ -568,6 +579,12 @@ try {
         (await lineOf(1)) === 'Active' && (await statusText()) === 'Sparse active', `${await lineOf(1)} / ${await statusText()}`);
       check('scenes: and playback stays stopped', (await playing()) === 'no');
       check('scenes: the stopped scene set the mix (Sparse cuts the kick)', (await stemState(page, 'kick')).state === 'cut');
+      check('scenes: Cancel is available for an active scene with nothing queued', !(await cancelScene.isDisabled()));
+      await cancelScene.click();
+      check('scenes: Cancel before Play restores the custom mix and clears selection',
+        (await selectedScenes()) === 0 && (await sceneMix()) === beforeScenes && (await playing()) === 'no');
+      await pad(1).click();
+      await waitState(1, 'active');
 
       await page.getByRole('button', { name: 'Play the track' }).click();
       await page.waitForFunction(() => document.querySelector('.app')?.getAttribute('data-playing') === 'yes');
@@ -643,21 +660,26 @@ try {
         !buildSeen.some((s) => s.startsWith('active')) && (await stateOf(2)) === 'available' && (await stateOf(3)) === 'available',
         buildSeen.join(' > '));
 
-      // Queue, then Cancel queued: nothing changes.
+      // Cancel clears both the queued launch and the active scene. Multiple scene
+      // choices keep the original custom mix as the return point.
       await nextBar();
       await pad(0).click();
       await waitLine(0, /^Queued · Bar \d+$/);
-      await page.getByRole('button', { name: 'Cancel queued Full' }).click();
-      await waitStatus(/^Full cancelled$/);
-      check('scenes: Cancel queued clears the queued line', (await lineOf(0)) === '' && (await stateOf(0)) === 'available');
+      await cancelScene.click();
+      await waitStatus(/^Scene cleared; previous mix restored$/);
+      check('scenes: Cancel clears the queued line and active selection',
+        (await lineOf(0)) === '' && (await selectedScenes()) === 0);
       await nextBar();
       await page.waitForTimeout(300);
-      check('scenes: after Cancel queued the previous scene is still the active one',
-        (await stateOf(1)) === 'active' && (await stateOf(0)) === 'available', `Full ${await stateOf(0)}, Sparse ${await stateOf(1)}`);
-      check('scenes: status says it was cancelled', (await statusText()) === 'Full cancelled', await statusText());
-      check('scenes: Cancel queued goes back to disabled', await page.getByRole('button', { name: 'Cancel queued scene' }).isDisabled());
+      check('scenes: the queued scene cannot land after Cancel',
+        (await selectedScenes()) === 0 && (await sceneMix()) === beforeScenes && (await playing()) === 'yes');
+      check('scenes: status confirms the previous mix was restored',
+        (await statusText()) === 'Scene cleared; previous mix restored', await statusText());
+      check('scenes: Cancel goes back to disabled', await cancelScene.isDisabled());
 
-      // Pressing the queued pad again cancels it too.
+      // Pressing the queued pad again withdraws only that launch.
+      await pad(1).click();
+      await waitState(1, 'active');
       await nextBar();
       await pad(0).click();
       await waitStatus(/^Full queued for bar \d+$/);
@@ -678,8 +700,8 @@ try {
         await waitState(d - 1, ['sending', 'queued']);
       }
       const shiftSeen = await Promise.all([0, 1, 2, 3].map(history));
-      await page.getByRole('button', { name: 'Cancel queued Drop' }).click();
-      await waitStatus(/^Drop cancelled$/);
+      await cancelScene.click();
+      await waitStatus(/^Scene cleared; previous mix restored$/);
       check('scenes: Shift+1..4 launch the four pads',
         shiftSeen.every((seen) => seen.some((s) => /^(sending|queued)/.test(s))), shiftSeen.map((s) => s.join(' > ')).join(' || '));
 
@@ -742,13 +764,13 @@ try {
       await fillButton.click();
       await page.waitForFunction(() => document.querySelector('.fill-button')?.getAttribute('data-state') === 'idle', null, T);
       check('fill: a second press before it starts cancels it',
-        (await fillButton.textContent()) === 'Fill' && (await statusText()) === 'Fill cancelled', await statusText());
+        (await fillButton.textContent()) === 'Drum fill' && (await statusText()) === 'Fill cancelled', await statusText());
       await nextBar();
       await fillButton.click();
       await page.waitForFunction(() => document.querySelector('.fill-button')?.getAttribute('data-state') === 'playing', null, T);
       check('fill: it plays its bar, and the button is disabled meanwhile', await fillButton.isDisabled());
       await page.waitForFunction(() => document.querySelector('.fill-button')?.getAttribute('data-state') === 'idle', null, T);
-      check('fill: then it returns to idle', (await fillButton.textContent()) === 'Fill' && !(await fillButton.isDisabled()));
+      check('fill: then it returns to idle', (await fillButton.textContent()) === 'Drum fill' && !(await fillButton.isDisabled()));
 
       // Held Filter: pressed while the pointer is down (and captured), the knob keeps
       // showing the mix underneath, letting go releases it.
@@ -893,7 +915,8 @@ try {
       check('panic: stops playback, and the queued line clears',
         (await lineOf(3)) === '' && (await stateOf(3)) === 'available', `${await stateOf(3)} "${await lineOf(3)}"`);
       check('panic: the status line says Panic', /Panic/.test(await statusText()), await statusText());
-      check('panic: nothing is left to cancel', await page.getByRole('button', { name: 'Cancel queued scene' }).isDisabled());
+      check('panic: Cancel remains available only if an active scene remains',
+        (await cancelScene.isDisabled()) === ((await selectedScenes()) === 0));
 
     } catch (e) {
       check('scenes: the walk-through ran to the end', false, String(e.message).split('\n')[0]);

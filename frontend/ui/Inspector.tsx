@@ -31,7 +31,7 @@ import {
   TEMPO,
   WIDTH,
 } from '../lib/mappings';
-import { STEM_NAMES, type StemState } from '../lib/stems';
+import { STEM_NAMES, STEM_ROLES, type StemState } from '../lib/stems';
 import type { StemId, StemMeta } from '../lib/types';
 import { ControlLabel, Fader, PerformancePad, Segmented, StatusIndicator, useRangeGesture } from './controls';
 import { Knob } from './Knob';
@@ -308,7 +308,8 @@ function StemControls({
       <div className="inspector-stem-head">
         <div>
           <p className="inspector-stem-name">{STEM_NAMES[stem]}</p>
-          {meta ? <p className="text-xs text-muted">{meta.hint} · key {meta.keys}</p> : null}
+          <p className="inspector-stem-note">{STEM_ROLES[stem]}</p>
+          {meta ? <p className="inspector-stem-note">Key {meta.keys} toggles sound</p> : null}
         </div>
         <StatusIndicator state={state} label={stateLabel} />
       </div>

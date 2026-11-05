@@ -7,6 +7,7 @@
  * mix; Exit Comparison brings back the mix from before the first capture.
  */
 
+import { CopyPlus, Headphones } from 'lucide-react';
 import type { Compare, SceneRequest } from '../lib/scenes';
 import { isPending } from '../lib/scenes';
 import { cx } from './controls';
@@ -35,13 +36,28 @@ export function CompareBar({
   onExit: () => void;
 }) {
   const queued = isPending(request) ? request.target : null;
+  const hint = !compare
+    ? 'Capture A, adjust the mix, then capture B.'
+    : !compare.a
+      ? 'Adjust the mix, then capture A.'
+      : !compare.b
+        ? 'Adjust the mix, then capture B.'
+        : 'Switch A/B to hear the difference.';
   const slot = (which: 'a' | 'b') => {
     const name = which.toUpperCase();
     const stored = compare?.[which] ?? null;
     if (!stored) {
       return (
-        <button key={which} type="button" className="compare-chip" onClick={() => onCapture(which)}>
-          Capture {name}
+        <button
+          key={which}
+          type="button"
+          className="compare-chip is-empty"
+          disabled={disabled !== null}
+          title={disabled ?? `Capture the current mix as ${name}, for this session`}
+          onClick={() => onCapture(which)}
+        >
+          <CopyPlus size={16} aria-hidden="true" />
+          <span>Capture {name}</span>
         </button>
       );
     }
@@ -54,40 +70,52 @@ export function CompareBar({
         key={which}
         type="button"
         className={cx('compare-chip', hearing && 'is-on')}
+        data-queued={queued === target ? 'yes' : undefined}
+        data-modified={hearing && modified ? 'yes' : undefined}
         aria-pressed={hearing}
         disabled={disabled !== null}
-        title={disabled ?? undefined}
+        title={disabled ?? `Listen to mix ${name}`}
         onClick={() => onListen(which)}
       >
-        {label}
+        <Headphones size={16} aria-hidden="true" />
+        <span>{label}</span>
       </button>
     );
   };
 
   return (
-    <section className="compare-bar" aria-label="Compare A/B">
-      <p className="compare-title">
-        Compare A/B <span className="compare-note">this session only</span>
-      </p>
-      <div className="compare-row">
+    <section className="compare-bar" aria-label="Compare A/B" aria-describedby="compare-hint">
+      <div className="compare-heading">
+        <p className="compare-title">
+          Compare A/B <span className="compare-note">Session only</span>
+        </p>
+        <p className="compare-hint" id="compare-hint">{hint}</p>
+      </div>
+      <div className="compare-slots">
         {slot('a')}
         {slot('b')}
-        {compare?.listening && modified ? (
-          <button type="button" className="text-button" onClick={onUpdate}>
-            Update {compare.listening.toUpperCase()}
-          </button>
-        ) : null}
-        {compare ? (
-          <>
-            <button type="button" className="text-button" onClick={onKeep}>
-              Keep current
-            </button>
-            <button type="button" className="text-button" disabled={disabled !== null} onClick={onExit}>
-              Exit comparison
-            </button>
-          </>
-        ) : null}
       </div>
+      {compare ? (
+        <div className="compare-row">
+          {compare.listening && modified ? (
+            <button type="button" className="text-button" disabled={disabled !== null} onClick={onUpdate}>
+              Update {compare.listening.toUpperCase()}
+            </button>
+          ) : null}
+          <button type="button" className="text-button" disabled={disabled !== null} onClick={onKeep}>
+            Keep current
+          </button>
+          <button
+            type="button"
+            className="text-button compare-exit"
+            disabled={disabled !== null}
+            title="Restore the mix from before the first capture"
+            onClick={onExit}
+          >
+            Exit comparison
+          </button>
+        </div>
+      ) : null}
     </section>
   );
 }

@@ -46,7 +46,7 @@ import {
   type Timing,
 } from './scenes';
 import { STEM_ORDER, STEPS } from './stems';
-import type { ScenePatterns } from './patterns';
+import type { LaneId, ScenePatterns } from './patterns';
 import { usePatternWorkspace } from './workspace';
 import type { LibraryResponse, Mix, StemId, TrackArrangement, TrackSummary } from './types';
 
@@ -214,6 +214,12 @@ export function useInstrument() {
    * state: never saved, cleared by a track change.
    */
   const [activeScene, setActiveScene] = useState<{ slot: SceneSlotId; mix: SceneMix } | null>(null);
+  /** One return point for a run of scene choices; never part of the saved project. */
+  const beforeScenes = useRef<{
+    mix: SceneMix;
+    patterns: ScenePatterns;
+    changedLanes: Set<LaneId>;
+  } | null>(null);
   /** The latest launch request, pending or just settled. */
   const [sceneRequest, setSceneRequest] = useState<SceneRequest | null>(null);
   const sceneRequestRef = useRef<SceneRequest | null>(null);
@@ -599,6 +605,7 @@ export function useInstrument() {
   function resetScenesFor(arranged: TrackArrangement) {
     setScenes(factoryScenes(arranged));
     setActiveScene(null);
+    beforeScenes.current = null;
     setSceneRequest(null);
     setCompare(null);
     setSceneStatus('');
@@ -611,7 +618,9 @@ export function useInstrument() {
         ? 'Compare B'
         : slot === 'restore'
           ? 'The mix from before comparing'
-          : (scenes?.slots.find((s) => s.slot === slot)?.name ?? slot);
+          : slot === 'restoreScene'
+            ? 'The mix from before scenes'
+            : (scenes?.slots.find((s) => s.slot === slot)?.name ?? slot);
 
   /**
    * Make an applied scene the working mix on screen. The engine has already set
@@ -671,7 +680,9 @@ export function useInstrument() {
           } else if (next.status === 'applied') {
             landedRef.current(next);
             showMixRef.current(next.mix);
-            setSceneStatus(next.target === 'restore' ? 'Comparison closed; the earlier mix is back' : `${name} active`);
+            setSceneStatus(next.target === 'restoreScene'
+              ? 'Scene cleared; previous mix restored'
+              : next.target === 'restore' ? 'Comparison closed; the earlier mix is back' : `${name} active`);
           } else if (next.status === 'cancelled') {
             // A cancel the user asked for needs no reason; any other says what did it.
             const why = next.reason === undefined || next.reason === 10 ? '' : `: ${REASON[next.reason] ?? ''}`;
@@ -692,9 +703,16 @@ export function useInstrument() {
   /** What an applied launch means for the active scene and the comparison. */
   function landed(request: SceneRequest) {
     const t = request.target;
-    if (request.lanes) patternsRef.current.adoptScene(sceneName(t), request.lanes);
+    if (request.lanes) patternsRef.current.adoptScene(sceneName(t), request.lanes, !engine.booted);
     if (isSceneSlot(t)) {
+      for (const lane of Object.keys(request.lanes ?? {}) as LaneId[]) beforeScenes.current?.changedLanes.add(lane);
       setActiveScene({ slot: t, mix: request.mix });
+    } else if (t === 'restoreScene') {
+      setActiveScene(null);
+      beforeScenes.current = null;
+      // Keep the user's A/B captures, but neither is the mix now being heard.
+      // Exiting comparison should not reinstate the scene they just cancelled.
+      setCompare((c) => c ? { ...c, listening: null, before: copyMix(request.mix), beforeActive: null } : null);
     } else if (t === 'restore') {
       setActiveScene(compareRef.current?.beforeActive ?? null);
       setCompare(null);
@@ -730,25 +748,33 @@ export function useInstrument() {
   }
 
   /** Send a mix to the live deck at the chosen timing. */
-  function requestLaunch(target: SceneRequest['target'], revision: number, mix: SceneMix, lanes?: ScenePatterns) {
+  function requestLaunch(
+    target: SceneRequest['target'],
+    revision: number,
+    mix: SceneMix,
+    lanes?: ScenePatterns,
+    timing: Timing = sceneTiming,
+  ) {
     const sets = lanes && Object.keys(lanes).length ? lanes : undefined;
     if (!engine.booted) {
       // Stopped and never played: apply now, without starting playback.
       const now = copyMix(mix);
       sendMix(now);
       showMix(now);
-      if (sets) patterns.adoptScene(sceneName(target), sets, true);
       setSceneRequest(null);
       landed({
         requestId: 0,
         target,
         revision,
         generation: 0,
-        timing: sceneTiming,
+        timing,
         status: 'applied',
         mix: now,
+        ...(sets ? { lanes: sets } : {}),
       });
-      setSceneStatus(target === 'restore' ? 'Comparison closed; the earlier mix is back' : `${sceneName(target)} active`);
+      setSceneStatus(target === 'restoreScene'
+        ? 'Scene cleared; previous mix restored'
+        : target === 'restore' ? 'Comparison closed; the earlier mix is back' : `${sceneName(target)} active`);
       return;
     }
     const requestId = nextRequestId.current++;
@@ -758,7 +784,7 @@ export function useInstrument() {
       target,
       revision,
       generation: generations.current[deck],
-      timing: sceneTiming,
+      timing,
       status: 'sending',
       mix: copyMix(mix),
       ...(sets ? { lanes: sets } : {}),
@@ -770,7 +796,7 @@ export function useInstrument() {
     const data = sets ? patterns.scenePayload(sets) : undefined;
     engine.queueScene(
       requestId,
-      SCENE_TIMING[sceneTiming],
+      SCENE_TIMING[timing],
       sceneVector(request.mix),
       request.generation,
       data ? { requestId: nextRequestId.current++, data } : undefined,
@@ -784,6 +810,7 @@ export function useInstrument() {
   function launchScene(slot: SceneSlotId) {
     if (!scenes || mixing) return;
     const pending = isPending(sceneRequest) ? sceneRequest : null;
+    if (pending?.target === 'restoreScene') return;
     if (pending && pending.target === slot) {
       cancelQueuedScene();
       return;
@@ -798,7 +825,27 @@ export function useInstrument() {
     ) {
       return;
     }
+    if (!beforeScenes.current || (!activeScene && !(pending && isSceneSlot(pending.target)))) {
+      beforeScenes.current = { mix: workingMix(), patterns: patterns.sceneLanes(), changedLanes: new Set() };
+    }
     requestLaunch(slot, scene.revision, scene, scene.patterns);
+  }
+
+  /** Clear a queued or active scene, restoring the mix from before scene choices. */
+  function cancelScene() {
+    const before = beforeScenes.current;
+    if (!before || mixing || (isPending(sceneRequest) && sceneRequest.target === 'restoreScene')) return;
+    const lanes = new Set(before.changedLanes);
+    // Include a pending scene's lanes too: it may have landed just before its
+    // telemetry arrives. The replacement request restores them atomically.
+    if (isPending(sceneRequest) && isSceneSlot(sceneRequest.target)) {
+      for (const lane of Object.keys(sceneRequest.lanes ?? {}) as LaneId[]) lanes.add(lane);
+    }
+    const restore: ScenePatterns = {};
+    for (const lane of lanes) restore[lane] = before.patterns[lane] ?? { factory: true };
+    // Undo the scene immediately, through the same engine scheduler and smoothing
+    // as a launch. A previous queued scene is replaced, so it cannot land later.
+    requestLaunch('restoreScene', 0, before.mix, restore, 'now');
   }
 
   /** Withdraw the queued launch. Says so if it had already landed. */
@@ -1105,7 +1152,7 @@ export function useInstrument() {
   /**
    * Panic: stop, and leave nothing behind. Cancels anything queued, releases every
    * held effect, clears the echo and room tails, and abandons a running mix. Not the
-   * same as Cancel queued, which only withdraws the next launch.
+   * same as Cancel scene, which restores the mix without stopping playback.
    */
   function panic() {
     engine.panic();
@@ -1196,6 +1243,7 @@ export function useInstrument() {
     setSceneTiming,
     launchScene,
     cancelQueuedScene,
+    cancelScene,
     captureSceneSlot,
     renameSceneSlot,
     duplicateSceneSlot,
@@ -1250,6 +1298,7 @@ export function useInstrument() {
     activeScene: activeScene?.slot ?? null,
     sceneModified,
     sceneRequest,
+    sceneRestoring: isPending(sceneRequest) && sceneRequest.target === 'restoreScene',
     sceneTiming,
     sceneStatus,
     fill,

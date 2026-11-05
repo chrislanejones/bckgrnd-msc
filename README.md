@@ -119,12 +119,15 @@ Eight per track. Keys 1–8 cut them in this order.
 | 7 | Pad | |
 | 8 | Arp | |
 
-Each stem row has its icon and name up a spine on the left, its state in words, a
-meter, the step pattern for the current bar, a fader, and one badge column: **Solo**
-over **Cut**. Cut lights when the stem is silent for any reason, including another
-stem's solo, and reads **In** while it's cut. Each stem has its own echo send, so
-cutting a stem cuts its echo with it. Selecting the name opens the stem in the
-inspector.
+The Stems panel explains how the eight sounds build the track. Each channel names
+its role (such as **Short chords** for Stab or **Repeating notes** for Arp), shows
+its keyboard shortcut and state, and has a vertical volume fader beside a live
+audio meter. **Solo** lets you hear a sound on its own (or with other soloed
+sounds); **Cut** takes it out and becomes **Bring in**. Only an explicit cut lights
+that button. **Reset** restores the track's original volume for that sound.
+Selecting the name opens its detailed controls, including its echo send, in the
+inspector. The channels wrap into rows on smaller screens so all eight sounds are
+available without sideways scrolling.
 
 The state says why a stem is or isn't sounding:
 
@@ -137,8 +140,10 @@ The state says why a stem is or isn't sounding:
 | Solo | You soloed it. |
 | Off: solo on Bass | Silent because another stem is soloed. |
 
-Three group buttons above the stems: **Full mix**, **No drums**, **No music**. They
-apply at once, not on the bar.
+Three quick selections sit above the stems: **All sounds**, **Drums only**, and
+**Music only**. They change which sounds are cut and clear any solos immediately;
+they leave your volume settings alone. Level, Solo, and Cut each have a short
+explanation above the mixer. **Edit patterns** opens the pattern drawer.
 
 Cut every stem and the echo and room tails fade out with them, in about 30 ms. Cut
 just one and its tail rings out as usual. Solo a stem and the echo and room are
@@ -146,8 +151,15 @@ cleared first, so you hear that stem alone and not the tail of the one before it
 
 ## Scenes
 
-The scene strip sits above the stems: four pads, each holding a whole mix of the
-track that's playing. Press one and the mix changes on the beat.
+The **Scenes & comparison** panel sits below the stems: four pads, each holding a
+whole mix of the track that's playing, followed by A/B comparison. Press a scene
+and the mix changes at the chosen launch timing.
+
+Each button has a short cue for its sound and a miniature eight-stem mixer, in
+the same order as the Stems panel. The bars show the stored levels, with cut
+sounds and sounds excluded by Solo left empty. Capturing or copying a mix updates
+the preview; the original factory description is only used when it matches the
+stored mix. Active, modified, and queued states stay visible on the button.
 
 | Scene | What it does |
 |---|---|
@@ -164,7 +176,7 @@ Resonance, Low, Mid, High, Echo time, Feedback, Return, Room mix, Decay, Width a
 Balance. Tempo, swing, Master, the loop and the playhead stay out of it, so a launch
 never moves the beat or the volume.
 
-**Launch at** picks when a pad lands: **Now**, the next **Beat**, or the next **Bar**,
+**Switch on** picks when a pad lands: **Now**, **Next beat**, or **Next bar**,
 which is the default. The engine keeps the time on its own sample clock, not the
 browser's, so a launch lands on the step, before that step's notes, at any tempo and
 through a loop. The levels and effects glide in, the same as when you move them by
@@ -180,10 +192,12 @@ hand.
 
 While stopped, a scene applies at once and playback stays stopped.
 
-**Cancel queued** withdraws the launch that's waiting. If it had already landed, the
-strip says so.
+**Cancel** clears the active scene and any queued launch, then immediately restores
+the mix from before you started choosing scenes. It also restores any pattern lanes
+those scenes changed. Switching between scenes keeps the same return point;
+choosing a scene after Cancel starts a new one. Playback continues as it was.
 
-**Shift+1–4** launch Full, Sparse, Build and Drop, on the Launch at timing. They do
+**Shift+1–4** launch Full, Sparse, Build and Drop, on the Switch on timing. They do
 nothing while you're typing in a field or have a knob focused.
 
 A pad press only ever launches, so a click in the middle of a set can't overwrite a
@@ -191,7 +205,7 @@ scene. Everything else is in each pad's `…` menu:
 
 | Menu item | What it does |
 |---|---|
-| (the description) | What the factory version of that scene does. |
+| (the description) | What the stored mix does, or a custom-mix note after it is captured or changed. |
 | Capture current mix | Stores the current mix in that slot. A held Echo or Filter isn't part of it, only the mix under it. |
 | Rename… | Up to 40 characters. A blank name is refused. |
 | Duplicate to | Copies this scene into one of the other three slots. |
@@ -202,7 +216,7 @@ another track starts it on its own factory scenes.
 
 ### Fill
 
-**Fill** plays the track's one-bar drum fill, starting on the next bar, then drops
+**Drum fill** plays the track's one-bar drum fill, starting on the next bar, then drops
 back into the groove as it is by then. Each track's fill is its own phrase-ending
 bar with a change on the last beat, so it sounds like that track and not a stock drum
 break. It only replaces the kick, clap and hats patterns, and it never brings back a
@@ -214,11 +228,12 @@ needs playback.
 
 ### Compare A/B
 
-Under the pads. It has nothing to do with Deck A and Deck B: it's two mixes of the
-same track, on the same deck and the same playhead, for this session only.
+Below the scene controls, with separate capture and listening buttons. It has
+nothing to do with Deck A and Deck B: it's two mixes of the same track, on the same
+deck and the same playhead, for this session only.
 
 Capture **A**, change something, capture **B**, then flip between them. Each switch
-lands on the Launch at timing, same as a scene. Move something while listening to B
+lands on the Switch on timing, same as a scene. Move something while listening to B
 and it reads **B · Modified**; **Update B** stores the change. A works the same way.
 **Keep current** keeps what you're hearing and closes the comparison. **Exit
 comparison** goes back to the mix from before the first capture. No scene is
@@ -303,7 +318,7 @@ Three ways out, kept apart on purpose:
 
 | Button | What it does |
 |---|---|
-| Cancel queued (scene strip) | Withdraws the scene launch that's waiting. Nothing else changes. |
+| Cancel (scene strip) | Clears the scene selection and queued launch, restoring the mix from before scene choices. |
 | Release FX (under the pads) | Lets go of a held Echo or Filter. The mix stays exactly as it is. |
 | Panic (under the pads) | Stops both decks, cancels the queued scene and fill, lets go of every held effect, clears the echo and room tails, and abandons a running Auto mix. |
 
@@ -338,7 +353,7 @@ The continuous controls in the inspector are knobs. Each one:
 | Echo send (per stem) | How much of the stem feeds the echo. Each stem starts at its own amount and goes back there with a new track. |
 | Master meter | Left and right peak of what leaves the engine, in the transport. Turns amber near the limiter. The **Clip** light holds for two seconds after any sample goes past full scale, which can only happen while a crossfade adds two decks together. |
 | Space | Play / stop. |
-| Shift+1–4 | Launch Full, Sparse, Build or Drop, on the Launch at timing. Not while typing or with a knob focused. |
+| Shift+1–4 | Launch Full, Sparse, Build or Drop, on the Switch on timing. Not while typing or with a knob focused. |
 
 Nothing moves the sound in a step. Every fader, cut, solo, send and knob glides
 over 12–30 ms in the engine, so cutting a stem mid-note, slamming a fader or

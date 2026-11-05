@@ -332,6 +332,18 @@ try {
   check('scene: launching it brings its captured lanes back', (await pressed('hat', target)) !== had);
   check('scene: the launch is one undo step', (await undoLabel()) === 'Undo Launch Drop', await undoLabel());
 
+  // Cancel removes the applied scene, including the lanes it replaced.
+  await page.keyboard.press('Escape');
+  await page.getByRole('button', { name: 'Cancel scene', exact: true }).click();
+  await page.waitForFunction(() => document.querySelector('.scene-status')?.textContent === 'Scene cleared; previous mix restored', null, T);
+  await openEditor();
+  check('scene: Cancel restores the pattern from before the scene', (await pressed('hat', target)) === had);
+  check('scene: Cancel clears every active pad', (await page.locator('.scene-pad[aria-pressed="true"]').count()) === 0);
+  await page.keyboard.press('Escape');
+  await page.locator('.scene-slot').nth(3).locator('.scene-pad').click();
+  await page.waitForFunction(() => document.querySelectorAll('.scene-slot')[3]?.getAttribute('data-state') === 'active', null, T);
+  await openEditor();
+
   // ---- A fill over edited drums -----------------------------------------------------
   const fill = page.locator('.fill-button');
   await page.keyboard.press('Escape');

@@ -1215,37 +1215,88 @@ body {
 /* Mixer: one vertical channel per stem                                      */
 /* ------------------------------------------------------------------------ */
 
-/* The bank. Eight channels side by side where they fit at a useful size; where they
-   don't, the bank scrolls sideways with snapping, rather than squeezing eight faders
-   into slivers. */
+.stems-panel {
+  container-type: inline-size;
+}
+
+.stems-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  margin: 0 0 var(--space-1);
+}
+
+.stems-toolbar .segment,
+.stems-toolbar > .text-button {
+  min-height: var(--control-md);
+}
+
+.stems-toolbar > .text-button {
+  flex-shrink: 0;
+  margin-inline-start: auto;
+}
+
+.stems-guide {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-3);
+  margin: 0;
+  padding: var(--space-2) 0;
+  font-size: var(--text-label);
+  line-height: 1.4;
+}
+
+.stems-guide > div {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-1);
+  white-space: nowrap;
+}
+
+.stems-guide > div + div {
+  border-inline-start: 1px solid var(--color-line);
+  padding-inline-start: var(--space-3);
+}
+
+.stems-guide dt {
+  font-weight: 700;
+}
+
+.stems-guide dd {
+  margin: 0;
+  color: var(--color-muted);
+}
+
+/* One shared mixer surface. Wrap into two banks at narrower widths so none of the
+   eight sounds disappears off-screen, and keep the complete silence explanation. */
 .mixer-bank {
   display: grid;
-  grid-auto-flow: column;
-  grid-auto-columns: minmax(4.25rem, 1fr);
-  gap: var(--space-2);
-  overflow-x: auto;
-  overscroll-behavior-x: contain;
-  scroll-snap-type: x proximity;
-  padding-bottom: var(--space-2);
-  scrollbar-width: thin;
+  grid-template-columns: repeat(8, minmax(0, 1fr));
+  gap: 1px;
+  border: 1px solid var(--color-line);
+  border-radius: 0.5rem;
+  background: var(--color-line);
 }
 
 .channel {
   display: grid;
-  grid-template-rows: auto auto 1fr auto;
+  grid-template-rows: auto auto 2rem 3rem 1fr auto;
   justify-items: center;
-  gap: var(--space-1);
-  min-width: 4.25rem;
-  max-width: 5.5rem;
-  padding: var(--space-2) var(--space-1);
-  border: 1px solid var(--color-line);
-  border-radius: var(--radius-control);
-  background: color-mix(in srgb, var(--color-surface) 70%, var(--color-bg));
-  scroll-snap-align: start;
+  min-width: 0;
+  padding: var(--space-3) var(--space-1);
+  background: var(--color-surface);
 }
 
 .channel.is-selected {
-  border-color: color-mix(in srgb, var(--color-acid) 60%, var(--color-line));
+  background: color-mix(in srgb, var(--color-acid) 5%, var(--color-surface));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-acid) 45%, var(--color-line));
+}
+
+.channel-key {
+  color: var(--color-muted);
+  font-size: 0.625rem;
+  font-variant-numeric: tabular-nums;
 }
 
 /* The name is always horizontal and readable, and is the button that inspects it. */
@@ -1255,20 +1306,18 @@ body {
   justify-content: center;
   gap: 0.25rem;
   width: 100%;
-  min-height: var(--control-sm);
+  min-height: var(--control-md);
   padding: 0 0.2rem;
   border: 0;
   border-radius: 0.4rem;
   background: transparent;
   color: var(--color-fg);
-  font-size: var(--text-label);
-  font-weight: 800;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+  font-size: 0.8125rem;
+  font-weight: 700;
 }
 
 .channel-name > svg {
-  color: var(--color-acid);
+  color: var(--color-muted);
 }
 
 .channel-name:hover,
@@ -1276,24 +1325,34 @@ body {
   background: var(--color-raised);
 }
 
+.channel-role {
+  max-width: 12ch;
+  margin: 0;
+  color: var(--color-muted);
+  font-size: var(--text-label);
+  line-height: 1.3;
+  text-align: center;
+  text-wrap: balance;
+}
+
 .channel-status {
   display: flex;
   justify-content: center;
   width: 100%;
-  min-height: 1.6rem;
+  padding: var(--space-1) 0;
   text-align: center;
 }
 
 .channel-status .status {
   align-items: flex-start;
-  font-size: 0.5625rem;
+  font-size: 0.6875rem;
+  line-height: 1.25;
+  gap: 0.25rem;
 }
 
 .channel-status .status-text {
   white-space: normal;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
+  overflow: visible;
 }
 
 .channel-strip {
@@ -1305,21 +1364,37 @@ body {
 
 .channel-actions {
   display: grid;
-  gap: 0.3rem;
+  gap: var(--space-1);
   justify-items: center;
+  width: 100%;
+  margin-top: var(--space-3);
 }
 
 .channel-actions .stem-badge {
-  width: 3.5rem;
+  width: min(100%, 4.75rem);
+  min-height: var(--control-md);
+  padding: 0.25rem;
+  font-size: 0.75rem;
+  letter-spacing: 0;
+  text-transform: none;
 }
 
-.channel-reset {
-  display: grid;
-  place-items: center;
+.channel-actions .channel-reset {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.25rem;
+  border-color: transparent;
+  background: transparent;
+  color: var(--color-muted);
+}
+
+.channel-actions .stem-badge:hover:not(:disabled) {
+  border-color: var(--color-muted);
 }
 
 .channel-reset:disabled {
-  opacity: 0.3;
+  opacity: 0.45;
   cursor: default;
 }
 
@@ -1327,7 +1402,8 @@ body {
   min-height: var(--control-sm);
 }
 
-/* A silenced stem lights its Cut badge, including when another stem's solo cuts it. */
+/* Only an explicit cut lights this toggle. Silence caused by Solo is explained by
+   the channel status, so its Cut button never falsely looks engaged. */
 .stem-badge.is-cut {
   border-color: var(--color-acid);
   background: var(--color-acid);
@@ -1337,7 +1413,60 @@ body {
 /* Cut or out of a solo: the channel's name, meter and fill dim. The cap stays bright
    where the level is stored, so a cut never reads as a fader at zero. */
 .channel.is-cut .channel-name {
-  opacity: 0.5;
+  color: var(--color-muted);
+}
+
+.stems-footer {
+  display: grid;
+  gap: var(--space-1);
+  margin-top: var(--space-2);
+  font-size: var(--text-label);
+  line-height: 1.4;
+  color: var(--color-muted);
+}
+
+.stems-footer p {
+  margin: 0;
+}
+
+.stems-shortcuts {
+  display: inline-block;
+}
+
+.stems-shortcuts kbd {
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+}
+
+.inspector-stem-note {
+  font-size: var(--text-label);
+  line-height: 1.4;
+  color: var(--color-muted);
+}
+
+@container (max-width: 42rem) {
+  .mixer-bank {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+}
+
+@container (max-width: 26rem) {
+  .stems-toolbar .segment {
+    padding-inline: 0.3rem;
+    white-space: normal;
+    line-height: 1.2;
+  }
+
+  .stems-toolbar > .text-button {
+    padding-inline: 0.6rem;
+  }
+}
+
+@container (max-width: 18rem) {
+  .mixer-bank {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 /* The meter: a narrow strip beside the fader, measured audio only. */
@@ -1549,10 +1678,6 @@ body {
   :root {
     --fader-travel: 9.5rem;
   }
-
-  .mixer-bank {
-    grid-auto-columns: 4.5rem;
-  }
 }
 
 /* ------------------------------------------------------------------------ */
@@ -1648,6 +1773,7 @@ body {
 .drawer.editor.is-open {
   /* Head, status, bars, then the body: only the body shrinks and scrolls. */
   grid-template-rows: auto auto auto minmax(0, 1fr);
+  height: min(38rem, 78dvh);
   max-height: min(44rem, 78dvh);
 }
 
@@ -1657,7 +1783,37 @@ body {
   gap: var(--space-3);
   min-height: 0;
   overflow-y: auto;
+  scrollbar-gutter: stable;
+  overscroll-behavior-y: contain;
   padding-right: var(--space-1);
+}
+
+/* Every lane uses the same canvas, so its tabs and editing tools stay put. */
+.editor-canvas {
+  height: 16.125rem;
+  min-width: 0;
+}
+
+.editor-canvas .drum-editor {
+  height: 100%;
+  grid-template-rows: auto auto minmax(0, 1fr);
+}
+
+.editor-canvas .velocity-lane .step-groups {
+  height: 100%;
+}
+
+.editor-scope {
+  flex: 0 0 12rem;
+  min-width: 0;
+}
+
+.editor-scope-label {
+  display: flex;
+  align-items: center;
+  min-height: var(--control-sm);
+  color: var(--color-muted);
+  font-size: var(--text-label);
 }
 
 .editor-status {
@@ -2052,7 +2208,7 @@ body {
 }
 
 .roll-scroll {
-  max-height: 16rem;
+  height: 16rem;
   overflow-y: auto;
 }
 
@@ -2214,6 +2370,12 @@ body {
   color: var(--color-muted);
 }
 
+.editor-hint,
+.editor-note {
+  font-size: var(--text-label);
+  line-height: 1.4;
+}
+
 .field {
   display: inline-flex;
   align-items: center;
@@ -2358,6 +2520,7 @@ body {
     display: grid;
     position: static;
     gap: var(--space-3);
+    height: auto;
     max-height: none;
     margin: 0 var(--space-4) calc(var(--control-md) + 2.5rem);
     padding: var(--space-3) var(--space-4) var(--space-4);
@@ -3008,20 +3171,21 @@ html[data-control-drag="yes"] * {
 /* Scenes (Night 3)                                                         */
 /* ------------------------------------------------------------------------ */
 
-/* The strip sits right above the stem mixer, so a scene's effect on the faders is
-   in view. States are told by words and borders, never color alone. */
+/* Scenes sit in their own panel after the mixer, separating whole-mix changes from
+   individual sound controls. States use words and borders, never color alone. */
+.scenes-panel {
+  container: scenes / inline-size;
+}
+
 .scene-strip {
   display: grid;
   gap: var(--space-2);
-  padding-bottom: var(--space-3);
-  margin-bottom: var(--space-3);
-  border-bottom: 1px solid var(--color-line);
 }
 
 .scene-strip-head {
   display: flex;
   flex-wrap: wrap;
-  align-items: end;
+  align-items: center;
   justify-content: space-between;
   gap: var(--space-2) var(--space-3);
 }
@@ -3031,10 +3195,22 @@ html[data-control-drag="yes"] * {
   align-items: center;
 }
 
+.scene-strip-head .segment,
+.scene-strip-actions > button {
+  min-height: var(--control-md);
+}
+
 .scene-strip-actions {
   display: flex;
   align-items: center;
   gap: var(--space-2);
+}
+
+.scene-cancel {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-1);
 }
 
 .scene-pads {
@@ -3050,16 +3226,18 @@ html[data-control-drag="yes"] * {
 
 .scene-pad {
   display: grid;
-  align-content: center;
-  gap: 0.15rem;
+  grid-template-rows: auto minmax(1.4em, auto) 1.375rem minmax(1.4em, auto);
+  align-content: start;
+  gap: 0.35rem;
   width: 100%;
-  min-height: var(--control-lg);
-  padding: 0.35rem 1.9rem 0.35rem 0.6rem;
+  height: 100%;
+  padding: 0.75rem 0.65rem 0.5rem;
   border: 1px solid var(--color-line);
-  border-radius: var(--radius-control);
+  border-radius: 0.5rem;
   background: var(--raised);
   box-shadow: var(--raised-shadow);
   color: var(--color-fg);
+  font-size: var(--text-label);
   text-align: left;
 }
 
@@ -3071,24 +3249,63 @@ html[data-control-drag="yes"] * {
   translate: 0 1px;
 }
 
+.scene-pad-heading {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-width: 0;
+  padding-right: 1rem;
+}
+
+.scene-shortcut {
+  flex-shrink: 0;
+  color: var(--color-muted);
+  font-size: var(--text-label);
+  font-variant-numeric: tabular-nums;
+}
+
 .scene-name {
   overflow: hidden;
   font-size: 0.8125rem;
   font-weight: 700;
-  line-height: 1.15;
+  line-height: 1.35;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.scene-line {
-  overflow: hidden;
-  font-size: 0.625rem;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  line-height: 1.2;
+.scene-summary {
   color: var(--color-muted);
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  font-size: var(--text-label);
+  line-height: 1.4;
+}
+
+/* Eight stored levels, in the same order as the mixer. These are a scene preview,
+   not animated audio meters; cuts and other solos leave an empty well. */
+.scene-mix-preview {
+  display: grid;
+  grid-template-columns: repeat(8, minmax(0, 1fr));
+  gap: 3px;
+}
+
+.scene-mix-track {
+  position: relative;
+  overflow: hidden;
+  border-radius: 2px;
+  background: var(--color-line);
+}
+
+.scene-mix-level {
+  position: absolute;
+  inset: 0;
+  background: var(--color-muted);
+  transform-origin: bottom;
+}
+
+.scene-line {
+  font-size: var(--text-label);
+  font-weight: 600;
+  line-height: 1.4;
+  color: var(--color-muted);
 }
 
 /* Active: an acid border and the word Active. */
@@ -3096,6 +3313,12 @@ html[data-control-drag="yes"] * {
 .scene-slot[data-state="modified"] .scene-pad {
   border-color: var(--color-acid);
   box-shadow: 0 0 0 1px var(--color-acid) inset, var(--raised-shadow);
+  background: color-mix(in srgb, var(--color-acid) 7%, var(--color-surface));
+}
+
+.scene-slot[data-state="active"] .scene-mix-level,
+.scene-slot[data-state="modified"] .scene-mix-level {
+  background: var(--color-acid);
 }
 
 .scene-slot[data-state="active"] .scene-line {
@@ -3133,8 +3356,8 @@ html[data-control-drag="yes"] * {
 
 .scene-menu-button {
   position: absolute;
-  top: 0.35rem;
-  right: 0.35rem;
+  top: 0.4rem;
+  right: 0.3rem;
   display: grid;
   place-items: center;
   width: 1.5rem;
@@ -3185,7 +3408,7 @@ html[data-control-drag="yes"] * {
 
 .scene-menu-desc {
   margin-bottom: 0.25rem;
-  font-size: 0.75rem;
+  font-size: var(--text-label);
   line-height: 1.35;
   color: var(--color-muted);
 }
@@ -3260,7 +3483,8 @@ html[data-control-drag="yes"] * {
 
 .scene-status {
   min-height: 1.2em;
-  font-size: 0.6875rem;
+  margin: 0;
+  font-size: var(--text-label);
   line-height: 1.2;
   color: var(--color-muted);
 }
@@ -3297,7 +3521,7 @@ html[data-control-drag="yes"] * {
   opacity: 0.5;
 }
 
-@media (max-width: 639.98px) {
+@container scenes (max-width: 34rem) {
   .scene-pads {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -3320,46 +3544,85 @@ html[data-control-drag="yes"] * {
   }
 }
 
-/* Compare A/B: a quiet row under the scene pads. Not a deck control. */
+/* Separate the two listening snapshots from the scene launch pads. */
 .compare-bar {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(15rem, 1fr);
   align-items: center;
-  justify-content: space-between;
   gap: var(--space-2) var(--space-3);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--color-line);
 }
 
 .compare-title {
-  font-size: var(--text-label);
-  font-weight: 800;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-2);
+  font-size: 0.8125rem;
+  font-weight: 700;
 }
 
 .compare-note {
-  margin-left: 0.4rem;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  text-transform: none;
+  font-size: var(--text-label);
+  font-weight: 400;
   color: var(--color-muted);
 }
 
+.compare-hint {
+  margin: var(--space-1) 0 0;
+  font-size: var(--text-label);
+  line-height: 1.4;
+  color: var(--color-muted);
+}
+
+.compare-slots {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-2);
+}
+
 .compare-row {
+  grid-column: 1 / -1;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 0.35rem;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}
+
+.compare-row .text-button {
+  min-height: var(--control-md);
+}
+
+.compare-row .compare-exit {
+  border-color: transparent;
+  color: var(--color-muted);
 }
 
 .compare-chip {
-  min-height: var(--control-sm);
-  padding: 0.2rem 0.75rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  min-height: var(--control-md);
+  padding: 0.4rem;
   border: 1px solid var(--color-line);
-  border-radius: 999px;
-  background: transparent;
+  border-radius: 0.5rem;
+  background: var(--color-surface);
   color: var(--color-fg);
   font-size: 0.75rem;
   font-weight: 700;
+}
+
+.compare-chip > svg {
+  flex-shrink: 0;
+  color: var(--color-muted);
+}
+
+.compare-chip.is-empty {
+  border-style: dashed;
+  background: transparent;
 }
 
 .compare-chip:hover:not(:disabled) {
@@ -3368,12 +3631,35 @@ html[data-control-drag="yes"] * {
 
 .compare-chip.is-on {
   border-color: var(--color-acid);
-  box-shadow: 0 0 0 1px var(--color-acid) inset;
+  background: color-mix(in srgb, var(--color-acid) 7%, var(--color-surface));
+}
+
+.compare-chip.is-on > svg {
+  color: var(--color-acid);
+}
+
+.compare-chip[data-modified="yes"] > svg {
+  color: var(--color-warn);
+}
+
+.compare-chip[data-queued="yes"] {
+  border-style: dashed;
+  border-color: var(--color-acid);
 }
 
 .compare-chip:disabled,
 .compare-row .text-button:disabled {
   opacity: 0.4;
+}
+
+@container scenes (max-width: 34rem) {
+  .compare-bar {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .compare-row {
+    justify-content: flex-start;
+  }
 }
 
 /* Release FX and Panic: under the deck pads, apart from the gestures themselves. */

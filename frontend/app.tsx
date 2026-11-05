@@ -267,71 +267,35 @@ export function App() {
             title="Stems"
             views={['perform', 'mix']}
             className="stems-panel"
-            actions={
-              <>
-                <Segmented
-                  label="Stem groups"
-                  hideLabel
-                  value={inst.mask}
-                  onPick={(m) => m !== 'custom' && inst.applyMask(m)}
-                  options={[
-                    { value: 'full', label: 'Full mix' },
-                    { value: 'nodrums', label: 'No drums' },
-                    { value: 'nomusic', label: 'No music' },
-                  ]}
-                />
-                <button
-                  type="button"
-                  className="text-button"
-                  aria-expanded={drawerOpen}
-                  aria-controls="pattern-drawer"
-                  onClick={() => (drawerOpen ? setDrawerOpen(false) : openPattern())}
-                >
-                  Pattern
-                </button>
-              </>
-            }
           >
-            {inst.scenes ? (
-              <SceneStrip
-                scenes={inst.scenes.slots}
-                active={inst.activeScene}
-                modified={inst.sceneModified}
-                request={inst.sceneRequest}
-                timing={inst.sceneTiming}
-                unavailable={inst.mixing ? 'Available after mix' : null}
-                status={inst.sceneStatus}
-                onTiming={inst.setSceneTiming}
-                onLaunch={inst.launchScene}
-                onCancel={inst.cancelQueuedScene}
-                onCapture={inst.captureSceneSlot}
-                onRename={inst.renameSceneSlot}
-                onDuplicate={inst.duplicateSceneSlot}
-                onReset={inst.resetSceneSlot}
-                {...(inst.hasFill
-                  ? {
-                      fill: inst.fill.status,
-                      fillBar: inst.fill.bar,
-                      fillName: inst.fillName,
-                      fillUnavailable: inst.mixing ? 'Available after mix' : !inst.playing ? 'Press play first: a fill needs playback' : null,
-                      onFill: inst.toggleFill,
-                    }
-                  : {})}
+            <div className="stems-toolbar">
+              <Segmented
+                label="Stem selection"
+                hideLabel
+                value={inst.mask}
+                onPick={(m) => m !== 'custom' && inst.applyMask(m)}
+                options={[
+                  { value: 'full', label: 'All sounds' },
+                  { value: 'nomusic', label: 'Drums only' },
+                  { value: 'nodrums', label: 'Music only' },
+                ]}
+              />
+              <button
+                type="button"
+                className="text-button"
+                aria-expanded={drawerOpen}
+                aria-controls="pattern-drawer"
+                onClick={() => (drawerOpen ? setDrawerOpen(false) : openPattern())}
               >
-                <CompareBar
-                  compare={inst.compare}
-                  modified={inst.compareModified}
-                  request={inst.sceneRequest}
-                  disabled={inst.mixing ? 'Available after mix' : null}
-                  onCapture={inst.captureCompare}
-                  onListen={inst.listenCompare}
-                  onUpdate={inst.updateCompare}
-                  onKeep={inst.keepCompare}
-                  onExit={inst.exitCompare}
-                />
-              </SceneStrip>
-            ) : null}
-            <div className="stems mixer-bank" role="group" aria-label="Mixer">
+                {drawerOpen ? 'Close patterns' : 'Edit patterns'}
+              </button>
+            </div>
+            <dl className="stems-guide" id="stems-guide">
+              <div><dt>Level</dt><dd>Volume</dd></div>
+              <div><dt>Solo</dt><dd>Hear alone</dd></div>
+              <div><dt>Cut</dt><dd>Mute</dd></div>
+            </dl>
+            <div className="stems mixer-bank" role="group" aria-label="Mixer" aria-describedby="stems-guide">
               {library.stems.map((meta, index) => {
                 const state = stateOf(meta.id);
                 return (
@@ -354,11 +318,53 @@ export function App() {
                 );
               })}
             </div>
-            <p className="hint-line">
-              Space plays. Keys 1–8 cut a stem. Shift+1–4 launch a scene. Select a stem&rsquo;s name to
-              inspect it.
-            </p>
+            <div className="stems-footer">
+              <p>Select a name for details. <span className="stems-shortcuts">Keys <kbd>1–8</kbd> toggle sounds.</span></p>
+            </div>
           </InstrumentPanel>
+
+          {inst.scenes ? (
+            <InstrumentPanel title="Scenes & comparison" views={['perform', 'mix']} className="scenes-panel">
+              <SceneStrip
+                scenes={inst.scenes.slots}
+                track={track}
+                active={inst.activeScene}
+                modified={inst.sceneModified}
+                request={inst.sceneRequest}
+                timing={inst.sceneTiming}
+                unavailable={inst.mixing ? 'Available after mix' : inst.sceneRestoring ? 'Restoring previous mix' : null}
+                status={inst.sceneStatus}
+                onTiming={inst.setSceneTiming}
+                onLaunch={inst.launchScene}
+                onCancel={inst.cancelScene}
+                onCapture={inst.captureSceneSlot}
+                onRename={inst.renameSceneSlot}
+                onDuplicate={inst.duplicateSceneSlot}
+                onReset={inst.resetSceneSlot}
+                {...(inst.hasFill
+                  ? {
+                      fill: inst.fill.status,
+                      fillBar: inst.fill.bar,
+                      fillName: inst.fillName,
+                      fillUnavailable: inst.mixing ? 'Available after mix' : !inst.playing ? 'Press play first: a fill needs playback' : null,
+                      onFill: inst.toggleFill,
+                    }
+                  : {})}
+              >
+                <CompareBar
+                  compare={inst.compare}
+                  modified={inst.compareModified}
+                  request={inst.sceneRequest}
+                  disabled={inst.mixing ? 'Available after mix' : inst.sceneRestoring ? 'Restoring previous mix' : null}
+                  onCapture={inst.captureCompare}
+                  onListen={inst.listenCompare}
+                  onUpdate={inst.updateCompare}
+                  onKeep={inst.keepCompare}
+                  onExit={inst.exitCompare}
+                />
+              </SceneStrip>
+            </InstrumentPanel>
+          ) : null}
 
           <InstrumentPanel title="Deck" views={['perform']} className="deck-panel">
             <div className="deck-row">
@@ -399,8 +405,8 @@ export function App() {
                 <PerformancePad label="Backspin" ariaLabel="Backspin the platter" onPress={inst.backspin} />
               </div>
             </div>
-            {/* Three different exits, kept apart: Cancel queued (in the scene strip)
-                withdraws the next launch, Release FX lets go of held effects, Panic
+            {/* Three different exits, kept apart: Cancel scene (in the scene strip)
+                restores the previous mix, Release FX lets go of held effects, Panic
                 stops everything and clears the tails. */}
             <div className="deck-safety">
               <button

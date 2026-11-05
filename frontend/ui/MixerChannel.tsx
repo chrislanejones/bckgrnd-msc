@@ -19,7 +19,7 @@ import { RotateCcw } from 'lucide-react';
 import { stemRange } from '../lib/contract';
 import { engine } from '../lib/engine';
 import { editHistory } from '../lib/history';
-import { ICONS, isSilenced, type StemState } from '../lib/stems';
+import { ICONS, STEM_ROLES, isSilenced, type StemState } from '../lib/stems';
 import type { StemId, StemMeta } from '../lib/types';
 import { StatusIndicator, cx } from './controls';
 import { PERCENT, VerticalFader } from './VerticalFader';
@@ -82,13 +82,19 @@ export const MixerChannel = memo(function MixerChannel({
     <article
       className={cx('stem channel', silenced && 'is-cut', selected && 'is-selected')}
       aria-labelledby={headingId}
+      aria-describedby={`${headingId}-role`}
       data-state={state}
     >
+      <span className="channel-key" title={`Key ${meta.keys} cuts or brings in ${meta.name}`} aria-hidden="true">
+        {meta.keys}
+      </span>
       <button
         type="button"
         className="channel-name"
         aria-pressed={selected}
         aria-label={`Inspect ${meta.name}`}
+        aria-describedby={`${headingId}-role`}
+        title={`Open ${meta.name} controls`}
         onClick={() => onSelect(meta.id)}
       >
         <Icon className="size-3.5 shrink-0" strokeWidth={2.2} aria-hidden />
@@ -96,6 +102,7 @@ export const MixerChannel = memo(function MixerChannel({
           {meta.name}
         </span>
       </button>
+      <p className="channel-role" id={`${headingId}-role`}>{STEM_ROLES[meta.id]}</p>
       <div className="channel-status" title={stateLabel}>
         <StatusIndicator state={state} label={stateLabel} compact />
       </div>
@@ -119,31 +126,35 @@ export const MixerChannel = memo(function MixerChannel({
           className="badge stem-badge tap"
           aria-pressed={soloed}
           aria-label={`Solo ${meta.name}`}
+          title={soloed ? `Stop soloing ${meta.name}` : `Hear ${meta.name} on its own, or with other soloed sounds`}
           onClick={() => onSolo(meta.id)}
         >
           Solo
         </button>
         <button
           type="button"
-          className={cx('badge stem-badge tap', silenced && 'is-cut')}
+          className={cx('badge stem-badge tap', muted && 'is-cut')}
           aria-pressed={muted}
           aria-label={`${muted ? 'Bring in' : 'Cut'} ${meta.name}`}
           aria-keyshortcuts={meta.keys}
+          title={muted ? `Bring ${meta.name} back into the mix` : `Remove ${meta.name} from the mix`}
           onClick={() => onCut(meta.id)}
         >
-          {muted ? 'In' : 'Cut'}
+          {muted ? 'Bring in' : 'Cut'}
         </button>
         <button
           type="button"
           className="badge stem-badge channel-reset tap"
           disabled={!modified}
           aria-label={`Reset ${meta.name} to the track's level`}
+          title={modified ? `Restore ${meta.name}'s original volume` : 'Already at the track\'s original volume'}
           onClick={() => {
             editHistory.record(`stem.${meta.id}.volume`, volume, home);
             onVolume(meta.id, home);
           }}
         >
           <RotateCcw className="size-3" aria-hidden />
+          Reset
         </button>
       </div>
     </article>

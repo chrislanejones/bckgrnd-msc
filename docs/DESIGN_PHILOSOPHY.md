@@ -87,7 +87,7 @@ these states, with the same words and the same treatment everywhere:
 | **Resting** | In the mix, but the song has no notes for it in this bar (the stab, lead and arp sit out the intro, and the break drops the drums). | Hollow dot, muted text "Rests this bar". Strip at full strength. |
 | **Cut** | You cut it. | Filled neutral dot, "Cut". Strip dimmed. Cut badge lit. |
 | **Soloed** | You soloed it. | Acid dot, "Solo". Solo badge lit. |
-| **Off by solo** | Silent because *another* stem is soloed. | Warning dot, "Off: solo on Bass". Strip dimmed. Cut badge lit. |
+| **Off by solo** | Silent because *another* stem is soloed. | Warning dot, "Off: solo on Bass". Strip dimmed. Cut stays unlit because this stem was not explicitly cut. |
 | **Queued** | A scene or fill waiting for its boundary. | Scene pads and the Fill button (Night 3): dashed acid outline that pulses (no pulse under reduced motion), "Queued · Bar 9" or "Fill · Bar 9". |
 
 The same rule applies everywhere else. A disabled control says why. A deck that
@@ -117,6 +117,28 @@ them, not ad-hoc values.
 | **Inspector** (right) | The selected stem's controls, or the master effects. |
 | **Editor drawer** (bottom) | The pattern editor. Opened on purpose. It never permanently takes space. |
 
+The Stems panel lets its controls and layout explain the eight musical layers.
+Each channel has a short sound description and a visible key number.
+Quick selections say what remains audible: All sounds, Drums only, Music only.
+Level, Solo, and Cut have visible explanations. Cut becomes Bring in when muted;
+Reset restores that channel's original volume. Eight channels share a mixer
+surface and wrap into rows on narrower screens instead of hiding sounds behind
+horizontal scrolling. Keep supporting explanations brief, muted, and at
+`--text-label` (11 px); avoid introductory paragraphs and repeated tips.
+
+Scenes and comparison follow in a separate panel. Scene buttons lead with their
+name, a short sound cue, and a miniature preview of their eight stored levels.
+Preview bars respect cuts and solos; custom captures never keep a misleading
+factory description. Switch on timing and Drum fill sit below the scene buttons.
+A/B has its own divided row: dashed capture buttons become listening buttons with
+headphone icons. A single small hint gives the next comparison step. Current,
+modified, and queued states use both text and visual treatment.
+Cancel clears the selected scene and returns to the mix from before scene choices.
+It stays available for an active scene even when nothing is queued.
+
+The pattern editor keeps its drawer, lane tabs, canvas, and editing toolbar in
+place when switching lanes. Read-only lanes use the same space and a small hint.
+
 Breakpoints:
 
 - **≥ 1180 px:** library, performance area and inspector side by side. The drawer
@@ -139,7 +161,7 @@ controls are built from these and don't restyle them locally.
 | `ValueReadout` | The value next to a label: tabular figures, a unit, and words where a number means nothing ("Stereo", "Off"). |
 | `InstrumentPanel` | A titled panel with an optional action in its header. The unit of layout. |
 | `PerformancePad` | A raised, pressable pad, momentary or latching, with an optional "held" state. |
-| `StemStrip` | One stem: spine, status, meter, bar pattern, fader, Solo and Cut. |
+| `MixerChannel` | One stem: name, sound description, shortcut, status, vertical fader, meter, Solo, Cut / Bring in, and Reset. |
 | `StatusIndicator` | A dot plus words for one of the states above. |
 | `Knob` | Every continuous control that turns. One implementation, in [`frontend/ui/Knob.tsx`](../frontend/ui/Knob.tsx). |
 | `Fader` | Stem volumes, which stay faders: a row of eight faders reads as a mixer at a glance. |

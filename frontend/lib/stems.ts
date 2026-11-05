@@ -33,6 +33,18 @@ export const STEM_NAMES: Record<StemId, string> = {
   arp: 'Arp',
 };
 
+/** What each layer contributes, without requiring music-production vocabulary. */
+export const STEM_ROLES: Record<StemId, string> = {
+  kick: 'Low drum pulse',
+  clap: 'Backbeat snap',
+  hats: 'Ticking rhythm',
+  bass: 'Low-end groove',
+  stab: 'Short chords',
+  lead: 'Main melody',
+  pad: 'Sustained chords',
+  arp: 'Repeating notes',
+};
+
 export const ICONS: Record<StemId, LucideIcon> = {
   kick: CircleDot,
   clap: AudioLines,

@@ -497,59 +497,54 @@ export function PatternDrawer({
 
         {inst.mixing ? <p className="editor-note">A mix is running. Editing waits until it finishes.</p> : null}
 
-        {tab === 'drums' ? (
-          <div className="drum-editor">
-            <div className="step-numbers" aria-hidden>
-              <span />
-              <div className="step-groups">
-                {groupsOf(view.cols).map((g) => (
-                  <div key={g[0]} className="step-group">
-                    {g.map((c) => (
-                      <span
-                        key={c}
-                        className={cx('step-number', c % 4 === 0 && 'is-beat', playStep === barFrom + c && 'is-playhead')}
-                      >
-                        {c + 1}
-                      </span>
-                    ))}
-                  </div>
-                ))}
+        <div className="editor-canvas">
+          {tab === 'drums' ? (
+            <div className="drum-editor">
+              <div className="step-numbers" aria-hidden>
+                <span />
+                <div className="step-groups">
+                  {groupsOf(view.cols).map((g) => (
+                    <div key={g[0]} className="step-group">
+                      {g.map((c) => (
+                        <span
+                          key={c}
+                          className={cx('step-number', c % 4 === 0 && 'is-beat', playStep === barFrom + c && 'is-playhead')}
+                        >
+                          {c + 1}
+                        </span>
+                      ))}
+                    </div>
+                  ))}
+                </div>
               </div>
-            </div>
-            <DrumGrid
-              lanes={drumPatterns}
-              view={view}
-              playStep={playStep}
-              focusLane={drumLane}
-              selection={selectedHits}
-              lockedLanes={ws.locks.lanes}
-              lockedEvents={lockedEvents}
-              disabled={frozen}
-              onFocusLane={(l) => {
-                setDrumLane(l);
-                onStem(stemOfLane(l));
-              }}
-              onPaint={paint}
-            />
-            {focusPattern ? (
-              <VelocityLane
-                pattern={focusPattern}
+              <DrumGrid
+                lanes={drumPatterns}
                 view={view}
+                playStep={playStep}
+                focusLane={drumLane}
                 selection={selectedHits}
-                mode={velMode}
+                lockedLanes={ws.locks.lanes}
+                lockedEvents={lockedEvents}
                 disabled={frozen}
-                onSelect={setSelection}
-                onCommit={velocity}
+                onFocusLane={(l) => {
+                  setDrumLane(l);
+                  onStem(stemOfLane(l));
+                }}
+                onPaint={paint}
               />
-            ) : null}
-          </div>
-        ) : notePattern ? (
-          <>
-            {!editableLane ? (
-              <p className="editor-note">
-                {spec.label} plays as written in this version: shown here with its chords intact, not editable yet.
-              </p>
-            ) : null}
+              {focusPattern ? (
+                <VelocityLane
+                  pattern={focusPattern}
+                  view={view}
+                  selection={selectedHits}
+                  mode={velMode}
+                  disabled={frozen}
+                  onSelect={setSelection}
+                  onCommit={velocity}
+                />
+              ) : null}
+            </div>
+          ) : notePattern ? (
             <PianoRoll
               pattern={notePattern}
               view={view}
@@ -567,8 +562,8 @@ export function PatternDrawer({
               }}
               onRefused={setMessage}
             />
-          </>
-        ) : null}
+          ) : null}
+        </div>
 
         {/* The inspector: exact values for what is selected. */}
         <div className="editor-inspector" role="group" aria-label="Selection">
@@ -606,31 +601,33 @@ export function PatternDrawer({
             />
           ) : selectedNote ? (
             <p className="editor-hint">
-              {selectedNote.notes.map(noteName).join(' ')} · {stepLabel(selectedNote.step)} · {selectedNote.len} steps ·{' '}
+              Read-only · {selectedNote.notes.map(noteName).join(' ')} · {stepLabel(selectedNote.step)} · {selectedNote.len} steps ·{' '}
               {pct(selectedNote.vel)}%{selectedNote.accent ? ' · accent' : ''}
             </p>
           ) : (
             <p className="editor-hint">
               {editableLane
-                ? 'Click to add a note. Drag a note to move it, its right edge to resize. Select one for exact values.'
-                : 'Select a note to see its pitches and length.'}
+                ? 'Click to add. Drag to move; drag an edge to resize.'
+                : 'Read-only. Select a note for details.'}
             </p>
           )}
         </div>
 
         <div className="editor-actions" role="toolbar" aria-label="Edit">
-          {tab === 'drums' ? (
-            <Segmented<'lane' | 'drums'>
-              label="Scope"
-              hideLabel
-              value={scope}
-              onPick={setScope}
-              options={[
-                { value: 'lane', label: spec.label, aria: `Scope: ${spec.label} only` },
-                { value: 'drums', label: 'All drums', aria: 'Scope: all four drum lanes' },
-              ]}
-            />
-          ) : null}
+          <div className="editor-scope">
+            {tab === 'drums' ? (
+              <Segmented<'lane' | 'drums'>
+                label="Scope"
+                hideLabel
+                value={scope}
+                onPick={setScope}
+                options={[
+                  { value: 'lane', label: spec.label, aria: `Scope: ${spec.label} only` },
+                  { value: 'drums', label: 'All drums', aria: 'Scope: all four drum lanes' },
+                ]}
+              />
+            ) : <span className="editor-scope-label">{spec.label} · this bar</span>}
+          </div>
           <button type="button" className="segment tap" onClick={copy} aria-label={`Copy ${scopeLabel}`}>
             Copy
           </button>
