@@ -110,6 +110,15 @@ return [
         'PARKING_LOT.md',
         'public/build/*.map',
         'public/build/assets/*.map',
+        'phpunit.xml*',
+        '.phpunit*',
+        'vite.config.ts',
+        'tsconfig*.json',
+        'package.json',
+        'pnpm-lock.yaml',
+        'netlify.toml',
+        'start.sh',
+        'screenshots',
     ],
 
     /**
