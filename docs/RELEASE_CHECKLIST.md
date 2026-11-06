@@ -1,6 +1,7 @@
 # Night 6 release checklist
 
-Candidate evidence is in [NIGHT6_PROTOCOL.md](NIGHT6_PROTOCOL.md). A check is complete
+Candidate evidence is in [NIGHT6_PROTOCOL.md](NIGHT6_PROTOCOL.md) and the
+[final artifact record](releases/2026-11-06-linux-rc1.json). A check is complete
 only for the named artifact/environment. Historical passes and pushes are not
 release evidence.
 
@@ -18,13 +19,14 @@ release evidence.
 - [x] Browser/native/MCP edited and silent fixtures produce matching events/frames/WAV.
 - [x] MCP packed clean installation: ten tools, contracts/assets, project rendering,
   narration, preset backup migration and missing dependency errors.
-- [ ] Freeze clean source commit, rebuild native/static/MCP, record final hashes.
-- [ ] Recheck the final distributable after all packaging transformations.
+- [x] Freeze clean source commit, rebuild native/static/MCP, record final hashes.
+- [x] Recheck the final distributable after all packaging transformations.
 - [ ] Execute saved-project validation/render/narration from this actual T3 client.
 - [ ] Human listening on the installed Linux app, including solo/held effects.
 - [ ] Physical sleep/resume and output-device changes.
-- [ ] Verify the intended production deployment identity and cached/fresh clients.
-- [ ] Record final rollback locations and source/artifact evidence in the handoff.
+- [ ] Actual minimization: WSL ignored the test request; no pass is claimed.
+- [x] Verify the intended production deployment identity and cached/fresh clients.
+- [x] Record final rollback locations and source/artifact evidence in the handoff.
 
 Unsigned Linux candidate only. `.deb` package-manager installation, Windows,
 macOS and real iOS/Android devices are untested until separate evidence exists.

@@ -1,0 +1,128 @@
+{
+  "candidate": "night6-linux-rc1",
+  "releaseSignoff": false,
+  "runtimeAppCommit": "4f5a5e3083521bdb2e0bf825c5de805a9f63e628",
+  "installerAndVerificationCommit": "44e02c9f7b0c620b30a3d4e014820d2450adfb22",
+  "mcpCommit": "d47ee150cc193c3360617ffac223399c6aed3dd6",
+  "buildId": "885e516519d1db0725cd5adf0cd34e7cc1d7e46705cae64517f7f5c6d700605e",
+  "engineSha256": "6ed97035573c5598c6e262d75d1e9954c1a8ed24f2510298604d2187a8972daa",
+  "engineBytes": 231072,
+  "renderer": "project-renderer-1",
+  "projectSchema": 3,
+  "snapshotSchema": 1,
+  "runtimes": {
+    "developmentPhp": "8.4.26",
+    "packagedPhp": "8.4.27",
+    "composer": "2.10.3",
+    "node": "24.21.0",
+    "pnpm": "10.26.0",
+    "rust": "1.98.1",
+    "wasmPack": "0.15.0",
+    "wasmOpt": "116",
+    "nativePhp": "2.4.0",
+    "electron": "40.10.6",
+    "ffmpeg": "7.1.5"
+  },
+  "lockfiles": {
+    "composer.lock": "89fe27526bed9a7f858ab8dbad2eaa9d025a07ecb0fecad4d817cf2b6cdcb6c3",
+    "pnpm-lock.yaml": "a91b3f834b67b3603774330ec2de392935366308f46b5a6e8daff6b75e29ed11",
+    "engine-core/Cargo.lock": "635811d19f56434edf2dece26e09bd76638635d9fd65c219980fa072b9f6ef20",
+    "nativephp/pnpm-lock.yaml": "a4b02f4661f66aeb342cd31ad2876f865b6569dea17b6138dd6d0aab08f172ec"
+  },
+  "mcpLockfileSha256": "565327c7c1f7c42e034818957b6833961fcff3331083f843a702149b4643cd0d",
+  "artifacts": {
+    "bckgrnd-msc-0.6.0-rc.1.tar.xz": {
+      "sha256": "c5ec3db091142a10014ecbb5dd86db9aeacbbad5cb547226c0745a3d783ba103",
+      "bytes": 101144724
+    },
+    "bckgrnd-msc_0.6.0-rc.1_amd64.deb": {
+      "sha256": "bfd50dd0f023a7aaf935a4b48f0a7874cce6a2f25d6896bfc37a381685b698a5",
+      "bytes": 117401320
+    },
+    "bckgrnd-msc-mcp-0.4.0-rc.1.tgz": {
+      "sha256": "e385e4320996e94bce368adc7fb0874ab0eccb15fb450759f17ec0a1f464a396",
+      "bytes": 434902
+    },
+    "bckgrnd-msc-static-885e516519d1.tar.xz": {
+      "sha256": "790c850c4e2d6c41d08a3829ec27e67d7c5d51e6302c727ca887ad4a0f57cd65",
+      "bytes": 368236
+    },
+    "install-linux.sh": {
+      "sha256": "f03285c8695580d1c84b5ce5e232cc0aa57e4ea09e3ca33bd41c43a6c8123be8",
+      "bytes": 2077
+    },
+    "build-manifest.json": {
+      "sha256": "7b37776b0b73e068a98b3b0927449c3d7cd5d3b8098557bc2d22323d498d56f8",
+      "bytes": 10684
+    }
+  },
+  "platforms": {
+    "linux-x64": "installed tar tested under Debian 13 WSL2/WSLg; unsigned; GTK fallback tested without portal",
+    "linux-deb": "contents inspected; package-manager installation untested",
+    "windows": "not tested",
+    "macos": "not tested",
+    "ios": "real-device audio, touch, accessibility not tested",
+    "android": "real-device audio, touch, accessibility not tested"
+  },
+  "tests": {
+    "php": {
+      "tests": 245,
+      "assertions": 5832
+    },
+    "rust": 259,
+    "mcp": 63,
+    "browser": "project, UI, editor, audio, resume, forward Break/Drop passed",
+    "static": "independent assets, no API dependency, project workflow passed",
+    "native": "installed startup with checkout hidden and restricted PATH; native dialogs, Save As, failed-save close, export cancellation, stopped reopen, audio probe, simulated resume passed",
+    "parity": "edited/silent fixtures and final saved native project match browser/production/MCP exactly under controlled settings",
+    "mcpPackage": "clean installation, 10 tools, old workflows, project validation/render/narration, absent dependency diagnostics passed"
+  },
+  "acceptance": {
+    "projectId": "47ff511c-ca48-4d32-97f6-85004c22b677",
+    "revision": 1,
+    "projectSha256": "714d6117c07925b404999ecc5c04927943a04317062adcacd9e8a0e2e862e22a",
+    "wavSha256": "b381a1e8a94bc94111ef613de5da065b957ed685663c2cd3ee01c6f43a667a7e",
+    "frames": 1462857,
+    "format": "wav/pcm16/stereo",
+    "sampleRate": 48000,
+    "nativeProductionMcpIdentical": true,
+    "renderMilliseconds": 1418,
+    "narration": {
+      "outputLufs": -17.7,
+      "truePeakDbfs": -6.3,
+      "seconds": 13.3
+    }
+  },
+  "production": {
+    "url": "https://bckgrnd-msc.netlify.app",
+    "deployId": "6aed8624a1f55f1aabaa7b8a",
+    "previousDeployId": "6aeb2a2cae85af350de2f7bc",
+    "freshAndCachedVerified": true
+  },
+  "mcpConnection": {
+    "transport": "stdio",
+    "client": "T3 Code via Codex",
+    "command": "/home/clj/.fnm/node-versions/v24.21.0/installation/bin/node",
+    "args": [
+      "/home/clj/.local/share/bckgrnd-msc/MCP Companion/0.4.0-rc.1-d47ee15/node_modules/bckgrnd-msc-mcp/dist/index.js"
+    ],
+    "env": {
+      "FFMPEG_PATH": "/usr/bin/ffmpeg",
+      "FFPROBE_PATH": "/usr/bin/ffprobe"
+    },
+    "actualClientCall": "not verified; active T3 session has not discovered newly configured tools"
+  },
+  "remaining": [
+    "Actual T3 validate/render/narration call after MCP reconnect",
+    "Human listening through the installed Linux output device",
+    "Physical sleep/resume and output-device changes",
+    "Minimization unverified: WSL ignored the minimize request (WM_STATE stayed Normal)",
+    "Signed/distribution-ready release and deb installation not certified"
+  ],
+  "rollback": {
+    "previousNativeInstallation": "~/.local/share/bckgrnd-msc/versions/a6019f260bbf199e535aecbc26f69dfa520ad5af992a4fbd430c8c7e4152a008",
+    "packages": "~/.local/share/bckgrnd-msc/rollback",
+    "preserveProjects": "~/.config/bckgrnd-msc/storage/app/projects",
+    "warning": "Rejected no-sandbox AppImage retained only as historical evidence; do not run or distribute it."
+  }
+}

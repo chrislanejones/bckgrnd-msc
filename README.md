@@ -307,7 +307,7 @@ Exports use a fresh isolated engine and an immutable revision, independently of
 live playback. Project-wide Undo includes mix, scene and pattern changes.
 
 Linux development: `composer native:install`, then `composer dev:desktop`
-(`php artisan native:run --installer=pnpm`). Build with `php artisan native:build linux`.
+(`php artisan native:run --installer=pnpm`). Build with `php artisan native:build linux x64`.
 Install the generated tar archive using `sh scripts/install-linux.sh /path/to/archive.tar.xz`,
 or install the `.deb` with the system package manager. Launch **bckgrnd-msc** from
 the desktop menu. Manual installs retain previous versions and project data.

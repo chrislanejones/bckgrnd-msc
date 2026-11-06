@@ -1,7 +1,9 @@
 # Night 6 — release evidence
 
-Status: in progress; **not a release signoff**. Night 5 persistence/export was
-absent at baseline. Packaging and publication depend on that gate passing first.
+Status: Linux candidate built/installed and website deployed; **not final Night 6
+signoff**. Browser persistence/export, installed automation and packed MCP pass.
+Actual T3 tool execution, physical audio listening and device interruptions remain
+open. Night 5 persistence/export was absent at baseline and was implemented here.
 
 ## Baseline, 2026-11-06
 
@@ -55,8 +57,8 @@ phrase-ending fills, Drop + Crash, stutter, randomize mix, alternate mixer modes
 Existing rhythm-only/static/read-only limitations remain visible.
 
 Linux is the selected first packaging target; T3 Code is the selected MCP client. Windows, macOS, iOS, Android,
-actual output-device listening, and production deployment are unverified until
-evidence is recorded here. An unsigned test artifact is not a signed release.
+actual output-device listening and physical interruptions remain unverified.
+Production is now verified below. An unsigned test artifact is not a signed release.
 
 ## Candidate implementation and fresh evidence
 
@@ -73,13 +75,37 @@ builds; NativePHP supplies the same storage interface in application data.
 | Audio | Rust targeted regressions and worklet gate pass. `verify-transitions` advances normally through Break and Drop, with no seek. Simulated interruption/failed/successful resume passes in browser and installed app |
 | Cross-runtime | Edited and silent fixtures produce identical resolved events, 108000 frames and byte-identical PCM WAV in actual browser/native export workers and MCP, at 48 kHz with controlled settings and fresh WASM noise state |
 | MCP clean package | Ten tools, contracts/fixtures/shared assets, saved-project validation/render/narration, old workflows and diagnostics pass outside either repository with restricted PATH and a Unicode/space path |
-| T3 client | Configuration/discovery/tool execution is a separate gate; an SDK test does not certify it |
+| T3 client | Exact installed executable configured; active session has not discovered new tools. Actual tool call remains unverified; SDK acceptance is separate |
 | Production baseline | Real browser check finds no pattern editor, stale saving placeholder, no build manifest (404); app script query `mw2472ai`. Production engine SHA256 `3ed28bd6e288d4116e0d773d6d01bcebcffccde5fa7f7147afc661211d714b04`, 222709 bytes. November 5 pushes did not update this deployment |
-| Other targets | Windows/macOS and actual iOS/Android devices untested |
+| Production final | Deploy `6aed8624a1f55f1aabaa7b8a`, build `885e516519d1`: previously cached and fresh sessions load matching app/worklet/WASM, play, import/save/reopen stopped and export the native revision; WAV matches native/MCP |
+| Other targets | Windows/macOS and actual iOS/Android devices untested; `.deb` installation untested. WSL ignored minimization; no minimization pass |
 
-Logs are collected under `/tmp/bckgrnd-*.log` during development. Durable final
-source/artifact identities and result copies belong in the release evidence and
-handoff; temporary logs alone are not a release record.
+Durable artifacts, hashes, accepted project/audio and raw logs are under
+`~/.local/share/bckgrnd-msc/releases/night6-rc1-4f5a5e3/`. The checked-in
+[release record](releases/2026-11-06-linux-rc1.json) contains source/lockfile/artifact
+hashes, runtime versions and exact verification boundaries. PHP: 245 tests / 5832
+assertions; Rust: 259 including integrations/doctest; MCP: 63 plus clean package.
+UI/editor/audio/static/project checks pass. Optimized WASM is 231072 bytes; its
+recorded build actually ran wasm-opt. The final 30.476-second project renders in
+1418 ms in the installed MCP acceptance process on this host.
+
+The app/static/native/MCP musical bundle is frozen at app commit
+`4f5a5e3083521bdb2e0bf825c5de805a9f63e628`; build ID
+`885e516519d1db0725cd5adf0cd34e7cc1d7e46705cae64517f7f5c6d700605e`.
+Installer/verification commit `44e02c9f7b0c620b30a3d4e014820d2450adfb22`
+adds the tested WSL GTK launcher and event-driven interruption-test readiness;
+it changes no bundled runtime/engine. MCP source is
+`d47ee150cc193c3360617ffac223399c6aed3dd6`. Later documentation commits do not
+change those artifact identities. No audio changes occurred after synchronization.
+
+The saved native revision 1 includes edited bass notes 39/45 and an empty kick
+lane. Native, production-browser and installed MCP exports each contain 1462857
+stereo PCM16 frames at 48 kHz, SHA256
+`b381a1e8a94bc94111ef613de5da065b957ed685663c2cd3ee01c6f43a667a7e`.
+MCP mixed that same revision under the local 8.3-second speech fixture, with
+13.3-second final output, -17.7 LUFS and -6.3 dBFS true peak. A missing executable
+returns an installation/path hint, publishes no output, and leaves musical
+rendering available. The real T3 call still must be demonstrated.
 
 ## Defect disposition
 
@@ -111,8 +137,22 @@ because the generated launcher disabled the sandbox.
 ## Remaining manual or external evidence
 
 Actual speaker listening (including solo/Filter Hold), physical sleep/resume and
-output-device changes remain unverified. This WSL test used a temporary native
-file-chooser portal. The actual T3 session must call validation, render and narration
-with the installed package. Production publication needs the intended build ID,
-fresh/cached-client checks and preserved rollback artifacts. Do not mark Night 6
-complete while any of those required gates remains open.
+output-device changes remain unverified. Minimization is unverified because WSL's
+window manager left WM_STATE Normal after the minimize request. This is explicitly
+separate from a passed simulated AudioContext interruption/resume test.
+
+The permanent WSL launcher selects Electron 40's native GTK dialog fallback.
+Import, Save As, export, dialog cancellation and close recovery passed without the
+temporary portal processes. The installed app launches with the checkout hidden;
+its probe also passed with development servers stopped. Export workers completed
+while the live app continued playing. Ordinary playback/export has no ffmpeg or
+developer-tool dependency. Test CDP flags are not used for normal startup.
+
+Only the `bckgrnd-msc` client entry was added. This active T3 session has not
+reloaded the tools, so it cannot yet execute the final validation/render/narration
+sequence. The installed SDK stdio test is not client signoff. Windows/macOS, real
+phones, `.deb` installation and a signed distribution remain untested.
+
+Rollback instructions and preserved locations are in the
+[latest handoff](sessions/2026-11-06-night6-release.md). Do not mark Night 6 complete
+while its required client and physical-audio gates remain open.
