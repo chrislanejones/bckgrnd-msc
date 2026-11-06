@@ -4,6 +4,15 @@ const cdp = process.env.NATIVE_CDP;
 const browser = cdp ? await chromium.connectOverCDP(cdp) : await chromium.launch();
 try {
   const page = cdp ? browser.contexts()[0].pages()[0] : await browser.newPage();
+  page.setDefaultTimeout(10000);
+  if (cdp) {
+    // Electron intentionally refuses a dirty page reload. Commit this acceptance
+    // fixture before reloading to install the AudioContext instrumentation.
+    if (!await page.getByRole('dialog', { name: 'Projects', exact: true }).isVisible())
+      await page.getByRole('button', { name: /^Projects ·/ }).click();
+    await page.getByRole('button', { name: 'Save project', exact: true }).click();
+    await page.waitForFunction(() => document.querySelector('[data-testid="project-status"]')?.textContent?.startsWith('Saved '));
+  }
   await page.addInitScript(() => {
     const Original = window.AudioContext;
     window.__releaseContexts = [];
@@ -11,10 +20,17 @@ try {
       constructor(...args) { super(...args); window.__releaseContexts.push(this); }
     };
   });
-  page.on('dialog', (dialog) => void dialog.accept());
-  await page.goto(cdp ? page.url() : process.argv[2] ?? 'http://127.0.0.1:8080');
+  page.on('dialog', (dialog) => void dialog.accept().catch(() => {}));
+  if (cdp) await page.reload();
+  else await page.goto(process.argv[2] ?? 'http://127.0.0.1:8080');
   await page.getByRole('button', { name: 'Play the track', exact: true }).click();
-  await page.waitForFunction(() => document.querySelector('.app')?.dataset.playing === 'yes');
+  // The transport updates optimistically before the worklet's first telemetry.
+  // Interrupt only once real output has reached the meter, not during startup.
+  await page.waitForFunction(() => document.querySelector('.app')?.dataset.playing === 'yes'
+    && [...document.querySelectorAll('.master-meter-fill')].some(el => {
+      const level = Number(el.style.transform.match(/scaleX\(([^)]+)\)/)?.[1]);
+      return level > 0;
+    }), {}, { timeout: 8000 });
   const project = await page.evaluate(() => window.__BCKGRND_PROJECT__());
   await page.evaluate(async () => {
     const context = window.__releaseContexts[0];

@@ -10,7 +10,8 @@ instrumental keeps playing, so you build the track yourself while it runs.
 **Night 6 candidate:** browser projects, recovery, unified undo and WAV export;
 NativePHP Desktop 2.4 on Linux; saved-project rendering in MCP. Release evidence
 and remaining acceptance gates are in [NIGHT6_PROTOCOL.md](docs/NIGHT6_PROTOCOL.md)
-and the [release checklist](docs/RELEASE_CHECKLIST.md). Windows, macOS and real
+and the [release checklist](docs/RELEASE_CHECKLIST.md). Production build `885e516519d1`
+was verified in fresh and previously cached sessions. Windows, macOS and real
 phones are untested. Pushed source is not deployment evidence.
 
 The DSP is Rust compiled to WebAssembly, running inside an `AudioWorklet`. The music —
@@ -77,19 +78,18 @@ Portable project files use the same format in all three runtimes.
 
 The Netlify response headers block framing the app (clickjacking), embedded
 plugin objects and cross-origin base URLs. The policy leaves JavaScript,
-WebAssembly and AudioWorklet loading unchanged. These headers apply on the next
-Netlify deployment; the local Laravel and static development servers do not
+WebAssembly and AudioWorklet loading unchanged. The verified Night 6 deployment includes these headers; the local Laravel and static development servers do not
 read `netlify.toml`.
 
 ## The screen
 
 | Area | What's there |
 |---|---|
-| Transport (top, always visible) | Play/stop, the track, the song part and bar, the tempo, the master meter with a clip light, and whether the mix differs from the track as written. Nothing is saved yet, so it says so. |
+| Transport (top, always visible) | Play/stop, the track, the song part and bar, the tempo, the master meter with a clip light, and whether the mix differs from the track as written. Projects shows the saved revision or unsaved changes and opens saving, recovery and export. |
 | Library (left) | Tracks by section and style, with a star to keep favorites (stored in this browser only). On narrower screens it opens from the button in the transport. |
 | Performance area (middle) | The two decks, the scene strip, the stems, the jog wheel and pads, loop, Release FX and Panic, and mixing to the next track. |
 | Inspector (right) | **Master**: the effects rack, all knobs except the echo's note divisions. Select a stem's name to see that stem instead: its fader, its echo send, Solo and Cut. |
-| Pattern editor (bottom) | Opened from **Pattern** or the inspector. Edit the drums, bass and lead one bar at a time while the track plays; see [Editing patterns](#editing-patterns). Escape closes it. |
+| Pattern editor (bottom) | Opened with **Edit patterns** beside the sound controls. Edit the drums, bass and lead one bar at a time while the track plays; see [Editing patterns](#editing-patterns). Escape closes it. |
 
 On a phone the same panels show one view at a time: **Perform**, **Mix** and
 **Edit**, from the tabs at the bottom. The transport stays at the top.

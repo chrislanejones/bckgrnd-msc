@@ -28,6 +28,7 @@ const windowId = (name) => {
 const closeWindow = () => execFileSync(closer, [windowId('bckgrnd-msc')]);
 async function launch() {
   const args = ['--remote-debugging-address=127.0.0.1', `--remote-debugging-port=${port}`];
+  if (process.env.NATIVE_GTK_DIALOGS === '1') args.push('--xdg-portal-required-version=9999');
   const wrapped = process.env.BWRAP;
   const command = wrapped ?? binary;
   const commandArgs = wrapped ? ['--bind', '/', '/', '--dev-bind', '/dev', '/dev', '--proc', '/proc', '--tmpfs', resolve('.'), '--chdir', dir, binary, ...args] : args;

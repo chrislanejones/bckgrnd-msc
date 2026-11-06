@@ -26,7 +26,7 @@ Current results and remaining gates are in [NIGHT6_PROTOCOL.md](NIGHT6_PROTOCOL.
 Use locked dependencies: `composer install`, `pnpm install --frozen-lockfile`, then
 `composer native:install`. The installer preserves the reviewed Composer scripts.
 `composer dev:desktop` invokes the documented `native:run --installer=pnpm`.
-`php artisan native:build linux` builds optimized WASM, app, worklet and desktop.
+`php artisan native:build linux x64` builds optimized WASM, app, worklet and desktop.
 Use `sh scripts/install-linux.sh /absolute/path/to/archive.tar.xz` for a per-user
 installation and desktop launcher. It installs under an archive-hash directory,
 so an update cannot rewrite a running executable. No developer tools are required
@@ -40,10 +40,13 @@ It replaces the upstream AppImage target: its generated launcher added
 `--no-sandbox`. That diagnostic artifact is **not a supported distributable**.
 
 The Linux test host is Debian 13 under WSL2/WSLg. Its minimal desktop lacked an XDG
-file chooser portal. A temporary portal/GTK backend enabled native-dialog testing;
-this is a host dependency, not a renderer security exception. Normal desktop
-distributions should supply their desktop's chooser backend. No sandbox, context
-isolation or web-security flag was disabled.
+file chooser portal. The final installer uses Electron 40's native GTK fallback
+on WSL (`--xdg-portal-required-version=9999`); `BCKGRND_GTK_DIALOGS=1` selects
+it explicitly elsewhere. Native import/save/export/cancel and safe shutdown all
+passed with the temporary portal processes stopped. Regular Linux desktops retain
+their normal chooser. This supported dialog switch does not change sandbox, context
+isolation or web security. Recheck it when changing Electron: see the
+[Electron dialog documentation](https://github.com/electron/electron/blob/v40.10.6/docs/api/dialog.md).
 
 ## Required packaged files
 
@@ -65,13 +68,14 @@ The manifest mismatch error instructs reload/reinstall instead of silent playbac
 
 `tools/verify-native.mjs` drives the installed app through native X11 file/close
 actions. Test-only variables: `NATIVE_BINARY`, `XDOTOOL`, optional `BWRAP` (hides
-the checkout), optional `BROWSER_PROJECT`, and `NATIVE_DEBUG_PORT`. It needs
+the checkout), optional `BROWSER_PROJECT`, `NATIVE_DEBUG_PORT`, and `NATIVE_GTK_DIALOGS=1` for the direct GTK fixture. It needs
 Playwright, a C compiler/X11 headers, xdotool and xclip on the test host; none ships
 as an application requirement. CDP is enabled only by test launch arguments.
 
 `NATIVE_CDP=... node tools/verify-render-parity.mjs` compares the actual packaged
 export worker with browser and MCP. `verify-resume.mjs` checks simulated
-interruption; `/probe.html` measures stereo, signal and meter agreement in the
-installed origin. Actual speaker listening, physical sleep/resume and output-device
+interruption. The installed `probe.js` is loaded into a temporary diagnostic section
+on the main page to measure stereo, signal and meter agreement under its CSP;
+normal navigation restrictions remain intact. Actual speaker listening, physical sleep/resume and output-device
 changes require separate human/device evidence. Narrow browser layouts do not
 certify phone audio or accessibility. The release checklist keeps those gates visible.

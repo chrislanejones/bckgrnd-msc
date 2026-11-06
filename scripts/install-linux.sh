@@ -6,7 +6,7 @@ case "$archive" in /*) ;; *) archive="$PWD/$archive" ;; esac
 digest=$(sha256sum "$archive" | cut -d ' ' -f 1)
 data_root=${XDG_DATA_HOME:-"$HOME/.local/share"}
 install_root="$data_root/bckgrnd-msc/versions/$digest"
-mkdir -p "$data_root/bckgrnd-msc/versions" "$HOME/.local/bin" "$data_root/applications"
+mkdir -p "$data_root/bckgrnd-msc/versions" "$data_root/bckgrnd-msc/launchers" "$HOME/.local/bin" "$data_root/applications"
 if [ ! -d "$install_root" ]; then
     stage=$(mktemp -d "$data_root/bckgrnd-msc/versions/.install-XXXXXX")
     trap 'rm -rf "$stage"' EXIT HUP INT TERM
@@ -17,13 +17,27 @@ if [ ! -d "$install_root" ]; then
     mv "$stage" "$install_root"
     trap - EXIT HUP INT TERM
 fi
-ln -sfn "$install_root/bckgrnd-msc" "$HOME/.local/bin/bckgrnd-msc"
+launcher="$data_root/bckgrnd-msc/launchers/$digest.sh"
+cat > "$launcher" <<'SH'
+#!/bin/sh
+set -eu
+launcher=$(readlink -f -- "$0")
+install_root="$(dirname -- "$launcher")/../versions/$(basename -- "$launcher" .sh)"
+# The pinned Electron 40 supports GTK without an XDG portal. Minimal WSL
+# sessions often have no portal backend; retain the usual choice elsewhere.
+if [ -n "${WSL_DISTRO_NAME:-}" ] || [ "${BCKGRND_GTK_DIALOGS:-0}" = 1 ]; then
+    set -- --xdg-portal-required-version=9999 "$@"
+fi
+exec "$install_root/bckgrnd-msc" "$@"
+SH
+chmod 755 "$launcher"
+ln -sfn "$launcher" "$HOME/.local/bin/bckgrnd-msc"
 cat > "$data_root/applications/com.chrislanejones.bckgrndmsc.desktop" <<EOF
 [Desktop Entry]
 Type=Application
 Name=bckgrnd-msc
 Comment=Create, save and render music locally
-Exec="$install_root/bckgrnd-msc"
+Exec="$launcher"
 Icon=$install_root/resources/build/icon.png
 Terminal=false
 Categories=AudioVideo;Audio;Music;
