@@ -1,5 +1,15 @@
 @import "tailwindcss";
 
+.project-dialog { margin: auto; max-width: min(620px, 94vw); max-height: 85dvh; overflow: auto; padding: 24px; background: #171c25; color: #f4f1ea; border: 1px solid #535963; border-radius: 8px; }
+.project-dialog::backdrop { background: #0009; }
+.project-dialog label { display: grid; gap: 6px; margin: 16px 0; }
+.project-dialog input { border: 1px solid #535963; padding: 8px; }
+.project-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 16px 0; }
+.project-dialog button { border: 1px solid #535963; border-radius: 4px; padding: 6px 10px; cursor: pointer; }
+.project-dialog button:disabled { opacity: .45; cursor: default; }
+.project-dialog li { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; border-top: 1px solid #535963; padding: 12px 0; }
+.project-dialog li span { flex: 1 1 100%; }
+
 /*
  * Tokens. The rules for using them are in docs/DESIGN_PHILOSOPHY.md: color explains
  * state (acid for on, warn for "needs attention", danger for broken), surfaces stay
@@ -3691,3 +3701,6 @@ html[data-control-drag="yes"] * {
 .panic-button:hover {
   background: color-mix(in srgb, var(--color-danger) 14%, transparent);
 }
+
+.audio-error { position: fixed; z-index: 100; bottom: 1rem; left: 50%; transform: translateX(-50%); max-width: 90vw; padding: .8rem; background: #181b20; color: #fff; border: 1px solid #e6a45b; display: flex; gap: 1rem; align-items: center; }
+.audio-error button { white-space: nowrap; text-decoration: underline; }

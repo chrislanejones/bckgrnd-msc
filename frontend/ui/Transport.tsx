@@ -4,7 +4,7 @@
  * in every view at every width.
  */
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Library as LibraryIcon, Play, Square } from 'lucide-react';
 import { engine } from '../lib/engine';
 import { PARTS } from '../lib/stems';
@@ -122,6 +122,7 @@ export function TransportBar({
   bar,
   bpm,
   edited,
+  projects,
   mixing,
   liveDeck,
   onTogglePlay,
@@ -132,6 +133,7 @@ export function TransportBar({
   bar: number;
   bpm: number;
   edited: boolean;
+  projects?: ReactNode;
   mixing: string | null;
   liveDeck: 'a' | 'b';
   onTogglePlay: () => void;
@@ -210,13 +212,13 @@ export function TransportBar({
 
       <MasterMeter />
 
-      <div className="save-status" title="Nothing is saved yet. Changes last until you reload the page.">
+      {projects ?? <div className="save-status">
         {edited ? (
           <StatusIndicator state="warn" label="Edited · not saved" />
         ) : (
           <StatusIndicator state="idle" label="Track as written" />
         )}
-      </div>
+      </div>}
     </header>
   );
 }

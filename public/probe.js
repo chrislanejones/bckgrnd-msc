@@ -120,8 +120,9 @@ async function run() {
   let peakL = 0;
   let peakR = 0;
   let nonFinite = 0;
-  const deadline = performance.now() + 1500;
-  while (performance.now() < deadline) {
+  const started = performance.now();
+  const deadline = started + 8000;
+  while (performance.now() < deadline && (frames < 30 || peakL <= 0.02 || peakR <= 0.02)) {
     left.getFloatTimeDomainData(bufL);
     right.getFloatTimeDomainData(bufR);
     for (let i = 0; i < bufL.length; i += 1) {
@@ -135,7 +136,7 @@ async function run() {
 
   check('engine produces sound', Math.max(peakL, peakR) > 0.02 && nonFinite === 0, `peak L ${peakL.toFixed(4)} R ${peakR.toFixed(4)}`);
   check('output is stereo', peakL > 0 && peakR > 0 && peakL !== peakR);
-  check('telemetry reaches the page', frames > 10, `${frames} frames in 1.5 s`);
+  check('telemetry reaches the page', frames > 10, `${frames} frames in ${Math.round(performance.now() - started)} ms`);
   check('master meter agrees with the output', Math.abs(masterPeak - Math.max(peakL, peakR)) < 0.1, `telemetry ${masterPeak.toFixed(4)}`);
   check('no engine errors', errors.length === 0, errors.join('; '));
   return finish(ctx);

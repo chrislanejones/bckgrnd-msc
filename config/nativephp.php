@@ -6,14 +6,14 @@ return [
      * It is used to determine if the app needs to be updated.
      * Increment this value every time you release a new version of your app.
      */
-    'version' => env('NATIVEPHP_APP_VERSION', '0.1.0'),
+    'version' => env('NATIVEPHP_APP_VERSION', '0.6.0-rc.1'),
 
     /**
      * The ID of your application. This should be a unique identifier
      * usually in the form of a reverse domain name.
      * For example: com.nativephp.app
      */
-    'app_id' => env('NATIVEPHP_APP_ID', 'dev.floor.stemmachine'),
+    'app_id' => env('NATIVEPHP_APP_ID', 'com.chrislanejones.bckgrndmsc'),
 
     /**
      * If your application allows deep linking, you can specify the scheme
@@ -29,7 +29,7 @@ return [
     /**
      * The author of your application.
      */
-    'author' => env('NATIVEPHP_APP_AUTHOR'),
+    'author' => env('NATIVEPHP_APP_AUTHOR', 'Chris Lane Jones'),
 
     /**
      * The copyright notice for your application.
@@ -39,12 +39,12 @@ return [
     /**
      * The description of your application.
      */
-    'description' => env('NATIVEPHP_APP_DESCRIPTION', 'An awesome app built with NativePHP'),
+    'description' => env('NATIVEPHP_APP_DESCRIPTION', 'Create, save and render music locally with bckgrnd-msc.'),
 
     /**
      * The Website of your application.
      */
-    'website' => env('NATIVEPHP_APP_WEBSITE', 'https://nativephp.com'),
+    'website' => env('NATIVEPHP_APP_WEBSITE', 'https://bckgrnd-msc.netlify.app'),
 
     /**
      * The default service provider for your application. This provider
@@ -86,6 +86,30 @@ return [
         'content',
         'node_modules',
         '*/tests',
+        'old',
+        '.git',
+        '.netlify',
+        'engine-core/target',
+        'docs',
+        'bootstrap/cache/*.php',
+        'storage/logs/*',
+        'storage/app/projects',
+        'storage/app/recovery',
+        '.claude',
+        '.agents',
+        '.playwright-mcp',
+        'tests',
+        'tools',
+        'floor-desktop',
+        '.env*',
+        '*/.env*',
+        'frontend',
+        'scripts',
+        'engine-core',
+        'SESSION_LOG.md',
+        'PARKING_LOT.md',
+        'public/build/*.map',
+        'public/build/assets/*.map',
     ],
 
     /**
@@ -97,7 +121,7 @@ return [
          * updater will only work when your application is bundled
          * for production.
          */
-        'enabled' => env('NATIVEPHP_UPDATER_ENABLED', true),
+        'enabled' => false,
 
         /**
          * The updater provider to use.
@@ -141,14 +165,7 @@ return [
     /**
      * The queue workers that get auto-started on your application start.
      */
-    'queue_workers' => [
-        'default' => [
-            'queues' => ['default'],
-            'memory_limit' => 128,
-            'timeout' => 60,
-            'sleep' => 3,
-        ],
-    ],
+    'queue_workers' => [],
 
     /**
      * Define your own scripts to run before and after the build process.

@@ -154,7 +154,7 @@ export const LibraryPanel = memo(function LibraryPanel({
           Saved projects
         </h3>
         <p className="empty-note">
-          Saving isn&rsquo;t built yet. Your changes last until you reload the page.
+          Open Projects from the save status above to save, reopen or recover your work.
         </p>
       </section>
     </div>

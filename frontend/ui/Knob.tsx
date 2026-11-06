@@ -158,6 +158,7 @@ export const Knob = memo(function Knob({
       const clamped = Math.min(mapping.max, Math.max(mapping.min, v));
       if (Math.abs(clamped - valueRef.current) <= EPS) return;
       emitted.current = clamped;
+      if (historyId) editHistory.begin(historyId);
       valueRef.current = clamped;
       onChange(clamped);
     },
@@ -167,8 +168,8 @@ export const Knob = memo(function Knob({
   const commit = useCallback(
     (from: number) => {
       const to = valueRef.current;
-      if (Math.abs(to - from) <= EPS) return;
       if (historyId) editHistory.record(historyId, from, to);
+      if (Math.abs(to - from) <= EPS) return;
       onCommit?.(from, to);
     },
     [historyId, onCommit],

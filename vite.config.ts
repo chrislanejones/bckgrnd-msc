@@ -2,6 +2,7 @@ import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
 import { resolve } from 'node:path';
+import { readFileSync } from 'node:fs';
 
 /**
  * Vite builds the React app into `public/build`, which is what the Blade shell
@@ -15,9 +16,10 @@ export default defineConfig({
   // comes through undefined and the static bundle quietly keeps calling the API.
   envDir: import.meta.dirname,
   publicDir: false,
+  base: '/build/',
   // A cache key for the worklet and wasm, whose names are fixed (see engine.ts).
   define: {
-    __BUILD_ID__: JSON.stringify(Date.now().toString(36)),
+    __BUILD_ID__: JSON.stringify(JSON.parse(readFileSync(resolve(import.meta.dirname, process.env.BCKGRND_MANIFEST_PATH ?? 'public/build-manifest.json'), 'utf8')).buildId),
   },
   plugins: [react(), tailwindcss()],
   resolve: {

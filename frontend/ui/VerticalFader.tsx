@@ -110,6 +110,7 @@ export const VerticalFader = memo(function VerticalFader({
       const clamped = Math.min(max, Math.max(min, next));
       if (Math.abs(clamped - valueRef.current) <= EPS) return;
       valueRef.current = clamped;
+      if (historyId) editHistory.begin(historyId);
       onChange(clamped);
     },
     [max, min, onChange],
@@ -118,7 +119,7 @@ export const VerticalFader = memo(function VerticalFader({
   const commit = useCallback(
     (from: number) => {
       const to = valueRef.current;
-      if (historyId && Math.abs(to - from) > EPS) editHistory.record(historyId, from, to);
+      if (historyId) editHistory.record(historyId, from, to);
     },
     [historyId],
   );

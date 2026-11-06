@@ -72,6 +72,7 @@ pub struct KickVoice {
     sub_env: Adsr,
     sub: Osc,
     click_env: f32,
+    click_decay: f32,
     click_hp: Biquad,
     click_left: f32,
     inv_sr: f32,
@@ -112,6 +113,8 @@ impl KickVoice {
             ),
             sub: Osc::new(Wave::Sine, sub_hz, sample_rate),
             click_env: if lofi { 0.08 } else { 0.42 } * vel,
+            click_decay: (0.0001 / ((if lofi { 0.08_f32 } else { 0.42_f32 }) * vel).max(0.0001))
+                .powf(1.0 / (0.015 * sample_rate)),
             click_hp: {
                 let mut f = Biquad::new();
                 f.highpass(
@@ -152,7 +155,7 @@ impl DrumVoice for KickVoice {
         if self.click_left > 0.0 {
             click = self.click_hp.process(noise()) * self.click_env;
             self.click_left -= self.inv_sr;
-            self.click_env *= 0.86;
+            self.click_env *= self.click_decay;
         }
 
         let out = body + sub + click;
@@ -203,7 +206,7 @@ impl ClapVoice {
         let decay = if lofi {
             0.28
         } else {
-            if kind_freq < 1000.0 {
+            if kind_freq < 1500.0 {
                 0.2
             } else {
                 0.13
@@ -211,7 +214,7 @@ impl ClapVoice {
         };
         Self {
             bursts,
-            tail_env: Adsr::new(0.5 * vel, 0.018, decay, 0.0, 0.0, 0.02, sample_rate),
+            tail_env: Adsr::decay_from(0.5 * vel, decay, sample_rate),
             tail_bp: {
                 let mut f = Biquad::new();
                 f.bandpass(sample_rate, kind_freq * 0.82, 0.55);
@@ -585,6 +588,35 @@ impl DrumVoice for PercVoice {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn kick_click_has_a_fifteen_millisecond_decay_at_every_rate() {
+        for sr in [44100.0, 48000.0, 96000.0] {
+            let mut kick = super::KickVoice::new(1.0, sr, false, 55.0);
+            for _ in 0..(sr * 0.0075) as usize {
+                super::DrumVoice::process(&mut kick);
+            }
+            let expected = (0.42_f32 * 0.0001).sqrt();
+            assert!(
+                (kick.click_env - expected).abs() < 0.0002,
+                "{} at {}",
+                kick.click_env,
+                sr
+            );
+        }
+    }
+    #[test]
+    fn clap_tail_begins_at_full_level_after_one_offset() {
+        let mut clap = super::ClapVoice::new(1.0, 48000.0, 1750.0, false);
+        // Its delay is the onset offset. The envelope must start near its peak.
+        assert!(clap.tail_env.process() > 0.49);
+    }
+    #[test]
+    fn deep_clap_tail_lasts_longer_than_house() {
+        let deep = super::ClapVoice::new(1.0, 48000.0, 1250.0, false);
+        let house = super::ClapVoice::new(1.0, 48000.0, 1750.0, false);
+        assert!(deep.tail_env.release_starts_at() > house.tail_env.release_starts_at() + 3000.0);
+    }
     use super::*;
 
     #[test]

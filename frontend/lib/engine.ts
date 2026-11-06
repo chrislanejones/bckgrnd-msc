@@ -1,3 +1,4 @@
+import { verifyEngine } from './build-identity';
 /**
  * Main-thread host for the Rust/WASM engine.
  *
@@ -159,7 +160,7 @@ export class EngineHost {
    * starts suspended, and a suspended context cannot run the processor.
    */
   async boot(): Promise<void> {
-    this.bootPromise ??= this.create();
+    this.bootPromise ??= this.create().catch(async (error) => { await this.close(); throw error; });
     return this.bootPromise;
   }
 
@@ -180,8 +181,12 @@ export class EngineHost {
 
     const ctx = new AudioContext({ latencyHint: 'interactive' });
     this.ctx = ctx;
-
-    await ctx.audioWorklet.addModule(WORKLET_URL);
+    ctx.onstatechange = () => {
+      if (ctx.state !== 'running' && this.telemetry.playing) {
+        this.lastError = 'Audio is interrupted. Check the output device, then Resume Audio.';
+        for (const listener of this.errorListeners) listener(this.lastError);
+      }
+    };
 
     // `fetch` exists here even though it does not in the worklet, so the binary is
     // pulled down on this thread and handed over as bytes.
@@ -190,6 +195,12 @@ export class EngineHost {
       throw new Error(`could not load the audio engine: ${response.status} ${WASM_URL}`);
     }
     const wasm = await response.arrayBuffer();
+    const manifest = await verifyEngine(wasm);
+    const worklet = await fetch(WORKLET_URL);
+    if (!worklet.ok) throw new Error('Worklet asset missing. Reload the complete app build.');
+    const digest = await crypto.subtle.digest('SHA-256', await worklet.arrayBuffer());
+    if ([...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('') !== manifest.worklet) throw new Error('Worklet does not match this build. Reload the complete app.');
+    await ctx.audioWorklet.addModule(WORKLET_URL);
 
     const node = new AudioWorkletNode(ctx, 'bckgrnd-msc-engine', {
       numberOfInputs: 0,
@@ -441,7 +452,14 @@ export class EngineHost {
   }
 
   async resume(): Promise<void> {
-    if (this.ctx?.state === 'suspended') await this.ctx.resume();
+    const ctx = this.ctx;
+    if (!ctx || ctx.state === 'closed') throw new Error('The audio device closed. Save the project and reload to reconnect it.');
+    if (ctx.state !== 'running') {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try { await Promise.race([ctx.resume(), new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('Audio could not resume. Check the output device and try Resume Audio.')), 4000); })]); }
+      finally { clearTimeout(timer); }
+    }
+    if (ctx.state !== 'running') throw new Error('Audio remains suspended. Check the output device and try Resume Audio.');
   }
 
   get running(): boolean {
@@ -449,13 +467,14 @@ export class EngineHost {
   }
 
   async close(): Promise<void> {
-    for (const map of [this.cancelWaiters, this.fillCancelWaiters, this.gestureWaiters]) {
+    for (const map of [this.cancelWaiters, this.fillCancelWaiters, this.patternsCancelWaiters, this.gestureWaiters]) {
       for (const waiting of map.values()) for (const resolve of waiting) resolve(false);
       map.clear();
     }
     this.node?.disconnect();
     this.node = null;
-    await this.ctx?.close();
+    if (this.ctx) this.ctx.onstatechange = null;
+    if (this.ctx?.state !== 'closed') await this.ctx?.close();
     this.ctx = null;
     this.bootPromise = null;
   }

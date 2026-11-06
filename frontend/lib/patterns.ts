@@ -77,6 +77,25 @@ export type Patterns = Partial<Record<LaneId, Pattern>>;
 export type Locks = { lanes: LaneId[]; events: Partial<Record<LaneId, string[]>> };
 export const NO_LOCKS: Locks = { lanes: [], events: {} };
 
+/** Visual projection only; the engine still receives revisions over the original
+ * source so editing the bass cannot change the source-root kick tuning. */
+export function resolvedArrangement(source: TrackArrangement, patterns: Patterns): TrackArrangement {
+  const out = structuredClone(source);
+  for (const lane of LANE_IDS) {
+    const p = patterns[lane]; if (!p) continue;
+    if (laneSpec(lane).kind === 'drum') {
+      const hits = Array<number>(STEPS).fill(0);
+      for (const e of p.events) hits[e.step] = e.vel;
+      (out[lane] as number[]) = hits;
+    } else {
+      const notes = Array<TrackNote | null>(STEPS).fill(null);
+      for (const e of p.events as NoteEvent[]) notes[e.step] = { notes: [...e.notes], len: e.len, vel: e.vel, accent: e.accent };
+      (out[lane] as (TrackNote | null)[]) = notes;
+    }
+  }
+  return out;
+}
+
 export const isNoteEvent = (e: PatternEvent): e is NoteEvent => 'notes' in e;
 export const isFactoryRef = (p: Pattern | FactoryRef): p is FactoryRef => 'factory' in p;
 

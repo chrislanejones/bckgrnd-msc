@@ -613,6 +613,18 @@ impl Engine {
         self.master.reset();
     }
 
+    /// Offline end of score: stop new events, release notes, retain effect tails.
+    /// Unlike the interactive Stop command this deliberately does not reset returns.
+    pub fn end_score(&mut self) {
+        self.interrupt(reason::STOPPED);
+        self.release_overrides();
+        self.transport.stop();
+        for v in self.voices.iter_mut().flatten() {
+            v.release();
+        }
+        self.transitions.release();
+    }
+
     pub fn is_playing(&self) -> bool {
         self.transport.playing
     }
@@ -923,6 +935,8 @@ impl Engine {
 
     /// The latched echo throw (the older UI toggle). Kept alongside the Echo Throw
     /// gesture: the throw is engaged while this is on or any Echo Throw is held.
+    /// Deprecated compatibility latch. New hosts use tokened gestures. Kept for
+    /// existing consumers and pinned by perform_tests and tests/smoothing.rs.
     pub fn set_echo(&mut self, on: bool) {
         self.echo_latch = on;
         self.apply_overrides();
@@ -1654,6 +1668,8 @@ impl Engine {
 
         let mut sum_l = 0.0f32;
         let mut sum_r = 0.0f32;
+        let mut return_l = 0.0f32;
+        let mut return_r = 0.0f32;
         let coef = self.channel_coef;
         for c in self.channels.iter_mut() {
             let g = c.step_gain(any_solo, coef) * self.music;
@@ -1661,15 +1677,23 @@ impl Engine {
             c.bus.right *= g;
             // Sends tap post-fader so cutting a stem also cuts its echo. One call per
             // stem: the line advances once per sample, inside `Master::process`.
-            if c.send_now > 0.0 {
+            // Solo flushes shared history. Excluded channels may glide their dry
+            // output, but must not refill the freshly cleared returns.
+            if c.send_now > 0.0 && (!any_solo || c.audible(any_solo)) {
                 self.master.feed_send(c.bus.left, c.bus.right, c.send_now);
+            }
+            if !any_solo || c.audible(any_solo) {
+                return_l += c.bus.left;
+                return_r += c.bus.right;
             }
             sum_l += c.bus.left;
             sum_r += c.bus.right;
         }
-        self.master.process(
+        self.master.process_with_returns(
             (sum_l + fx_l) * gate + direct_l,
             (sum_r + fx_r) * gate + direct_r,
+            (return_l + fx_l) * gate + direct_l,
+            (return_r + fx_r) * gate + direct_r,
         )
     }
 

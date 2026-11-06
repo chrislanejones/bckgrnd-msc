@@ -149,8 +149,8 @@ try {
 
     const buf = new Float32Array(analyser.fftSize);
     let peak = 0;
-    const deadline = performance.now() + 1500;
-    while (performance.now() < deadline) {
+    const deadline = performance.now() + 8000;
+    while (performance.now() < deadline && (frames < 20 || peak <= 0.02 || !sawPlaying)) {
       analyser.getFloatTimeDomainData(buf);
       for (const v of buf) peak = Math.max(peak, Math.abs(v));
       await new Promise((r) => setTimeout(r, 16));

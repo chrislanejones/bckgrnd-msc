@@ -46,8 +46,9 @@ import {
   type Timing,
 } from './scenes';
 import { STEM_ORDER, STEPS } from './stems';
-import type { LaneId, ScenePatterns } from './patterns';
+import { LANE_IDS, type LaneId, type ScenePatterns } from './patterns';
 import { usePatternWorkspace } from './workspace';
+import { useProjectHistory } from './project-history';
 import type { LibraryResponse, Mix, StemId, TrackArrangement, TrackSummary } from './types';
 
 /** Master level a fresh session starts at, and what its reset returns to. */
@@ -145,6 +146,7 @@ export function useInstrument() {
   const [library, setLibrary] = useState<LibraryResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [track, setTrack] = useState<TrackArrangement | null>(null);
+  const [historyEpoch, setHistoryEpoch] = useState(0);
 
   const [playing, setPlaying] = useState(false);
   const [step, setStep] = useState(-1);
@@ -325,14 +327,14 @@ export function useInstrument() {
   useEffect(
     () =>
       engine.subscribe((t) => {
-        setPlaying(t.playing);
+        setPlaying(t.playing && engine.running);
         setStep(t.step);
       }),
     [],
   );
 
   // A fault on the audio thread is otherwise silent, so surface it.
-  useEffect(() => engine.onError(setError), []);
+  useEffect(() => engine.onError((message) => { setError(message); setPlaying(false); }), []);
 
   const songStep = step < 0 ? -1 : step % STEPS;
   const bar = songStep < 0 ? 0 : Math.floor(songStep / 16);
@@ -354,6 +356,7 @@ export function useInstrument() {
     try {
       engine.clearError();
       await engine.play(liveDeck);
+      setError(null);
       setPlaying(true);
     } catch (e) {
       setError((e as Error).message);
@@ -367,6 +370,7 @@ export function useInstrument() {
    * page load; it takes this click, or the play button.
    */
   function selectTrack(summary: TrackSummary) {
+    if (mixing) return;
     void (async () => {
       try {
         const arranged = await loadArrangement(summary.id);
@@ -378,6 +382,8 @@ export function useInstrument() {
         engine.setMuted(0, false);
         setTrack(arranged);
         resetScenesFor(arranged);
+        patternsRef.current.restore(arranged, {}, { lanes: [], events: {} }, true);
+        setHistoryEpoch((x) => x + 1);
         setBpmState(arranged.bpm);
         engine.setBpm(arranged.bpm);
         setSwingState(arranged.swing);
@@ -407,6 +413,26 @@ export function useInstrument() {
         setError((e as Error).message);
       }
     })();
+  }
+
+  /** A project opens stopped, even if this engine was already playing. */
+  async function openProject(p: Project) {
+    if (mixing) throw new Error('Open is available after the mix finishes.');
+    const arranged = await loadArrangement(p.trackId);
+    if (!arranged) throw new Error(`Missing source track: ${p.trackId}`);
+    cancelTempoGlide();
+    engine.panic();
+    releaseAllEffects();
+    setPlaying(false); setContinuous('off'); setLoopBarsState(0); engine.setLoop(0);
+    loadDeck(liveDeck, arranged);
+    setTrack(arranged);
+    resetScenesFor(arranged);
+    setHistoryEpoch((x) => x + 1);
+    setScenes(structuredClone(p.scenes));
+    setBpm(p.params['transport.bpm']); setSwing(p.params['transport.swing']);
+    setMaster(p.params['master.level']);
+    sendMix(p); showMix(p);
+    patternsRef.current.restore(arranged, p.patterns, p.locks);
   }
 
   /** Cue rewinds the live deck and starts that same deck. */
@@ -452,6 +478,8 @@ export function useInstrument() {
           setMixing(null);
           setTrack(arranged);
           resetScenesFor(arranged);
+          patternsRef.current.restore(arranged, {}, { lanes: [], events: {} }, true);
+          setHistoryEpoch((x) => x + 1);
           // The deck that just went live is no longer the cued one, so the panel has to
           // follow the swap or the waveforms will label the wrong tracks.
           setLiveDeck(incoming);
@@ -1060,7 +1088,8 @@ export function useInstrument() {
    * The engine's lease ends it if a release never arrives; holding renews it.
    */
   function holdEffect(kind: HeldKind) {
-    if (mixing || heldTokens.current[kind] !== null) return;
+    if (mixing) { setSceneStatus('Held effects available after mix'); return; }
+    if (heldTokens.current[kind] !== null) return;
     const token = nextToken.current++;
     heldTokens.current[kind] = token;
     setHeld((h) => ({ ...h, [kind]: true }));
@@ -1139,7 +1168,8 @@ export function useInstrument() {
           if (e.kind === EVENT.fillQueued) setSceneStatus(`Fill queued for bar ${e.a}`);
           if (e.kind === EVENT.fillStarted) setSceneStatus('Fill playing');
           if (e.kind === EVENT.fillCancelled) {
-            setSceneStatus(e.a === 10 ? 'Fill cancelled' : `Fill cancelled: ${REASON[e.a] ?? ''}`);
+            const message = e.a === 10 ? 'Fill cancelled' : `Fill cancelled: ${REASON[e.a] ?? ''}`;
+            setSceneStatus((previous) => previous.includes('cancelled') ? `${previous} · ${message}` : message);
           }
           if (e.kind === EVENT.fillRejected) setSceneStatus(`Fill not started: ${REASON[e.a] ?? 'refused'}`);
         }
@@ -1169,9 +1199,8 @@ export function useInstrument() {
   // ---- The project the screen describes -----------------------------------
 
   /**
-   * The current mix as a project. Nothing saves it yet; it is what the save
-   * indicator compares against the track as written, so the transport can say
-   * truthfully whether there is anything a reload would lose.
+   * Accepted composition only. Pending auditions and performance state stay out
+   * of persistence and export.
    */
   const project: Project | null = useMemo(() => {
     if (!track || !vols) return null;
@@ -1203,6 +1232,15 @@ export function useInstrument() {
   }, []);
 
   const edited = project && track ? !sameMusic(project, projectFromTrack(track)) : false;
+  const projectHistory = useProjectHistory(project, historyEpoch, !!mixing || !!patterns.preview || !!compare?.listening || isPending(sceneRequest), patterns.undoLabel, (p) => {
+    setBpm(p.params['transport.bpm']); setSwing(p.params['transport.swing']); setMaster(p.params['master.level']);
+    setScenes(structuredClone(p.scenes));
+    const lanes: ScenePatterns = {};
+    for (const lane of LANE_IDS) lanes[lane] = p.patterns[lane] ?? { factory: true };
+    requestLaunch('restoreScene', 0, p, lanes, 'now');
+    showMix(p);
+    patterns.restore(track!, p.patterns, p.locks);
+  });
   const activeLanes = activeScene ? scenes?.slots.find((s) => s.slot === activeScene.slot)?.patterns : undefined;
   const sceneModified =
     activeScene !== null &&
@@ -1213,6 +1251,7 @@ export function useInstrument() {
   const actions = useStable({
     togglePlay,
     selectTrack,
+    openProject,
     cue,
     setNextId,
     autoMix,
@@ -1292,7 +1331,7 @@ export function useInstrument() {
     // project
     project,
     edited,
-    patterns,
+    patterns: { ...patterns, ...projectHistory },
     // scenes
     scenes,
     activeScene: activeScene?.slot ?? null,

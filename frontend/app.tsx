@@ -51,8 +51,13 @@ const LOOP_OPTIONS = (param('performance.loopBars').options ?? [])
   .filter((o) => o.value !== 0)
   .map((o) => ({ value: o.value, label: o.label, aria: `Loop ${o.label} bar${o.value === 1 ? '' : 's'}` }));
 
+import { useProjects } from './lib/projects';
+import { ProjectMenu } from './ui/ProjectMenu';
+import { resolvedArrangement } from './lib/patterns';
+
 export function App() {
   const inst = useInstrument();
+  const projects = useProjects(inst);
   const { library, track, vols, error } = inst;
 
   const libraryDocked = useMedia(LIBRARY_DOCKED);
@@ -66,7 +71,8 @@ export function App() {
   const songStep = inst.songStep;
   const bar = inst.bar;
 
-  const sounding = useMemo(() => (track ? soundingMap(track) : null), [track]);
+  const soundingTrack = useMemo(() => track ? resolvedArrangement(track, inst.patterns.audible) : null, [track, inst.patterns.audible]);
+  const sounding = useMemo(() => (soundingTrack ? soundingMap(soundingTrack) : null), [soundingTrack]);
   const soloedBy = STEM_ORDER.filter((id) => inst.solo[id]);
   const stateOf = (id: StemId) =>
     stemState(id, {
@@ -128,6 +134,11 @@ export function App() {
         }
         return;
       }
+      const focus = event.target as HTMLElement | null;
+      if ((event.metaKey || event.ctrlKey) && !event.altKey && !focus?.closest('[data-editor]') && !/^(INPUT|TEXTAREA)$/.test(focus?.tagName ?? '')) {
+        if (event.key.toLowerCase() === 'z') { event.preventDefault(); event.shiftKey ? inst.patterns.redo() : inst.patterns.undo(); return; }
+        if (event.key.toLowerCase() === 's') { event.preventDefault(); void projects.save(event.shiftKey); return; }
+      }
       if (event.repeat || event.metaKey || event.ctrlKey || event.altKey) return;
       const target = event.target as HTMLElement | null;
       if (target && /^(INPUT|SELECT|TEXTAREA)$/.test(target.tagName)) return;
@@ -166,7 +177,7 @@ export function App() {
     if (libraryDocked) setLibraryOpen(false);
   }, [libraryDocked]);
 
-  if (error) {
+  if (error && (!library || !track || !vols)) {
     return (
       <main className="grid min-h-dvh place-items-center bg-bg p-6 text-fg">
         <div className="max-w-md text-center" role="alert">
@@ -202,12 +213,14 @@ export function App() {
       data-playing={inst.playing ? 'yes' : 'no'}
       data-library={libraryDocked ? 'docked' : libraryOpen ? 'open' : 'closed'}
     >
+      {error && <div className="audio-error" role="alert"><span>{error}</span><button onClick={() => void inst.togglePlay()}>Resume Audio</button></div>}
       <TransportBar
         track={track}
         playing={inst.playing}
         bar={bar}
         bpm={inst.bpm}
         edited={inst.edited}
+        projects={<ProjectMenu projects={projects} />}
         mixing={inst.mixing}
         liveDeck={inst.liveDeck}
         onTogglePlay={() => void inst.togglePlay()}
@@ -252,7 +265,7 @@ export function App() {
                 <DeckWave
                   key={side}
                   side={side}
-                  track={inst.liveDeck === side ? track : inst.cued}
+                  track={inst.liveDeck === side ? soundingTrack : inst.cued}
                   step={inst.liveDeck === side ? songStep : -1}
                   status={deckStatus(side)}
                   silenced={inst.liveDeck === side ? silenced : undefined}
@@ -268,9 +281,9 @@ export function App() {
             views={['perform', 'mix']}
             className="stems-panel"
           >
-            <div className="stems-toolbar">
+            <div className="stems-toolbar" title="Sound selection applies immediately; scenes use the timing selector.">
               <Segmented
-                label="Stem selection"
+                label="Stem selection · applies immediately"
                 hideLabel
                 value={inst.mask}
                 onPick={(m) => m !== 'custom' && inst.applyMask(m)}

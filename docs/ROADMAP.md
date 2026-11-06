@@ -168,6 +168,13 @@ Not done:
 
 ## Night 5: projects, undo, export, hardening
 
+**Implemented and exercised during Night 6 (2026-11-06):** versioned snapshots,
+revision-aware saving, previous/recovery copies, stopped reopen, portable imports,
+project-wide undo and immutable WAV export. Browser and static acceptance pass.
+A/B stays session-only; projects own scenes/patterns, track changes start new
+identities, and destructive actions wait through crossfades. Physical device
+reliability remains a separate gate. The original scope below is retained.
+
 - Save, reopen, rename and delete projects. Migrate project v1 and legacy presets
   forward without loss.
 - Undo and redo over project changes. Telemetry is never part of history.
@@ -186,6 +193,13 @@ Picked up from Night 3:
   shows during a mix and what carries over after it.
 
 ## Night 6: NativePHP packaging and MCP reconnection
+
+**Linux first; other platforms untested.** The candidate migrates to Desktop 2.4
+and a shared project renderer with two additional MCP tools. Installed Linux
+workflow and three-runtime fixtures pass. This is not full release signoff;
+[the current protocol](NIGHT6_PROTOCOL.md) and [checklist](RELEASE_CHECKLIST.md)
+track client, listening and publication evidence. Larger creative features above
+are deferred with scope, not silently marked implemented. Original plan:
 
 - Move from the abandoned `nativephp/electron` and `nativephp/laravel` to
   `nativephp/desktop`, and fix the leftover `dev.floor.stemmachine` app id.

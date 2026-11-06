@@ -196,6 +196,13 @@ try {
     Number(await vbar.getAttribute('aria-valuenow')) === 2 && (await onSteps('hat')).length === hitsBefore, await vbar.getAttribute('aria-valuenow'));
   await undo.click();
 
+  const beforeRepeat = await page.evaluate(() => window.__BCKGRND_PROJECT__().patterns);
+  await vbar.focus();
+  for (let repeat = 0; repeat < 8; repeat++) await page.keyboard.down('ArrowDown');
+  await page.keyboard.up('ArrowDown');
+  await undo.click();
+  check('velocity: held arrow is one undoable gesture', isDeepStrictEqual(await page.evaluate(() => window.__BCKGRND_PROJECT__().patterns), beforeRepeat));
+
   // ---- Several hits together ------------------------------------------------------
   await editor.getByRole('button', { name: 'Select bar' }).click();
   const selected = await editor.locator('.velocity-bar.is-selected').count();
@@ -318,8 +325,12 @@ try {
   await page.getByRole('button', { name: 'Capture current mix' }).click();
   await openEditor();
   check('editor: reopening keeps the bar being edited', (await editingLine()) === 'Closed hat · Bar 9 · Break', await editingLine());
+  // Project-wide undo now includes capturing the scene itself.
   await undo.click();
-  check('scene: after undo the edit is gone', (await pressed('hat', target)) === had);
+  check('scene: undo reverses the capture', !(await page.evaluate(() => window.__BCKGRND_PROJECT__().scenes.slots[3].patterns.hat)));
+  await redo.click();
+  await cell('hat', target).click();
+  check('scene: working edit can change without changing the capture', (await pressed('hat', target)) === had);
   await page.keyboard.press('Escape');
   await page.locator('.scene-slot').nth(3).locator('.scene-pad').click();
   await page.waitForFunction(() => document.querySelectorAll('.scene-slot')[3]?.getAttribute('data-state') === 'active', null, T);

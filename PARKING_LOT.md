@@ -1,6 +1,40 @@
 # Parking lot
 
-Found, verified against `old/src/lib/engine.ts`, and not fixed yet. Ordered by how much
+## Night 6 disposition — 2026-11-06
+
+The dated reports below remain history. Current release evidence is in
+[the Night 6 protocol](docs/NIGHT6_PROTOCOL.md); an implemented fix is not a
+claim of speaker listening or production deployment.
+
+| Report | Release disposition and evidence |
+|---|---|
+| ADSR release (#2), kick click (#3), clap offset/deep decay (#4/#5), brake floor (#7) | Correctness defects reproduced and fixed. Targeted Rust tests run at multiple sample rates; complete engine suite passes. |
+| Hat attack (#6), highpass Q (#8), delay damping (#9), saturation order (#10) | Intentional sound differences retained for this release. No speculative reference-matching changes; listening approval remains open. |
+| Solo echo residue | Reproduced excluded stems refilling shared returns during gain glide. Delay/reverb/throw input eligibility now follows solo; isolated regression passes. Speaker listening remains open. |
+| Waveforms and silent-bar labels | Resolved edited lanes now drive visuals, using the acknowledged sounding revision; pending edits remain distinct. Editor/audio checks pass. |
+| Separate undo; repeated velocity key entries | Unified project history, coherent scene restoration, one held-key gesture per undo; editor regressions pass. |
+| Held FX refusal; competing scene/fill messages | Explicit available-after-mix feedback and combined cancellation status; UI regressions cover both. |
+| Drawer/scene/held-pad overlap | November 5 stable layout supersedes older layout notes. Current five-width UI/editor checks pass; no redesign. Real two-finger touch remains untested. |
+| Kick root after bass edits | Policy: kick sub remains tied to the defined source arrangement root. Bass edits do not silently retune it. |
+| Legacy echo latch | Deprecated compatibility wrapper retained after consumer audit: worklet promotion/reset and engine/audio tests still use it. Never serialized. See NIGHT3_PROTOCOL. |
+| Short telemetry test; missing forward boundaries | Event readiness with bounded timeout; separate actual forward-playback Break/Drop worklet fixture passes. |
+| Native provider, package migration and PHP mismatch | NativePHP Desktop 2.4, real provider, PHP ≥8.4.1, packaged PHP 8.4.27; platform checks pass without bypass. |
+| Night 4 unoptimized WASM | Release build requires wasm-opt; measure each final artifact in the release manifest, not historical figures. |
+| Scene reverb decay stepping | Known limitation retained: feedback changes on the boundary; no delay-length jump. |
+
+Post-release creative scope: timing humanization and pitch variation need harmonic
+metadata; chord entry needs a chord editor; timed builds, phrase-ending fills,
+Drop + Crash, stutter, randomize mix and alternate mixer modes are deferred, not
+implemented. Existing velocity-only/rhythm-only/static/read-only labels stay.
+Sound-selection groups apply immediately and are labeled accordingly.
+
+Real-device iOS/Android startup, interruptions, locking, safe areas, two-finger
+gestures and touch screen readers remain untested. Old environment relocation
+and historical build notes below stay closed.
+
+## Historical reports
+
+Originally found against `old/src/lib/engine.ts`; see current dispositions above. Ordered by how much
 each one is likely to be heard.
 
 | # | Where | What's wrong | Audible effect |

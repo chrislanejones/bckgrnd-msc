@@ -82,6 +82,8 @@ export function usePatternWorkspace({
   generation: () => number;
 }) {
   const [working, setWorking] = useState<Patterns>({});
+  const [audible, setAudible] = useState<Patterns>({});
+  const staged = useRef<{ id: number; lanes: Patterns } | null>(null);
   const [locks, setLocks] = useState<Locks>(NO_LOCKS);
   const [undoStack, setUndoState] = useState<HistoryEntry[]>([]);
   const [redoStack, setRedoState] = useState<HistoryEntry[]>([]);
@@ -111,12 +113,15 @@ export function usePatternWorkspace({
   generationRef.current = generation;
   /** Lanes this session has sent to the engine; every revision carries all of them. */
   const touched = useRef(new Set<LaneId>());
+  const restoredTrack = useRef<string | null>(null);
 
   // A new track is a new project: nothing edited, nothing to undo. The engine
   // withdraws any revision staged for the old track itself (`track`).
   const trackId = track?.id;
   useEffect(() => {
+    if (restoredTrack.current === trackId) { restoredTrack.current = null; return; }
     setWorking({});
+    setAudible({}); staged.current = null;
     setLocks(NO_LOCKS);
     setUndo(() => []);
     setRedo(() => []);
@@ -126,6 +131,23 @@ export function usePatternWorkspace({
     touched.current = new Set();
   }, [trackId]);
 
+  /** Restore accepted composition only. A load clears previews and local history. */
+  function restore(source: TrackArrangement, lanes: Patterns, nextLocks: Locks, fresh = false) {
+    if (trackRef.current?.id !== source.id) restoredTrack.current = source.id;
+    trackRef.current = source;
+    previewRef.current = null;
+    setPreview(null);
+    workingRef.current = structuredClone(lanes);
+    setWorking(workingRef.current);
+    setLocks(structuredClone(nextLocks));
+    setUndo(() => []); setRedo(() => []);
+    touched.current = new Set(fresh ? [] : LANE_IDS);
+    if (fresh) {
+      staged.current = null; setAudible({});
+      statusRef.current = { state: 'none', requestId: 0 }; setStatus(statusRef.current);
+    } else stage(workingRef.current);
+  }
+
   /** Send `lanes` (the composition to hear) as one revision. */
   function stage(lanes: Patterns, extraLanes: LaneId[] = []) {
     const t = trackRef.current;
@@ -134,6 +156,8 @@ export function usePatternWorkspace({
     const set = LANE_IDS.filter((l) => touched.current.has(l)).map((l) => lanes[l] ?? factoryPattern(t, l));
     if (set.length === 0) return;
     const requestId = nextId++;
+    staged.current = { id: requestId, lanes: structuredClone(lanes) };
+    if (!engine.booted) setAudible(staged.current.lanes);
     // Before the first Play there is no engine to answer: the revision is held and
     // sent when it boots, so it is what playback starts with.
     const next: ChangeStatus = { state: engine.booted ? 'sending' : 'audible', requestId };
@@ -153,7 +177,10 @@ export function usePatternWorkspace({
           if (e.requestId !== current.requestId) continue;
           let next: ChangeStatus | null = null;
           if (e.kind === PATTERN_EVENT.queued) next = { ...current, state: 'queued', bar: e.a };
-          else if (e.kind === PATTERN_EVENT.applied) next = { state: 'audible', requestId: e.requestId };
+          else if (e.kind === PATTERN_EVENT.applied) {
+            next = { state: 'audible', requestId: e.requestId };
+            if (staged.current?.id === e.requestId) setAudible(staged.current.lanes);
+          }
           else if (e.kind === PATTERN_EVENT.cancelled) next = { state: 'cancelled', requestId: e.requestId, reason: e.a };
           else if (e.kind === PATTERN_EVENT.rejected) next = { state: 'rejected', requestId: e.requestId, reason: e.a };
           if (next) {
@@ -303,6 +330,7 @@ export function usePatternWorkspace({
     setUndo((u) => [...u.slice(-(HISTORY_LIMIT - 1)), { label: `Launch ${name}`, before, after: change }]);
     setRedo(() => []);
     const s = statusRef.current.state;
+    setAudible(structuredClone(next));
     if (send || hadPreview || s === 'sending' || s === 'queued') stage(next);
   }
 
@@ -338,6 +366,7 @@ export function usePatternWorkspace({
   return useMemo(
     () => ({
       working,
+      audible,
       locks,
       status,
       preview,
@@ -360,10 +389,11 @@ export function usePatternWorkspace({
       toggleLaneLock,
       toggleEventLock,
       stageNow,
+      restore,
     }),
     // Functions read refs or the state listed; recomputed when any of it changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [working, locks, status, preview, undoStack, redoStack, track, liveDeck],
+    [working, audible, locks, status, preview, undoStack, redoStack, track, liveDeck],
   );
 }
 

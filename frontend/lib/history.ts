@@ -25,9 +25,16 @@ const LIMIT = 500;
 
 class EditHistory {
   private list: Edit[] = [];
+  private gestures = new Set<string>();
+  private listeners = new Set<() => void>();
+  get active() { return this.gestures.size > 0; }
+  begin(id: string) { this.gestures.add(id); }
+  subscribe(fn: () => void) { this.listeners.add(fn); return () => { this.listeners.delete(fn); }; }
 
   /** Record a finished gesture. A gesture that ended where it started is not an edit. */
   record(id: string, from: number, to: number): void {
+    this.gestures.delete(id);
+    for (const listener of this.listeners) listener();
     if (!Number.isFinite(from) || !Number.isFinite(to) || Math.abs(from - to) < 1e-9) return;
     this.list.push({ id, from, to, at: Date.now() });
     if (this.list.length > LIMIT) this.list.splice(0, this.list.length - LIMIT);

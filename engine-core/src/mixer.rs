@@ -718,6 +718,18 @@ impl Master {
     /// summed stem buses. Per-stem sends must already have been pushed via
     /// [`Master::feed_send`] for this sample; the wet taps are read once here.
     pub fn process(&mut self, left: f32, right: f32) -> (f32, f32) {
+        self.process_with_returns(left, right, left, right)
+    }
+
+    /// A solo can glide excluded dry channels without feeding their residual signal
+    /// into shared echo or room returns after the flush.
+    pub fn process_with_returns(
+        &mut self,
+        left: f32,
+        right: f32,
+        return_left: f32,
+        return_right: f32,
+    ) -> (f32, f32) {
         // The filter and EQ glide at control rate; see `control_tick`.
         if self.control == 0 {
             self.control_tick();
@@ -737,7 +749,7 @@ impl Master {
         let (wet_l, wet_r) = (wet_l * PING_PONG_GAIN, wet_r * PING_PONG_GAIN);
         let throw_gain = self.throw.next();
         let throw = if throw_gain > 0.0 {
-            let (t_l, t_r) = self.echo_hp.process(left, right);
+            let (t_l, t_r) = self.echo_hp.process(return_left, return_right);
             0.5 * (t_l + t_r) * throw_gain
         } else {
             0.0
@@ -746,7 +758,7 @@ impl Master {
         self.send_acc = 0.0;
 
         // --- Reverb send, tapped off the summed buses before any master processing.
-        let (send_l, send_r) = self.verb_pre.process(left, right);
+        let (send_l, send_r) = self.verb_pre.process(return_left, return_right);
         let (verb_l, verb_r) = self.verb.process(send_l, send_r);
 
         // --- Rumble filter, taking the sum and every wet return together. The returns

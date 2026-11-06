@@ -2,16 +2,16 @@
   "name": "bckgrnd-msc",
   "private": true,
   "type": "module",
-  "description": "bckgrnd-msc — stem machine UI. Vite + React, rendering into the NativePHP webview.",
+  "description": "bckgrnd-msc \u2014 stem machine UI. Vite + React, rendering into the NativePHP webview.",
   "packageManager": "pnpm@10.26.0",
   "engines": {
-    "node": ">=20"
+    "node": ">=22"
   },
   "scripts": {
-    "build:engine": "cd engine-core && wasm-pack build --target web --release --out-dir ../public/wasm",
+    "build:engine": "node scripts/build-engine.mjs",
     "build:worklet": "node scripts/build-worklet.mjs",
-    "build:app": "vite build",
-    "build:app:static": "VITE_STATIC=1 vite build --mode static",
+    "build:app": "node scripts/build-shared.mjs && node scripts/build-manifest.mjs && vite build",
+    "build:app:static": "node scripts/build-app-static.mjs",
     "build": "pnpm run build:worklet && pnpm run build:app",
     "build:static": "node scripts/build-static.mjs",
     "build:all": "pnpm run build && pnpm run build:static",
@@ -20,13 +20,15 @@
     "verify:audio": "node tools/verify-audio.mjs",
     "verify:static": "node tools/verify-static.mjs",
     "serve": "php artisan serve --host=0.0.0.0 --port=8080",
-    "serve:static": "php -S 0.0.0.0:8090 -t public",
-    "dev": "pnpm run build:worklet --watch & vite",
+    "serve:static": "php -S 0.0.0.0:8090 -t dist",
+    "dev": "pnpm exec concurrently -k \"node scripts/build-worklet.mjs --watch\" \"vite\"",
     "verify:ui": "node tools/verify-ui.mjs",
     "verify:editor": "node tools/verify-editor.mjs",
     "check:contract": "node tools/check-contract.mjs",
     "check:scenes": "node tools/check-scenes.mjs",
-    "check:editing": "node tools/check-editing.mjs"
+    "check:editing": "node tools/check-editing.mjs",
+    "verify:projects": "node tools/verify-projects.mjs",
+    "build:shared": "node scripts/build-shared.mjs"
   },
   "dependencies": {
     "lucide-react": "^0.510.0",

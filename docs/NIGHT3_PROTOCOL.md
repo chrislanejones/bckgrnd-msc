@@ -302,7 +302,10 @@ playing, 8 already playing, 9 stale generation, 10 cancelled by the user.
   sent by the UI, which uses gesture tokens for Echo Throw. The engine still accepts
   it (verify-audio drives it directly): it is combined with any held Echo Throw, is
   not leased, survives Stop and track loads, and Release FX and Panic turn it off.
-  Removing it is in PARKING_LOT.md.
+  Night 6 retains this **deprecated compatibility wrapper**: the worklet promotion
+  path still resets it, and audio/engine compatibility fixtures call it. Remove
+  the host message, wrapper and documentation together only after those consumers
+  migrate. New callers use leased gesture tokens. It is never project data.
 
 ## Silence, solo and transition sounds
 

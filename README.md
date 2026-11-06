@@ -7,6 +7,12 @@ instrumental keeps playing, so you build the track yourself while it runs.
 
 **Live:** https://bckgrnd-msc.netlify.app
 
+**Night 6 candidate:** browser projects, recovery, unified undo and WAV export;
+NativePHP Desktop 2.4 on Linux; saved-project rendering in MCP. Release evidence
+and remaining acceptance gates are in [NIGHT6_PROTOCOL.md](docs/NIGHT6_PROTOCOL.md)
+and the [release checklist](docs/RELEASE_CHECKLIST.md). Windows, macOS and real
+phones are untested. Pushed source is not deployment evidence.
+
 The DSP is Rust compiled to WebAssembly, running inside an `AudioWorklet`. The music —
 song form, note grid, swing, stem mix — is PHP. React draws the meters and sends intent,
 and holds no audio state of its own.
@@ -21,6 +27,10 @@ in **[docs/archive/](docs/archive/README.md)** rather than deleted — each one 
 went stale about it.
 
 ## Quick start
+
+Build environment: PHP ≥8.4.1, Node ≥22, pnpm 10.26, Rust, wasm-pack and wasm-opt.
+The installed desktop app includes PHP and all audio assets; playback and WAV
+export need none of these developer tools.
 
 ```bash
 ./start.sh          # build what's stale, start what isn't running
@@ -61,7 +71,9 @@ netlify deploy --dir dist --no-build --prod
 
 `build:netlify` builds the engine, the app and the static export, then puts only what a
 static host should serve into `dist/`. Saved presets need Laravel, so they aren't
-available on the live site. Nothing in the UI uses them yet.
+available on the live site. Projects use browser IndexedDB on both Laravel and
+static sites and the desktop's application-data folder through its native adapter.
+Portable project files use the same format in all three runtimes.
 
 The Netlify response headers block framing the app (clickjacking), embedded
 plugin objects and cross-origin base URLs. The policy leaves JavaScript,
@@ -271,7 +283,36 @@ static build can only vary the tracks as written, and says so for a phrase you'v
 changed.
 
 A scene captured after editing remembers those lanes and brings them back when it
-launches. Nothing is saved to a file yet (Night 5).
+launches. Save the project to retain them. The waveforms and stem activity follow
+the accepted revision actually sounding; queued edits stay identified in the editor.
+
+## Projects and desktop
+
+Click the revision-aware save status to open Projects. Save, Save As, reopen a
+saved/recovery/previous revision, import or download a `.bckgrnd.json` file, and
+export WAV. Open always starts stopped. Recovery never reruns an export. A failed
+save keeps the working composition and prior committed copy. Browser storage is
+local to its origin; explicitly import a downloaded project into the desktop.
+
+Projects own their patterns and scenes. A track change starts a new identity.
+Open/New/Import wait for an active crossfade; asynchronous writes and exports
+capture their project and revision before starting. A/B is session-only: Keep
+current or capture a scene to preserve it. Held gestures and unaccepted previews
+are excluded. Full → Drop → Cancel restores the original mix and replaced lanes,
+preserves playback, and saving records that restored composition.
+
+The musical contract is v3, wrapped in snapshot v1 with renderer and source hashes.
+Unknown newer versions are refused. Old imports leave the input file untouched.
+Exports use a fresh isolated engine and an immutable revision, independently of
+live playback. Project-wide Undo includes mix, scene and pattern changes.
+
+Linux development: `composer native:install`, then `composer dev:desktop`
+(`php artisan native:run --installer=pnpm`). Build with `php artisan native:build linux`.
+Install the generated tar archive using `sh scripts/install-linux.sh /path/to/archive.tar.xz`,
+or install the `.deb` with the system package manager. Launch **bckgrnd-msc** from
+the desktop menu. Manual installs retain previous versions and project data.
+Automatic updates are disabled. See [the native inventory](docs/NIGHT6_INVENTORY.md)
+for storage paths, security settings and candidate limitations.
 
 ## The decks
 
@@ -428,15 +469,20 @@ files on disk ([ADR-002](docs/adr/002-laravel-runs-stateless.md)).
 | `pnpm run verify:editor` | The pattern editor in Chromium: edit bar 9 while bar 2 plays, undo, duplicate, a bass note, humanize and variation preview/keep/revert, scenes with lanes, the phone's eight-step view. |
 | `pnpm run verify:audio` | Drives the real worklet in Chromium and asserts audio, pattern edits landing on the bar included. |
 | `pnpm run verify:static` | The same, against the static build, plus no API calls and the variation catalog. |
+| `pnpm run verify:projects` | Save/reopen/export, Cancel restoration, failure, recovery, migrations and preview exclusion. |
+| `node tools/verify-transitions.mjs` | Actual forward playback across Break and Drop, with bounded event conditions. |
+| `node tools/verify-resume.mjs` | Simulated audio interruption and failed/successful resume. |
+| `node tools/verify-native.mjs` | Installed Linux/X11 file dialogs, persistence, close failures and export cancellation. See release protocol for its test-only environment variables. |
+| `NATIVE_CDP=http://127.0.0.1:9224 node tools/verify-render-parity.mjs` | Actual browser/native export workers against MCP at identical settings. |
 | `php tools/check-arrangement.php` | The 16-bar form. |
 | `php tools/compare-with-original.php tools/reference.json` | Parity with `old/`. |
 
 `verify:audio` taps the worklet through an `AnalyserNode` into a zero-gain sink. It proves
 correct samples leave the worklet. It does not prove audio reaches a speaker, and it can't
 see the audio thread's console — a throw inside `process()` is swallowed by the browser,
-which is why there's an explicit error channel to the UI. It also can't jump the
-playhead, so the transitions and most of the percussion are covered by the Rust tests
-only.
+which is why there's an explicit error channel to the UI. `verify-transitions`
+now covers Break and Drop during actual forward playback; a seek would suppress
+the transition sounds. The telemetry gate waits for signal/events within a bound.
 
 The browser checks look for Chromium in Playwright's cache. Set
 `PLAYWRIGHT_CHROMIUM=/path/to/chrome` to use another one.
@@ -449,14 +495,15 @@ whether sound came out. See [docs/NIGHT6_INVENTORY.md](docs/NIGHT6_INVENTORY.md)
 meters and the last error.
 
 The engine's defects found and fixed during the port, and the audio notes behind them,
-are written up in [HANDOFF.md](HANDOFF.md). Open items are in
+are recorded in [the current handoff](docs/sessions/2026-11-06-night6-release.md). Open items are in
 [PARKING_LOT.md](PARKING_LOT.md).
 
 ## Coming next: a mobile app
 
 I'm planning to package this as a phone app with NativePHP. The desktop side of
-NativePHP (`nativephp/laravel`, `nativephp/electron`) is already in `composer.json`; mobile
-is a separate package and isn't set up yet. The open questions are in
+NativePHP (`nativephp/desktop`) is in `composer.json`; mobile is a separate package
+and isn't set up yet. Device audio, interruptions, screen locking, safe areas,
+two-finger gestures and touch screen readers remain untested. The open questions are in
 [PARKING_LOT.md](PARKING_LOT.md).
 
 ## `old/`

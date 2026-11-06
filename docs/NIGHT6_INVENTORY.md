@@ -1,115 +1,77 @@
-# Night 6 inventory: NativePHP, assets, MCP, and an early audio probe
+# NativePHP release inventory — 2026-11-06
 
-Taken on Night 1 (11-03-2026) so that packaging night isn't the first time these
-assumptions get tested. Each item says what was checked and how, and what is still
-unknown.
+Linux x64 is the first target. Windows and macOS are **not tested**. The original
+[Night 1 inventory](archive/NIGHT6_INVENTORY_NIGHT1.md) is historical evidence,
+including its bare Electron/Xvfb probe; it is not installed-app certification.
+Current results and remaining gates are in [NIGHT6_PROTOCOL.md](NIGHT6_PROTOCOL.md).
 
-## Summary
+| Area | Current candidate |
+|---|---|
+| Framework | NativePHP Desktop 2.4.0; old Electron/Laravel packages removed |
+| PHP | Manifest `^8.4.1`; system 8.4.26; actual packaged executable 8.4.27; no platform-check bypass |
+| JS tools | Node ≥22 for app/desktop development; tested 24.21.0; pnpm 10.26.0, including generated Electron runtime |
+| Runtime | Electron 40.10.6, sandboxed renderer, context isolation, web security, Node integration off |
+| Bootstrap | `NativeAppServiceProvider`: window, menus, persistent directories, preserved legacy imports |
+| Identity | `com.chrislanejones.bckgrndmsc`; product bckgrnd-msc; original favicon used for the app icon |
+| Update policy | Automatic updater disabled; immutable manual installations retain prior versions |
+| Storage | Laravel redirects `storage_path()` into application data; this machine resolves `/home/clj/.config/bckgrnd-msc/storage` |
+| Projects | `storage/app/projects`, current/previous/recovery snapshots, locked atomic writes; same format as browser/MCP |
+| Legacy identity | Existing known old-identity project/preset JSON is copied into `app/legacy-imports`; originals/copies never overwritten |
+| Exports | Offline worker renders snapshot v1/project v3; chooser publishes WAV atomically; last export can be revealed |
+| Closing | Renderer confirms save before PHP shuts down; failed save stays open; running export offers keep-open or cancel-and-quit |
+| Artifacts | Unsigned Linux `.tar.xz` and `.deb`; tar installation exercised. `.deb` installation needs a separate package-manager test |
 
-| Area | State | Blocks Night 6? |
-|---|---|---|
-| NativePHP packages | `nativephp/electron` 1.3.0 and `nativephp/laravel` 1.3.1, both **abandoned** in favor of `nativephp/desktop`. | Yes: migrate first. |
-| NativePHP provider | `config/nativephp.php` names `App\Providers\NativeAppServiceProvider`, which **does not exist**. Nothing opens a window. | Yes |
-| App identity | `app_id` is still `dev.floor.stemmachine`. The description is NativePHP's placeholder. | Yes, before the first signed build |
-| PHP version | `composer.lock` needs PHP ≥ 8.4.1 (symfony 8.x), but `composer.json` says `^8.3`. `nativephp/php-bin` ships 8.3, 8.4 and 8.5. | Yes: pick 8.4 and say so in `composer.json` |
-| Engine build | `wasm-pack` downloads `wasm-opt` (binaryen) at build time. Without it the wasm is 238 KB instead of ~201 KB. | No, but the release build must be optimized |
-| Asset paths | Absolute from the origin root: `/build/…`, `/wasm/…`, `/library/…`. NativePHP serves the app at the root of a `127.0.0.1` origin, so they resolve. | No |
-| Runtime directories | `storage/framework/views` is gitignored. A fresh checkout returned 500 on `/` until it existed. Now created by `start.sh`. NativePHP sets its own storage path, so check it once packaged. | Check |
-| Presets disk | `config/bckgrnd.php` says the bundle points `BCKGRND_PRESET_DISK` at app data. No code does that yet (it would live in the missing provider). | Yes, for Night 5's projects |
-| Audio in an Electron shell | **Probe passes** in Electron 32.3.3 (Chrome 128) on a `127.0.0.1` origin, with no user gesture. See below. | No |
-| MCP engine | In sync: vendored from `bd79af5`, and nothing in `engine-core/`, `app/Support/Music/` or `public/library/` has changed since. | No |
-| MCP presets | A different shape (render settings for mixing under a voice). The mapping to project v1 is in `contracts/README.md`. | Night 6 work |
+## Build and install
 
-## NativePHP
+Use locked dependencies: `composer install`, `pnpm install --frozen-lockfile`, then
+`composer native:install`. The installer preserves the reviewed Composer scripts.
+`composer dev:desktop` invokes the documented `native:run --installer=pnpm`.
+`php artisan native:build linux` builds optimized WASM, app, worklet and desktop.
+Use `sh scripts/install-linux.sh /absolute/path/to/archive.tar.xz` for a per-user
+installation and desktop launcher. It installs under an archive-hash directory,
+so an update cannot rewrite a running executable. No developer tools are required
+for ordinary installed playback or WAV export.
 
-**Installed** (from `composer.lock`): `nativephp/electron` 1.3.0, `nativephp/laravel`
-1.3.1, `nativephp/php-bin` 1.2.0. Composer marks the first two abandoned with
-`nativephp/desktop` as the replacement. The NativePHP Electron app they bring
-(`vendor/nativephp/electron/resources/js/package.json`) pins `electron ^32.2.7`.
+The focused, fail-closed `scripts/prepare-native.mjs` compatibility patch is pinned
+to Desktop 2.4.0. It supports pnpm, a sandbox-compatible narrow preload, validated
+main-frame close IPC, single-instance ownership, persistent bootstrap caches and
+confirmed shutdown before server termination. Review it when updating NativePHP.
+It replaces the upstream AppImage target: its generated launcher added
+`--no-sandbox`. That diagnostic artifact is **not a supported distributable**.
 
-**`config/nativephp.php`:**
+The Linux test host is Debian 13 under WSL2/WSLg. Its minimal desktop lacked an XDG
+file chooser portal. A temporary portal/GTK backend enabled native-dialog testing;
+this is a host dependency, not a renderer security exception. Normal desktop
+distributions should supply their desktop's chooser backend. No sandbox, context
+isolation or web-security flag was disabled.
 
-- `provider` → `App\Providers\NativeAppServiceProvider`: missing. NativePHP calls this
-  to open the window (`Window::open()`), so `php artisan native:serve` has nothing to
-  show. It is also where `BCKGRND_PRESET_DISK` should be pointed at app data.
-- `app_id` → `dev.floor.stemmachine`, from when the app was called FLOOR.
-- `description` and `website` are NativePHP's placeholders.
-- `updater.enabled` defaults to true with the `spaces` provider and no credentials.
-  Turn it off until there is somewhere to publish.
-- `prebuild` runs `pnpm run build:engine` and `pnpm run build`, so the packaging
-  machine needs Rust, `wasm-pack`, and network access for `wasm-opt`.
-- `cleanup_exclude_files` lists `build`. Confirm on Night 6 that this means a root
-  `build/` and not `public/build/`. Excluding the latter would ship an app with no
-  frontend.
+## Required packaged files
 
-**Stale note:** PARKING_LOT says `.env` and `.env.static` are still in
-`floor-desktop/`. That directory no longer exists. The static build no longer needs
-`.env.static` either, because `build:app:static` sets `VITE_STATIC=1` itself, and
-`verify:static` passes without it.
+- `resources/build/php/php` and Laravel's production vendor dependencies.
+- `resources/build/app/public/build/assets`: app/CSS and hashed export worker.
+- `public/build/engine-worklet.js`, `public/wasm`, `public/library`, `public/shared`.
+- `contracts/` and `public/build-manifest.json`: commit, renderer/schema versions,
+  frontend/worklet/engine/library/contracts/shared content hashes.
+- Native preload and product metadata/icon. The narrow file endpoint validates
+  a native token and origin, accepts no arbitrary caller-provided file paths, and
+  obtains output/input locations through native dialogs.
 
-## Assets the shell must serve
+Build cleanup excludes development sources, nested environment files, project
+data, logs, tests and maps while retaining all runtime assets. Inspect the final
+archive and installed executable, not only `linux-unpacked` or the dev window.
+The manifest mismatch error instructs reload/reinstall instead of silent playback.
 
-| Path | Built by | Notes |
-|---|---|---|
-| `/build/assets/app.js`, `app.css` | `pnpm run build` | Fixed names. The Blade shell cache-busts with the file's mtime (ADR-010). |
-| `/build/engine-worklet.js` | `pnpm run build:worklet` | Loaded by `audioWorklet.addModule`, with `?v=` from `__BUILD_ID__`. |
-| `/wasm/bckgrnd_msc_engine_bg.wasm` | `pnpm run build:engine` | Fetched on the main thread and handed to the worklet as bytes. |
-| `/library/*.json` | `tools/export-library.php` | The static fallback. The API is preferred when Laravel runs. |
-| `/probe.html`, `/probe.js` | committed | The audio probe below. Ships with the app on purpose. |
-| `contracts/parameters.json` | committed | Read by PHP at runtime (`App\Support\Project\Contract`), and bundled into the JS at build time. |
+## Verification boundaries
 
-## Early audio probe
+`tools/verify-native.mjs` drives the installed app through native X11 file/close
+actions. Test-only variables: `NATIVE_BINARY`, `XDOTOOL`, optional `BWRAP` (hides
+the checkout), optional `BROWSER_PROJECT`, and `NATIVE_DEBUG_PORT`. It needs
+Playwright, a C compiler/X11 headers, xdotool and xclip on the test host; none ships
+as an application requirement. CDP is enabled only by test launch arguments.
 
-`public/probe.html` boots the real worklet and wasm, plays Warehouse for 1.5 s, and
-reports what the shell gave it and what came out. Open `/probe.html` and press Run,
-or add `?auto=1` where audio may start without a gesture. The verdict is in the page
-title (`probe: pass` / `probe: fail`) and in `window.__PROBE_RESULT__`.
-
-| Shell | Origin | Result |
-|---|---|---|
-| Chromium (Playwright build 1243), headless | `http://127.0.0.1:8080` (Laravel) | pass: peak 0.78, stereo, telemetry ~27 Hz |
-| Chromium, headless | `http://127.0.0.1:8090` (static) | pass |
-| **Electron 32.3.3 / Chrome 128**, Linux under Xvfb, no sandbox | `http://127.0.0.1:8080` | **pass** with no user gesture: secure context, worklet, sound, stereo, 40 telemetry frames in 1.5 s, master meter agrees with the output |
-| The app itself in Electron 32.3.3 | `http://127.0.0.1:8080/` | Renders: three-column layout, 8 stems, 18 tracks, no console errors |
-
-What the probe can't tell yet:
-
-- **The real NativePHP shell.** The Electron run was a bare `BrowserWindow` on the same
-  kind of origin NativePHP uses, not `php artisan native:serve`, which can't open a
-  window until the provider exists.
-- **A packaged build** (`native:build`). Run the probe inside one on Night 6.
-- **A speaker.** The analyser taps the signal before the output device. Xvfb has no
-  audio device ("audio outputs listed: 0"). Someone has to listen to the probe on a
-  real machine. It plays at a quarter of full level unless `?mute` is set.
-- **macOS and Windows**, and **phones**. The mobile questions stay separate (see the
-  PARKING_LOT section on the NativePHP mobile app).
-
-## MCP companion (`bckgrnd-msc-mcp`)
-
-- **How it syncs:** `scripts/sync-engine.mjs` copies `public/wasm/*` and
-  `public/library/*.json` from a built checkout into `vendor/`, and stamps
-  `vendor/SOURCE.json` with the commit and a dirty flag. It never builds Rust.
-- **Pinned at:** `bd79af5` (the 10-21 package update). `git log bd79af5..HEAD --
-  engine-core app/Support/Music public/library` is empty, so the MCP plays the same
-  engine and tracks as `main` today.
-- **The engine API it calls:** `initSync`, `new Engine(sampleRate)`,
-  `load_track_wasm`, `set_muted_index`, `set_volume_index`, `play`, `process`, `free`.
-  Night 1 changed none of these. The telemetry frame grew from 12 to 15 values, but
-  that frame belongs to the worklet, which the MCP doesn't use.
-- **Its presets:** `MixSettings` (track, music level, loudness, ducking, cut stems,
-  fades, mastering), saved in `~/.config/bckgrnd-msc/presets`. Only `track` and `cut`
-  are musical data. Night 6: have `sync-engine.mjs` copy `contracts/` too, read and
-  write the musical part as a project v1, and test the round trip in both repos.
-- **Its wasm** is the optimized build (200,907 bytes). Keep releasing from an
-  optimized engine build.
-
-## Night 6 order of work (proposed)
-
-1. Move to `nativephp/desktop`. Add `NativeAppServiceProvider` (window, preset disk).
-   Fix `app_id` and the description. Turn off the updater.
-2. Settle PHP 8.4 for the bundle and in `composer.json`.
-3. `native:serve`, then the probe and the UI checks inside it.
-4. `native:build` for one desktop platform, then the probe inside the package, and
-   someone listens.
-5. Resync the MCP and adopt the project contract there.
-6. Mobile compatibility check, reported separately.
+`NATIVE_CDP=... node tools/verify-render-parity.mjs` compares the actual packaged
+export worker with browser and MCP. `verify-resume.mjs` checks simulated
+interruption; `/probe.html` measures stereo, signal and meter agreement in the
+installed origin. Actual speaker listening, physical sleep/resume and output-device
+changes require separate human/device evidence. Narrow browser layouts do not
+certify phone audio or accessibility. The release checklist keeps those gates visible.

@@ -18,7 +18,9 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const libraryDir = resolve(root, 'public/library');
+const dist = resolve(root, 'dist');
+rmSync(dist, { recursive: true, force: true });
+mkdirSync(dist);
 
 function run(command, args, label) {
   process.stdout.write(`[static] ${label}\n`);
@@ -49,13 +51,13 @@ run('pnpm', ['run', 'build:app:static'], 'building the app in static mode');
 mkdirSync(resolve(root, 'public'), { recursive: true });
 // Stamp the bundle URLs with this build, as the Blade shell does with the file date:
 // the names are fixed, so without a key the browser keeps an old app.js.
-const stamp = Date.now().toString(36);
+const stamp = JSON.parse(readFileSync(resolve(dist, 'build-manifest.json'), 'utf8')).buildId;
 const shell = readFileSync(resolve(root, 'frontend/static.html'), 'utf8').replace(
   /(\/build\/assets\/app\.(?:js|css))"/g,
   `$1?v=${stamp}"`,
 );
-writeFileSync(resolve(root, 'public/index.html'), shell);
-console.log('[static] wrote public/index.html');
+writeFileSync(resolve(dist, 'index.html'), shell);
+console.log('[static] wrote dist/index.html');
 
 // 3. Sanity check: the engine and the frontend bundle must already exist, or the
 //    result is a shell that renders nothing.
@@ -77,12 +79,11 @@ if (missing.length) {
 
 // 4. Assemble dist/: only what a static host should serve. public/ also holds
 //    Laravel's index.php, which a static host would hand out as a download.
-const dist = resolve(root, 'dist');
-rmSync(dist, { recursive: true, force: true });
-mkdirSync(dist);
-for (const entry of ['index.html', 'favicon.svg', 'build', 'wasm', 'library']) {
+cpSync(resolve(root, 'public/build/engine-worklet.js'), resolve(dist, 'build/engine-worklet.js'));
+for (const entry of ['favicon.svg', 'wasm', 'library', 'shared']) {
   cpSync(resolve(root, 'public', entry), resolve(dist, entry), { recursive: true });
 }
+cpSync(resolve(root, 'contracts'), resolve(dist, 'contracts'), { recursive: true });
 console.log('[static] assembled dist/');
 
-console.log('[static] ready — serve dist/ (or public/) with any static file server');
+console.log('[static] ready — serve dist/ with any static file server');

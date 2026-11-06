@@ -201,7 +201,7 @@ impl Transport {
                 self.stop();
                 return true;
             }
-            self.rate = (1.0 - p).max(0.12).powf(1.7);
+            self.rate = (1.0 - p).powf(1.7).max(0.12);
         } else if self.spin_from > 0.0 {
             self.spin_from += 1.0;
             let p = self.spin_from / (SPIN_SECONDS * self.sample_rate);
@@ -252,6 +252,19 @@ impl Transport {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn braking_never_goes_below_the_declared_rate_floor() {
+        let mut t = super::Transport::new(120.0, 0.0, 48000.0);
+        t.start();
+        t.brake();
+        while t.playing {
+            t.tick_gesture();
+            if t.playing {
+                assert!(t.rate >= 0.12, "rate {}", t.rate);
+            }
+        }
+    }
     use super::*;
 
     #[test]

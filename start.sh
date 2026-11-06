@@ -6,7 +6,7 @@
 #   :8080  Laravel. The frontend plus a live /api that computes the track library
 #          and song form per request, and writes saved presets to disk.
 #   :8090  Static files only. No PHP in the request path; the library is read from
-#          public/library/*.json. This is the shape you would deploy to a CDN.
+#          dist/library/*.json. This is the shape you would deploy to a CDN.
 #
 # Both are bound to 0.0.0.0, and neither needs anything beyond the build outputs.
 #
@@ -85,16 +85,21 @@ if stale public/wasm/bckgrnd_msc_engine_bg.wasm engine-core/src engine-core/Carg
   pnpm run build:engine
 fi
 
+if stale public/library/index.json app/Support/Music tools/export-library.php; then
+  echo "==> exporting the track library"
+  php tools/export-library.php public/library
+fi
+
 # The worklet bundles the wasm glue, so a rebuilt engine means a rebuilt app too.
-if stale public/build/assets/app.js frontend public/wasm vite.config.ts tsconfig.json \
+if stale public/build/assets/app.js frontend contracts scripts public/wasm public/library vite.config.ts tsconfig.json \
   || stale public/build/engine-worklet.js frontend/worklets public/wasm scripts/build-worklet.mjs; then
   echo "==> pnpm run build"
   pnpm run build
 fi
 
-if stale public/library/index.json app/Support/Music tools/export-library.php; then
-  echo "==> exporting the track library"
-  php tools/export-library.php public/library
+if stale dist/index.html frontend contracts scripts public/wasm app/Support/Music tools/export-variations.php; then
+  echo "==> building the independent static site"
+  pnpm run build:static
 fi
 
 # --- Laravel.
@@ -113,7 +118,7 @@ if up "$STATIC_PORT"; then
   echo "already up: http://localhost:$STATIC_PORT"
 else
   echo "==> starting the static server on :$STATIC_PORT"
-  setsid nohup php -S "0.0.0.0:$STATIC_PORT" -t public \
+  setsid nohup php -S "0.0.0.0:$STATIC_PORT" -t dist \
     >/tmp/floor-static.log 2>&1 </dev/null &
 fi
 

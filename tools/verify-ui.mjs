@@ -138,7 +138,7 @@ try {
     check('the soloed stem says Solo', (await stemState(page, 'bass')).state === 'soloed');
     check(
       'the save status says the mix is edited',
-      (await page.locator('.save-status').textContent())?.includes('not saved') === true,
+      /^Unsaved · r\d+$/.test((await page.locator('.save-status').textContent()) ?? ''),
     );
     await page.getByRole('button', { name: 'Solo Bass' }).click();
 
@@ -772,6 +772,18 @@ try {
       await page.waitForFunction(() => document.querySelector('.fill-button')?.getAttribute('data-state') === 'idle', null, T);
       check('fill: then it returns to idle', (await fillButton.textContent()) === 'Drum fill' && !(await fillButton.isDisabled()));
 
+      await nextBar();
+      await page.getByRole('button', { name: 'Launch Full', exact: true }).click();
+      await fillButton.click();
+      await waitText('.fill-button', /^Fill · Bar \d+$/);
+      await page.getByRole('button', { name: 'Stop the track', exact: true }).click();
+      await page.waitForFunction(() => {
+        const text = document.querySelector('.scene-status')?.textContent ?? '';
+        return /cancelled.*Fill cancelled/i.test(text);
+      }, null, T);
+      check('Stop announces both the cancelled scene and fill', /cancelled.*Fill cancelled/i.test(await statusText()), await statusText());
+      await page.getByRole('button', { name: 'Play the track', exact: true }).click();
+
       // Held Filter: pressed while the pointer is down (and captured), the knob keeps
       // showing the mix underneath, letting go releases it.
       await page.getByRole('slider', { name: 'Cutoff' }).fill('900');
@@ -979,6 +991,8 @@ try {
       await page.mouse.down();
       await page.waitForTimeout(200);
       check('mixing: a held effect is refused', (await filterPad.getAttribute('aria-pressed')) !== 'true');
+      const refusedStatus = await page.locator('.scene-status').textContent();
+      check('mixing: the refused effect explains when it is available', /available after mix/i.test(refusedStatus), refusedStatus);
       await page.mouse.up();
       await page.getByRole('button', { name: 'Panic', exact: true }).click();
       // The pads come back at once; playback reports stopped on the next telemetry

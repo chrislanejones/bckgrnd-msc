@@ -55,6 +55,8 @@ export function VelocityLane({
   const base = view.bar * 16;
   const [drag, setDragState] = useState<Drag | null>(null);
   const dragRef = useRef<Drag | null>(null);
+  const keys = useRef<{ id: string; value: number } | null>(null);
+  const [, repaint] = useState(0);
   const setDrag = (d: Drag | null) => {
     dragRef.current = d;
     setDragState(d);
@@ -64,6 +66,7 @@ export function VelocityLane({
 
   /** What a bar shows mid-drag. */
   function shown(e: DrumEvent): number {
+    if (keys.current?.id === e.id) return keys.current.value;
     if (!drag || !drag.moved || !drag.ids.includes(e.id)) return e.vel;
     if (drag.ids.length === 1 || mode === 'set') return drag.value;
     return clamp(e.vel * (drag.value / drag.startVel));
@@ -121,13 +124,21 @@ export function VelocityLane({
     if (disabled) return;
     const step = ev.shiftKey ? 0.01 : 0.05;
     let value: number | null = null;
-    if (ev.key === 'ArrowUp' || ev.key === 'ArrowRight') value = e.vel + step;
-    else if (ev.key === 'ArrowDown' || ev.key === 'ArrowLeft') value = e.vel - step;
+    const from = keys.current?.id === e.id ? keys.current.value : e.vel;
+    if (ev.key === 'ArrowUp' || ev.key === 'ArrowRight') value = from + step;
+    else if (ev.key === 'ArrowDown' || ev.key === 'ArrowLeft') value = from - step;
     else if (ev.key === 'Home') value = MIN_VELOCITY;
     else if (ev.key === 'End') value = 1;
     if (value === null) return;
     ev.preventDefault();
-    onCommit([e.id], 'set', clamp(value));
+    keys.current = { id: e.id, value: clamp(value) };
+    repaint((n) => n + 1);
+  }
+
+  function endKeys() {
+    const k = keys.current; keys.current = null;
+    if (k) onCommit([k.id], 'set', k.value);
+    repaint((n) => n + 1);
   }
 
   return (
@@ -169,6 +180,8 @@ export function VelocityLane({
                     onPointerCancel={(ev) => end(ev, false)}
                     onLostPointerCapture={(ev) => end(ev, true)}
                     onKeyDown={(ev) => onKey(ev, e)}
+                    onKeyUp={endKeys}
+                    onBlur={endKeys}
                   >
                     <span className="velocity-fill" />
                     <span className="velocity-grip" />

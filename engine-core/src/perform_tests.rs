@@ -852,3 +852,45 @@ fn panic_does_all_of_it() {
     // A fill queued now is refused: nothing is playing.
     assert_eq!(e.queue_fill(5, 0), reason::NOT_PLAYING);
 }
+
+#[test]
+fn solo_does_not_refill_returns_with_excluded_stems() {
+    let mut e = tail_engine();
+    e.set_solo(Stem::Pad, true);
+    energy_ms(&mut e, 160);
+    let mut peak = 0.0_f32;
+    for _ in 0..375 {
+        let mut l = [0.0; 128];
+        let mut r = [0.0; 128];
+        e.process(&mut l, &mut r);
+        for v in l.iter().chain(r.iter()) {
+            peak = peak.max(v.abs());
+        }
+    }
+    assert!(peak < 0.0001, "non-solo return residue {peak}");
+}
+
+#[test]
+fn solo_returns_stay_empty_after_flush_despite_channel_glide() {
+    let mut e = tail_engine();
+    e.set_solo(Stem::Pad, true);
+    energy_ms(&mut e, 80);
+    assert!(
+        e.master.delay.is_silent(),
+        "excluded stem refilled the delay during its dry gain glide"
+    );
+}
+
+#[test]
+fn export_end_score_preserves_the_tail_then_decays() {
+    let mut e = tail_engine();
+    e.end_score();
+    let early = energy_ms(&mut e, 200);
+    assert!(early > 1.0, "end_score discarded the requested tail");
+    render(&mut e, 8 * 48_000, 128);
+    let late = energy_ms(&mut e, 200);
+    assert!(
+        late < early * 0.01,
+        "new notes continued in the tail: {late}/{early}"
+    );
+}

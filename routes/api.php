@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 use Illuminate\Support\Facades\Route;
 
+Route::post('/native/projects/{action}', [\App\Http\Controllers\NativeProjectController::class, 'handle']);
+
 /**
  * The track library. Public, because the app ships with its tracks baked in and
  * there is nothing to authenticate against.

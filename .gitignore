@@ -44,3 +44,12 @@
 # PHPUnit
 /.phpunit.result.cache
 /.phpunit.cache
+/public/shared
+/public/build-manifest.json
+/build
+/nativephp/electron
+/database/*.sqlite*
+/bootstrap/cache/*.php
+/storage/app
+
+/nativephp/binaries

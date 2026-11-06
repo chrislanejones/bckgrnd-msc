@@ -254,6 +254,17 @@ impl Adsr {
         self.hold_end
     }
 
+    /// A noise tail begins at its peak, with no second attack/onset delay.
+    pub fn decay_from(peak: f32, seconds: f32, sample_rate: f32) -> Self {
+        let mut env = Self::new(peak, 0.004, seconds, 0.0, 0.0, 0.012, sample_rate);
+        env.stage = EnvStage::Decay;
+        env.attack = 0.0;
+        env.hold_end = env.decay;
+        env.sustain = EPS;
+        env.level = peak;
+        env
+    }
+
     pub fn process(&mut self) -> f32 {
         self.elapsed += 1.0;
         self.level = match self.stage {
@@ -273,7 +284,7 @@ impl Adsr {
                 v
             }
             EnvStage::Hold => {
-                if self.elapsed >= self.hold_end {
+                if self.elapsed >= self.hold_end - self.attack {
                     self.stage = EnvStage::Release;
                     self.elapsed = 0.0;
                 }
@@ -766,6 +777,23 @@ pub fn midi_hz(note: f32) -> f32 {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn release_begins_at_the_reported_note_on_time() {
+        for sr in [44100.0, 48000.0, 96000.0] {
+            let mut env = super::Adsr::new(1.0, 0.7, 0.1, 0.5, 1.0, 0.2, sr);
+            let expected = env.release_starts_at() as usize;
+            let mut actual: usize = 0;
+            while !matches!(env.stage, super::EnvStage::Release) {
+                env.process();
+                actual += 1;
+            }
+            assert!(
+                actual.abs_diff(expected) <= 2,
+                "release {actual}, reported {expected}"
+            );
+        }
+    }
     use super::*;
 
     /// Excite with half a second of noise, then feed `secs` seconds of silence.

@@ -8,6 +8,7 @@ should all agree on these files. None of them should keep a private copy.
 |---|---|---|
 | [`parameters.json`](parameters.json) | Every engine parameter: id, range, default, unit, scope, and the worklet message that sets it. | `frontend/lib/contract.ts`, `App\Support\Project\Contract`, and the MCP from Night 6 |
 | [`project.schema.json`](project.schema.json) | A saved project, version 3. | The same, plus anything that writes a project file |
+| [`snapshot.schema.json`](snapshot.schema.json) | Portable snapshot v1: project identity/revision, renderer version, source dependency SHA256 and complete project v3. | Browser, native storage and MCP shared runtime |
 | [`patterns.json`](patterns.json) | The nine lanes a project may override (kind, stem, engine index, id prefix, editable or not), the musical unit, and pattern limits. | `frontend/lib/patterns.ts`, `App\Support\Project\Patterns`, the engine's tests |
 | [`scenes.json`](scenes.json) | The four scene slots, the parameters a scene holds (`sceneVector`, also the engine's vector order) and the factory recipes. | The same, plus `engine-core/tests` |
 
@@ -17,7 +18,7 @@ Two kinds of state, never mixed.
 
 | | **Project (saved musical data)** | **Telemetry (transient playback)** |
 |---|---|---|
-| What | Track, tempo, swing, stem levels, cuts and solos, master and effects settings, and later pattern edits. | Meters, the playhead step, playing or stopped, which deck is live, whether a mix is running, master peak. |
+| What | Track, tempo, swing, stem levels, cuts and solos, master/effects, accepted patterns, locks and alternative scenes. | Meters, playhead, transport/deck, fills, held gestures, comparison captures and unaccepted auditions. |
 | Where it comes from | The user's intent. | The audio thread, about 30 times a second. |
 | Shape | `project.schema.json` | The worklet's `Float32Array` frame, laid out in `frontend/worklets/engine-processor.ts` |
 | Saved, undone, exported? | Yes | **Never** |
@@ -48,6 +49,26 @@ A parameter's `scope` says which side it is on:
 Ids never change meaning. To change a parameter's meaning, add a new id and migrate.
 
 ## Projects
+
+Night 6 portable files use `bckgrnd-msc/snapshot` version 1 and renderer
+`project-renderer-1`. Its `project` is a complete canonical v3 document. Unlike
+legacy import, reading a current snapshot refuses repaired/clamped/unknown data.
+The source hash identifies the original arrangement, not the resolved edited one.
+Readers validate it before changing memory or rendering. A source-root kick stays
+tuned to that original arrangement; moving a bass note does not retune the kick.
+
+Browser IndexedDB and native application storage retain current, previous and
+recovery snapshots. A compare-and-swap write names its identity and expected
+revision. Exports clone the snapshot and source before awaiting any work; fresh
+WASM instances keep their noise stream independent of live playback. The shared
+runtime in `public/shared` is generated from `frontend/lib/shared.ts` and vendored
+atomically with contracts, fixtures, engine and library into the MCP package.
+Stored scenes are never interpreted as a timeline. Narration processing is outside
+this format. Original imported documents and migrated MCP preset backups remain
+untouched; newer unsupported formats are rejected rather than rewritten.
+
+The abbreviated example below illustrates the older musical v2 shape, which
+migrates to v3 on import; it is not a current portable snapshot.
 
 ```json
 {
