@@ -1,15 +1,5 @@
 @import "tailwindcss";
 
-.project-dialog { margin: auto; max-width: min(620px, 94vw); max-height: 85dvh; overflow: auto; padding: 24px; background: #171c25; color: #f4f1ea; border: 1px solid #535963; border-radius: 8px; }
-.project-dialog::backdrop { background: #0009; }
-.project-dialog label { display: grid; gap: 6px; margin: 16px 0; }
-.project-dialog input { border: 1px solid #535963; padding: 8px; }
-.project-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 16px 0; }
-.project-dialog button { border: 1px solid #535963; border-radius: 4px; padding: 6px 10px; cursor: pointer; }
-.project-dialog button:disabled { opacity: .45; cursor: default; }
-.project-dialog li { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; border-top: 1px solid #535963; padding: 12px 0; }
-.project-dialog li span { flex: 1 1 100%; }
-
 /*
  * Tokens. The rules for using them are in docs/DESIGN_PHILOSOPHY.md: color explains
  * state (acid for on, warn for "needs attention", danger for broken), surfaces stay
@@ -136,6 +126,14 @@ body {
     grid-template-columns: minmax(0, 1fr) 19rem;
   }
 
+  .app[data-inspector="closed"] .workspace {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .app[data-inspector="closed"] .inspector {
+    display: none;
+  }
+
   .library-panel {
     position: fixed;
     top: var(--transport-h);
@@ -176,12 +174,15 @@ body {
     --transport-h: 6.75rem;
   }
 
-  .workspace {
+  .workspace,
+  .app[data-inspector="closed"] .workspace {
     grid-template-columns: minmax(0, 1fr);
     padding: var(--space-3) var(--space-4) calc(var(--control-md) + 2.5rem + env(safe-area-inset-bottom));
   }
 
-  .inspector {
+  .inspector,
+  .app[data-inspector="closed"] .inspector {
+    display: block;
     position: static;
     max-height: none;
     overflow: visible;
@@ -339,8 +340,35 @@ body {
   font-weight: 700;
 }
 
+/* Opens Projects. It says whether work is safe, so it never shrinks or wraps. */
 .save-status {
+  display: inline-flex;
+  align-items: center;
   justify-self: end;
+  gap: 0.35rem;
+  min-height: var(--control-sm);
+  padding: 0.25rem 0.7rem;
+  border: 1px solid var(--color-line);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--color-fg);
+  font-size: 0.75rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.save-status:hover {
+  border-color: color-mix(in srgb, var(--color-acid) 45%, var(--color-line));
+}
+
+.save-status-icon {
+  display: none;
+}
+
+/* Only shown while the inspector can be hidden, so its open state is always real. */
+.inspector-toggle[aria-expanded="true"] {
+  border-color: color-mix(in srgb, var(--color-acid) 55%, var(--color-line));
+  color: var(--color-acid);
 }
 
 /* Master meter: two thin bars, a peak-hold tick, a numeric peak, and a clip light. */
@@ -430,17 +458,60 @@ body {
   }
 }
 
+/*
+ * Half a 1920 screen is 960px, so this one-row layout has to hold down to the phone
+ * breakpoint: the song position, meter and clip light compact so the track name keeps
+ * the space it needs and nothing is pushed past the window edge.
+ */
 @media (max-width: 1179.98px) {
   .transport {
-    grid-template-columns: auto auto minmax(6rem, 1fr) auto auto auto auto;
+    grid-template-columns: auto auto minmax(0, 1fr) auto auto auto auto auto;
+    column-gap: var(--space-3);
   }
 
-  .save-status .status-text {
+  .song-position {
+    gap: var(--space-2);
+  }
+
+  .part-chip {
+    padding: 0.2rem 0.3rem;
+    font-size: 0.5625rem;
+    letter-spacing: 0.03em;
+  }
+
+  .bar-word {
     display: none;
   }
 
+  .bar-readout {
+    min-width: 0;
+  }
+
   .master-meter {
-    grid-template-columns: 6rem auto;
+    grid-template-columns: 4rem auto;
+    gap: 0.35rem;
+  }
+
+  /* The clip light keeps its color but loses its word. */
+  .clip-light {
+    width: 0.7rem;
+    height: 0.7rem;
+    padding: 0;
+    overflow: hidden;
+    border-radius: 999px;
+    font-size: 0;
+  }
+}
+
+@media (max-width: 1039.98px) {
+  .wordmark {
+    font-size: 0;
+  }
+
+  .wordmark::before {
+    content: "b";
+    font-size: 1.25rem;
+    color: var(--color-acid);
   }
 }
 
@@ -460,41 +531,21 @@ body {
   .now-playing { grid-area: now; }
   .tempo-readout { grid-area: tempo; }
   .song-position { grid-area: pos; gap: var(--space-2); }
-  .master-meter { grid-area: meter; grid-template-columns: 4rem auto; gap: 0.35rem; justify-self: end; }
+  .master-meter { grid-area: meter; justify-self: end; }
 
-  /* The clip light keeps its color but loses its word, so the row fits a phone. */
-  .clip-light {
-    width: 0.7rem;
-    height: 0.7rem;
-    padding: 0;
-    overflow: hidden;
-    border-radius: 999px;
-    font-size: 0;
+  /* The status keeps its color but loses its word, so the track name fits a phone. */
+  .save-status {
+    grid-area: save;
+    min-height: var(--control-md);
+    padding: 0.25rem 0.6rem;
   }
 
-  .bar-word {
+  .save-status-icon {
+    display: block;
+  }
+
+  .save-status .status-text {
     display: none;
-  }
-  .save-status { grid-area: save; }
-
-  .wordmark {
-    font-size: 0;
-  }
-
-  .wordmark::before {
-    content: "b";
-    font-size: 1.25rem;
-    color: var(--color-acid);
-  }
-
-  .part-chip {
-    padding: 0.2rem 0.3rem;
-    font-size: 0.5625rem;
-    letter-spacing: 0.03em;
-  }
-
-  .bar-readout {
-    min-width: 0;
   }
 }
 
@@ -3702,5 +3753,76 @@ html[data-control-drag="yes"] * {
   background: color-mix(in srgb, var(--color-danger) 14%, transparent);
 }
 
-.audio-error { position: fixed; z-index: 100; bottom: 1rem; left: 50%; transform: translateX(-50%); max-width: 90vw; padding: .8rem; background: #181b20; color: #fff; border: 1px solid #e6a45b; display: flex; gap: 1rem; align-items: center; }
+/* ------------------------------------------------------------------------ */
+/* Projects dialog and audio error                                          */
+/* ------------------------------------------------------------------------ */
+
+.project-dialog {
+  margin: auto;
+  max-width: min(38.75rem, 94vw);
+  max-height: 85dvh;
+  overflow: auto;
+  padding: var(--space-4);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-control);
+  background: var(--color-surface);
+  color: var(--color-fg);
+}
+
+.project-dialog::backdrop { background: rgba(0, 0, 0, 0.6); }
+.project-dialog h2 { font-family: var(--font-display); font-size: 1.125rem; font-weight: 800; }
+.project-dialog label { display: grid; gap: 0.4rem; margin: var(--space-4) 0; font-size: 0.8125rem; font-weight: 600; }
+
+.project-dialog input {
+  min-height: var(--control-sm);
+  padding: 0.4rem 0.6rem;
+  border: 1px solid var(--color-line);
+  border-radius: 0.4rem;
+  background: var(--color-bg);
+  color: var(--color-fg);
+}
+
+.project-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); margin: var(--space-4) 0; }
+
+.project-dialog button {
+  min-height: var(--control-sm);
+  padding: 0.25rem 0.85rem;
+  border: 1px solid var(--color-line);
+  border-radius: 999px;
+  color: var(--color-fg);
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.project-dialog button:hover:not(:disabled) { border-color: color-mix(in srgb, var(--color-acid) 45%, var(--color-line)); }
+.project-dialog button:disabled { opacity: 0.45; cursor: default; }
+.project-dialog [data-testid="source-warning"] {
+  margin: var(--space-3) 0;
+  padding: var(--space-3);
+  border: 1px solid color-mix(in srgb, var(--color-warn) 45%, var(--color-line));
+  border-radius: var(--radius-control);
+  font-size: 0.8125rem;
+  line-height: 1.5;
+}
+.project-dialog ul { margin-top: var(--space-3); }
+.project-dialog li { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); padding: var(--space-3) 0; border-top: 1px solid var(--color-line); }
+.project-dialog li span { flex: 1 1 100%; font-size: 0.8125rem; }
+
+.audio-error {
+  position: fixed;
+  z-index: 100;
+  bottom: 1rem;
+  left: 50%;
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  max-width: 90vw;
+  padding: var(--space-3);
+  transform: translateX(-50%);
+  border: 1px solid var(--color-warn);
+  background: var(--color-surface);
+  color: var(--color-fg);
+}
+
 .audio-error button { white-space: nowrap; text-decoration: underline; }

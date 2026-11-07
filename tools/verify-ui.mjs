@@ -73,6 +73,60 @@ try {
     await page.close();
   }
 
+  // ---- Half a screen and every step around it: the transport bar holds together. --
+  for (const width of [1920, 1600, 1380, 1280, 1180, 1179, 1100, 1040, 1039, 1024, 960, 900, 899, 720, 390, 320]) {
+    const { page } = await open(width, 900);
+    const bar = await page.evaluate(() => {
+      const transport = document.querySelector('.transport');
+      const title = document.querySelector('.now-title .truncate');
+      const items = [...transport.children].map((el) => ({ name: el.className, box: el.getBoundingClientRect() }));
+      const overlaps = items.flatMap((a, i) => items.slice(i + 1).filter((b) => {
+        const across = a.box.left < b.box.right - 1 && b.box.left < a.box.right - 1;
+        const down = a.box.top < b.box.bottom - 1 && b.box.top < a.box.bottom - 1;
+        return across && down;
+      }).map((b) => `${a.name}/${b.name}`));
+      const save = document.querySelector('.save-status').getBoundingClientRect();
+      return {
+        pageWidth: document.documentElement.scrollWidth,
+        past: items.filter((i) => i.box.right > innerWidth + 0.5 || i.box.left < 0).map((i) => i.name),
+        overlaps,
+        titleCut: title.scrollWidth - title.clientWidth,
+        saveHeight: save.height,
+      };
+    });
+    check(`${width}px: the page doesn't scroll sideways`, bar.pageWidth <= width, `${bar.pageWidth}px`);
+    check(`${width}px: nothing in the bar is past the window edge`, bar.past.length === 0, bar.past.join(', '));
+    check(`${width}px: nothing in the bar overlaps`, bar.overlaps.length === 0, bar.overlaps.join(', '));
+    // The longest stock names are 11 characters; 320px is the one width that may ellipsize.
+    if (width > 320) check(`${width}px: the track name isn't cut off`, bar.titleCut <= 0, `${bar.titleCut}px cut`);
+    check(`${width}px: the save status stays on one line`, bar.saveHeight < 50, `${bar.saveHeight}px tall`);
+    const toggle = page.getByRole('button', { name: 'Hide the inspector' });
+    const expected = width < 1180 && width >= 900;
+    check(`${width}px: the inspector toggle is ${expected ? 'there' : 'not needed'}`, (await toggle.count()) === (expected ? 1 : 0));
+    await page.close();
+  }
+
+  // ---- Half screen: the right panel closes like the left, and comes back. ------
+  {
+    const { page } = await open(960, 900);
+    const width = (sel) => page.evaluate((s) => document.querySelector(s).getBoundingClientRect().width, sel);
+    const before = await width('.perform-area');
+    await page.getByRole('button', { name: 'Hide the inspector' }).click();
+    check('hiding the inspector removes it', !(await visible(page, '.inspector')));
+    const after = await width('.perform-area');
+    check('the decks take the inspector\'s room', after > before + 200, `${before}px to ${after}px`);
+    await page.getByRole('button', { name: 'Show the inspector' }).click();
+    check('showing the inspector brings it back', await visible(page, '.inspector'));
+    await page.getByRole('button', { name: 'Hide the inspector' }).click();
+    await page.getByRole('button', { name: 'Inspect Kick' }).click();
+    check('Inspect reopens a hidden inspector', await visible(page, '.inspector'));
+    // Hidden at half screen must not stay hidden once there is room for it.
+    await page.getByRole('button', { name: 'Hide the inspector' }).click();
+    await page.setViewportSize({ width: 1440, height: 900 });
+    check('a wide window always shows the inspector', await visible(page, '.inspector'));
+    await page.close();
+  }
+
   // ---- Desktop: focus, state vocabulary, inspector, drawer. ---------------------
   {
     const { page } = await open(1440, 900);
@@ -138,7 +192,7 @@ try {
     check('the soloed stem says Solo', (await stemState(page, 'bass')).state === 'soloed');
     check(
       'the save status says the mix is edited',
-      /^Unsaved · r\d+$/.test((await page.locator('.save-status').textContent()) ?? ''),
+      (await page.locator('.save-status').textContent()) === 'Unsaved',
     );
     await page.getByRole('button', { name: 'Solo Bass' }).click();
 

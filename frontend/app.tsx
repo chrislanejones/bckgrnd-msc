@@ -64,6 +64,7 @@ export function App() {
   const phone = useMedia(PHONE);
   const [view, setView] = useState<View>('perform');
   const [libraryOpen, setLibraryOpen] = useState(false);
+  const [inspectorOpen, setInspectorOpen] = useState(true);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [selected, setSelected] = useState<StemId>('kick');
   const [inspectorTab, setInspectorTab] = useState<InspectorTab>('master');
@@ -103,6 +104,8 @@ export function App() {
   const selectStem = useCallback((id: StemId) => {
     setSelected(id);
     setInspectorTab('stem');
+    // "Inspect" has to show something, even after the inspector was hidden for room.
+    setInspectorOpen(true);
   }, []);
 
   function openPattern(id?: StemId) {
@@ -123,6 +126,14 @@ export function App() {
   // Ignored while a text field or a slider has focus, so their own keys still work.
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
+      // Save works from anywhere, a text field included, rather than the browser's own.
+      if ((event.metaKey || event.ctrlKey) && !event.altKey && event.key.toLowerCase() === 's') {
+        event.preventDefault();
+        void projects.save(event.shiftKey);
+        return;
+      }
+      // A modal dialog owns the keyboard: nothing behind it may play, cut or launch.
+      if (document.querySelector('dialog[open]')) return;
       if (event.key === 'Escape') {
         if (drawerOpen) {
           setDrawerOpen(false);
@@ -137,7 +148,6 @@ export function App() {
       const focus = event.target as HTMLElement | null;
       if ((event.metaKey || event.ctrlKey) && !event.altKey && !focus?.closest('[data-editor]') && !/^(INPUT|TEXTAREA)$/.test(focus?.tagName ?? '')) {
         if (event.key.toLowerCase() === 'z') { event.preventDefault(); event.shiftKey ? inst.patterns.redo() : inst.patterns.undo(); return; }
-        if (event.key.toLowerCase() === 's') { event.preventDefault(); void projects.save(event.shiftKey); return; }
       }
       if (event.repeat || event.metaKey || event.ctrlKey || event.altKey) return;
       const target = event.target as HTMLElement | null;
@@ -212,6 +222,7 @@ export function App() {
       data-view={view}
       data-playing={inst.playing ? 'yes' : 'no'}
       data-library={libraryDocked ? 'docked' : libraryOpen ? 'open' : 'closed'}
+      data-inspector={inspectorOpen ? 'open' : 'closed'}
     >
       {error && <div className="audio-error" role="alert"><span>{error}</span><button onClick={() => void inst.togglePlay()}>Resume Audio</button></div>}
       <TransportBar
@@ -230,6 +241,14 @@ export function App() {
             : {
                 open: libraryOpen,
                 onToggle: () => setLibraryOpen((o) => !o),
+              }
+        }
+        inspectorToggle={
+          libraryDocked || phone
+            ? undefined
+            : {
+                open: inspectorOpen,
+                onToggle: () => setInspectorOpen((o) => !o),
               }
         }
       />
@@ -494,7 +513,7 @@ export function App() {
 
         </main>
 
-        <aside className="inspector panel" aria-label="Inspector" data-views="mix edit">
+        <aside id="inspector" className="inspector panel" aria-label="Inspector" data-views="mix edit">
           <Inspector
             tab={inspectorTab}
             onTab={setInspectorTab}

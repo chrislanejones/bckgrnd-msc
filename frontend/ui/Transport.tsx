@@ -5,7 +5,7 @@
  */
 
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { Library as LibraryIcon, Play, Square } from 'lucide-react';
+import { Library as LibraryIcon, Play, SlidersHorizontal, Square } from 'lucide-react';
 import { engine } from '../lib/engine';
 import { PARTS } from '../lib/stems';
 import type { TrackArrangement } from '../lib/types';
@@ -127,6 +127,7 @@ export function TransportBar({
   liveDeck,
   onTogglePlay,
   libraryToggle,
+  inspectorToggle,
 }: {
   track: TrackArrangement;
   playing: boolean;
@@ -139,6 +140,8 @@ export function TransportBar({
   onTogglePlay: () => void;
   /** Present when the library is an overlay; opens it. */
   libraryToggle?: { open: boolean; onToggle: () => void };
+  /** Present when the inspector can give its column back to the decks; hides it. */
+  inspectorToggle?: { open: boolean; onToggle: () => void };
 }) {
   const part = Math.floor(bar / 4);
   return (
@@ -177,7 +180,7 @@ export function TransportBar({
         <p className="now-title">
           <span className={liveDeck === 'a' ? 'text-acid' : 'text-deck-b'}>{liveDeck.toUpperCase()}</span>
           <span className="text-muted"> · </span>
-          <span className="truncate">{track.name}</span>
+          <span className="truncate" title={track.name}>{track.name}</span>
         </p>
         <p className="now-sub">
           {mixing ? `Mixing into ${mixing}` : [track.section, track.style].filter(Boolean).join(' · ')}
@@ -219,6 +222,19 @@ export function TransportBar({
           <StatusIndicator state="idle" label="Track as written" />
         )}
       </div>}
+
+      {inspectorToggle ? (
+        <button
+          type="button"
+          className="icon-button inspector-toggle"
+          aria-label={inspectorToggle.open ? 'Hide the inspector' : 'Show the inspector'}
+          aria-expanded={inspectorToggle.open}
+          aria-controls="inspector"
+          onClick={inspectorToggle.onToggle}
+        >
+          <SlidersHorizontal className="size-4" aria-hidden />
+        </button>
+      ) : null}
     </header>
   );
 }
