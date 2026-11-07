@@ -1,19 +1,27 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { FolderOpen } from 'lucide-react';
 import type { useProjects } from '../lib/projects';
+import { StatusIndicator } from './controls';
 
 export function ProjectMenu({ projects: p }: { projects: ReturnType<typeof useProjects> }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const file = useRef<HTMLInputElement>(null);
   const [error, setError] = useState('');
+  // What is being typed, spaces included. The project keeps the trimmed name.
+  const [nameDraft, setNameDraft] = useState<string | null>(null);
+  // The desktop File menu opens projects with this dialog shut. The warning still has to be seen.
+  useEffect(() => { if (p.sourceWarning && !dialog.current?.open) dialog.current?.showModal(); }, [p.sourceWarning]);
   return <>
-    <button className="save-status" onClick={() => { void p.list(); dialog.current?.showModal(); }} aria-label={`Projects · ${p.status}`}>
-      {p.status}
+    <button type="button" className="save-status" onClick={() => { void p.list(); dialog.current?.showModal(); }} aria-label={`Projects · ${p.status}`} title={p.status}>
+      <FolderOpen className="save-status-icon size-4" aria-hidden />
+      <StatusIndicator state={p.indicator.state} label={p.indicator.label} />
     </button>
     <dialog ref={dialog} className="project-dialog" aria-label="Projects">
       <div className="flex items-center justify-between gap-4"><h2>Projects</h2><button onClick={() => dialog.current?.close()} aria-label="Close projects">Close</button></div>
-      <label>Project name<input aria-label="Project name" value={p.name} onChange={(e) => p.rename(e.target.value)} /></label>
+      <label>Project name<input aria-label="Project name" value={nameDraft ?? p.name} onChange={(e) => { setNameDraft(e.target.value); p.rename(e.target.value); }} onBlur={() => setNameDraft(null)} /></label>
       <p role="status" data-testid="project-status">{p.notice || p.status}</p>
       {p.blocked && <p>{p.blocked}</p>}
+      {p.sourceWarning && <p role="alert" data-testid="source-warning">{p.sourceWarning}</p>}
       <div className="project-actions">
         <button disabled={!!p.blocked} onClick={() => void p.save()}>Save project</button>
         <button disabled={!!p.blocked} onClick={() => void p.save(true)}>Save As</button>
@@ -36,7 +44,11 @@ export function ProjectMenu({ projects: p }: { projects: ReturnType<typeof usePr
         const s = r.current ?? r.recovery!;
         return <li key={s.id}>
           <span>{s.project.name} · r{s.revision}</span>
-          {r.current && <button disabled={!!p.blocked} onClick={() => void p.open(r.current)}>Open</button>}
+          {r.current && <button disabled={!!p.blocked} onClick={() => {
+            // Editing the older copy eventually replaces the newer unsaved one.
+            const newer = r.recovery && r.recovery.revision > r.current!.revision;
+            if (!newer || window.confirm(`${s.project.name} has unsaved work at r${r.recovery!.revision}. Open the older saved r${r.current!.revision} anyway? Editing it will replace that work. Choose Cancel, then Recover, to keep it.`)) void p.open(r.current);
+          }}>Open</button>}
           {r.recovery && <button disabled={!!p.blocked} onClick={() => void p.open(r.recovery)}>Recover r{r.recovery.revision}</button>}
           {r.previous && <button disabled={!!p.blocked} onClick={() => void p.open(r.previous)}>Previous r{r.previous.revision}</button>}
           <button onClick={() => { if (window.confirm(`Delete saved copies of ${s.project.name}?`)) void p.remove(s.id); }}>Delete</button>

@@ -64,6 +64,56 @@ final class ProjectFiles
         } finally { flock($lock, LOCK_UN); fclose($lock); }
     }
 
+    /** Write a project out where the person asked for it, keeping what was there as .bak. */
+    public static function saveFile(string $path, array $snapshot): void
+    {
+        $snapshot['project'] = Contract::migrate($snapshot['project']);
+        if (is_file($path) && !copy($path, $path.'.bak')) throw new RuntimeException('Cannot back up the existing project file.');
+        self::atomicWrite($path, json_encode($snapshot, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR));
+    }
+
+    /** Save As ties a project to its file, so a later Save can keep that file current. */
+    public function linkFile(string $id, string $path): void
+    {
+        $this->changeLinks(function (array $links) use ($id, $path) { $links[$id] = $path; return $links; });
+    }
+
+    public function linkedFile(string $id): ?string
+    {
+        $path = $this->linksPath();
+        if (!is_file($path)) return null;
+        return json_decode(file_get_contents($path), true, flags: JSON_THROW_ON_ERROR)[$id] ?? null;
+    }
+
+    /** The file written, or null when this project was never saved as a file. */
+    public function updateLinkedFile(array $snapshot): ?string
+    {
+        self::validate($snapshot);
+        $path = $this->linkedFile($snapshot['id']);
+        if ($path === null) return null;
+        if (!is_file($path)) throw new RuntimeException("It's no longer at {$path}. Use Save As to choose a new place.");
+        self::saveFile($path, $snapshot);
+        return $path;
+    }
+
+    private function linksPath(): string
+    {
+        // Dotted, so records() can't read it as a project. Project IDs never contain a dot.
+        return $this->root.'/.file-links.json';
+    }
+
+    private function changeLinks(callable $change): void
+    {
+        if (!is_dir($this->root) && !mkdir($this->root, 0700, true) && !is_dir($this->root)) throw new RuntimeException('Cannot create project storage.');
+        $path = $this->linksPath();
+        $lock = fopen($path.'.lock', 'c');
+        if (!$lock || !flock($lock, LOCK_EX)) throw new RuntimeException('Cannot lock project storage.');
+        try {
+            $links = is_file($path) ? json_decode(file_get_contents($path), true, flags: JSON_THROW_ON_ERROR) : [];
+            self::atomicWrite($path, json_encode((object) $change($links), JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR));
+        } finally { flock($lock, LOCK_UN); fclose($lock); }
+    }
+
     public static function atomicWrite(string $path, string $bytes): void
     {
         $temp = tempnam(dirname($path), '.bckgrnd-');
@@ -89,5 +139,7 @@ final class ProjectFiles
         if (!preg_match('/^[a-zA-Z0-9_-]{1,100}$/D', $id)) throw new RuntimeException('Invalid project ID.');
         $path = $this->root.'/'.$id.'.json';
         if (is_file($path) && !unlink($path)) throw new RuntimeException('Cannot delete project.');
+        // The file itself stays; it was only the link that belonged to the app.
+        if ($this->linkedFile($id) !== null) $this->changeLinks(function (array $links) use ($id) { unset($links[$id]); return $links; });
     }
 }

@@ -41,12 +41,14 @@ final class NativeProjectController
                     return response()->json(['document' => json_decode(file_get_contents($path), false, flags: JSON_THROW_ON_ERROR)]);
                 case 'save-file':
                     $s = $request->input('snapshot'); ProjectFiles::validate($s);
-                    $s['project'] = \App\Support\Project\Contract::migrate($s['project']);
                     $path = Dialog::new()->asSheet('main')->title('Save Project As')->filter('bckgrnd project', ['json'])->save();
                     if (!$path) return response()->json(['cancelled' => true]);
-                    if (is_file($path) && !copy($path, $path.'.bak')) throw new \RuntimeException('Cannot back up the existing project file.');
-                    ProjectFiles::atomicWrite($path, json_encode($s, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR));
+                    ProjectFiles::saveFile($path, $s);
+                    $files->linkFile($s['id'], $path);
                     return response()->json(['path' => $path]);
+                case 'update-file':
+                    $data = $request->validate(['snapshot' => 'required|array']);
+                    return response()->json(['path' => $files->updateLinkedFile($data['snapshot'])]);
                 case 'export':
                     $wav = $request->getContent();
                     abort_unless(substr($wav, 0, 4) === 'RIFF' && substr($wav, 8, 4) === 'WAVE', 422);
@@ -62,7 +64,7 @@ final class NativeProjectController
                     return response()->json(['ok' => true]);
                 case 'recovery-folder':
                     if (!is_dir($root)) mkdir($root, 0700, true);
-                    Shell::openFile(storage_path('app'));
+                    Shell::openFile($root);
                     return response()->json(['ok' => true]);
                 case 'diagnostics':
                     return response()->json(['php' => PHP_VERSION, 'storage' => storage_path(), 'projectRoot' => $root]);

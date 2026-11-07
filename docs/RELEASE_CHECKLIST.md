@@ -21,6 +21,7 @@ release evidence.
   narration, preset backup migration and missing dependency errors.
 - [x] Freeze clean source commit, rebuild native/static/MCP, record final hashes.
 - [x] Recheck the final distributable after all packaging transformations.
+- [ ] Installed app, after a rebuild: Save As, edit, Save. The chosen file updates and a `.bak` appears. Then move the file, Save again, and read the warning.
 - [ ] Execute saved-project validation/render/narration from this actual T3 client.
 - [ ] Human listening on the installed Linux app, including solo/held effects.
 - [ ] Physical sleep/resume and output-device changes.

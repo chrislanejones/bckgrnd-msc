@@ -269,3 +269,19 @@ not. Things to settle before or while building it:
 - **The wasm here is a `--no-opt` build (270,638 bytes)** because wasm-opt can't be
   downloaded in this environment. It isn't comparable to Night 3's 222,709-byte
   optimized size. Measure the optimized build before release.
+- **Project menu leftovers from the 11-06-2026 audit.** Recovery rows have no date and
+  no order. Exported files are written at mode 0600. An aborted open can show a blank
+  "Open failed:". A queued scene blocks Save if audio dies, because the confirmation
+  never arrives. Nothing yet proves the web and desktop builds hash a track the same
+  way, so a project may open with the library-changed warning when it moves between
+  them, and the MCP would refuse it.
+- **The last edit can still miss the recovery copy on a hard close.** Recovery waits
+  400 ms and is written when the page hides or goes away, but the write hashes first,
+  so a browser that closes at once can cut it short. A browser crash inside the 400 ms
+  loses that one edit. Saved work isn't affected.
+- **A file opened on desktop isn't tied to Save.** Save keeps a file current only after
+  Save As. A project brought in with Import stays an app copy, and its original file is
+  left alone. That matches the "Import" label, but the desktop File menu calls the same
+  action "Open", where people may expect Save to write back. The reverse also holds: a
+  copy of a file already saved with Save As shares its project ID, so Save updates the
+  original Save As file (with a `.bak`) and never the copy. The notice names the path.

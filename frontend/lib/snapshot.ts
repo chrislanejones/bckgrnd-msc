@@ -34,7 +34,12 @@ export async function snapshotOf(project: Project, source: TrackArrangement, id:
     source: { trackId: source.id, sha256: await contentHash(source) }, project: copy };
 }
 
-export async function readSnapshot(raw: unknown, tracks: TrackSummary[], source: (id: string) => Promise<TrackArrangement>): Promise<Snapshot> {
+/**
+ * The source hash says which library data a project was saved against. A render has to
+ * reproduce that exactly, so without `onSourceChanged` a different library is refused.
+ * The app passes it: a library update must not lock anyone out of their own work.
+ */
+export async function readSnapshot(raw: unknown, tracks: TrackSummary[], source: (id: string) => Promise<TrackArrangement>, onSourceChanged?: (trackId: string) => void): Promise<Snapshot> {
   const doc = raw as Partial<Snapshot> | null;
   if (!doc || typeof doc !== 'object') throw new Error('A project file must be a JSON object.');
   const wrapped = doc.format === 'bckgrnd-msc/snapshot';
@@ -53,6 +58,10 @@ export async function readSnapshot(raw: unknown, tracks: TrackSummary[], source:
   if (wrapped && canonical(project) !== canonical(doc.project)) throw new Error('Project contains unsupported fields or invalid parameter values.');
   const arranged = await source(project.trackId);
   const hash = await contentHash(arranged);
-  if (wrapped && (doc.source?.trackId !== project.trackId || doc.source.sha256 !== hash)) throw new Error(`Source library mismatch for ${project.trackId}. Install the matching library before opening or rendering this project.`);
+  if (wrapped && doc.source?.trackId !== project.trackId) throw new Error(`Source library mismatch for ${project.trackId}. The file names a different track than its project.`);
+  if (wrapped && doc.source?.sha256 !== hash) {
+    if (!onSourceChanged) throw new Error(`Source library mismatch for ${project.trackId}. Install the matching library before opening or rendering this project.`);
+    onSourceChanged(project.trackId);
+  }
   return wrapped ? structuredClone(doc as Snapshot) : snapshotOf(project, arranged, crypto.randomUUID(), 1);
 }

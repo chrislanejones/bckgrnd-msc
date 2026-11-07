@@ -1,6 +1,6 @@
 import { chromium } from 'playwright';
 import { build } from 'esbuild';
-import { readFileSync, mkdtempSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import assert from 'node:assert/strict';
@@ -31,6 +31,50 @@ const file = async () => {
 
 try {
   await page.goto(base); await page.waitForFunction(() => !!window.__BCKGRND_PROJECT__?.());
+  // An untouched track has nothing to lose: no warning, no recovery row, no "Unsaved".
+  assert.equal(await page.locator('.save-status').textContent(), 'As written');
+  await page.getByRole('button', { name: 'Solo Kick' }).click();
+  assert.equal(await page.locator('.save-status').textContent(), 'Unsaved');
+  await page.getByRole('button', { name: 'Solo Kick' }).click();
+  // The dialog owns the keyboard: nothing behind it plays or cuts, and Save still works.
+  await menu();
+  const playingBefore = await page.locator('.app').getAttribute('data-playing');
+  const cutBefore = await page.evaluate(() => document.querySelector('article.stem')?.dataset.state);
+  await page.getByRole('button', { name: 'Close projects', exact: true }).focus();
+  await page.keyboard.press('1');
+  await page.locator('input[aria-label="Project name"]').focus();
+  assert.equal(await page.evaluate(() => document.querySelector('article.stem')?.dataset.state), cutBefore);
+  assert.equal(await page.locator('.app').getAttribute('data-playing'), playingBefore);
+  // Typing a name keeps its spaces; only the stored name is trimmed.
+  await page.locator('input[aria-label="Project name"]').fill('');
+  await page.locator('input[aria-label="Project name"]').pressSequentially('My  Song ');
+  assert.equal(await page.locator('input[aria-label="Project name"]').inputValue(), 'My  Song ');
+  assert.equal((await file()).project.name, 'My  Song');
+  await page.keyboard.press('Control+s');
+  await page.waitForFunction(() => document.querySelector('[data-testid="project-status"]')?.textContent?.startsWith('Saved '));
+  await page.getByLabel('Project name', { exact: true }).fill('My Song');
+  await save();
+  // A second save with nothing new keeps the rollback copy a real older revision.
+  await save();
+  const rows = await page.evaluate(() => new Promise((resolve) => {
+    const r = indexedDB.open('bckgrnd-projects', 1);
+    r.onsuccess = () => { const q = r.result.transaction('projects').objectStore('projects').getAll(); q.onsuccess = () => { resolve(q.result); r.result.close(); }; };
+  }));
+  const mine = rows.find((row) => row.current?.project.name === 'My Song');
+  assert.ok(mine.previous && mine.previous.revision < mine.current.revision, 'repeat save kept the older revision');
+  // A "Saved" notice doesn't outlive the next edit.
+  await page.getByLabel('Project name', { exact: true }).fill('My Song 2');
+  assert.match(await page.locator('[data-testid="project-status"]').textContent(), /^Unsaved · r\d+$/);
+  // Deleting the open project's saved copy leaves it unsaved, and it can still save.
+  await page.locator('li', { hasText: 'My Song' }).getByRole('button', { name: 'Delete', exact: true }).click();
+  await page.locator('li', { hasText: 'My Song' }).waitFor({ state: 'detached' });
+  assert.equal(await page.locator('.save-status').textContent(), 'Unsaved');
+  await save();
+  // Opening the saved copy of what is open is clean, and its edits save normally.
+  await page.locator('li', { hasText: 'My Song 2' }).getByRole('button', { name: 'Open', exact: true }).click();
+  await page.waitForFunction(() => document.querySelector('[data-testid="project-status"]')?.textContent?.startsWith('Opened '));
+  assert.equal(await page.locator('.save-status').textContent(), 'Saved');
+  await close();
   // Import portable accepted composition before editing and saving it.
   await menu();
   await page.locator('input[type=file]').setInputFiles('tests/fixtures/release/edited.bckgrnd.json');
@@ -65,7 +109,7 @@ try {
   await page.getByRole('button', { name: 'Close projects', exact: true }).click();
   await page.getByRole('button', { name: 'Stop the track', exact: true }).click();
   await page.reload(); await page.waitForFunction(() => !!window.__BCKGRND_PROJECT__?.());
-  await menu(); await page.getByRole('button', { name: 'Open', exact: true }).first().click();
+  await menu(); await page.locator('li', { hasText: 'Night 6 café' }).getByRole('button', { name: 'Open', exact: true }).click();
   await page.waitForFunction(() => document.querySelector('[data-testid="project-status"]')?.textContent?.startsWith('Opened '));
   assert.equal(await page.locator('.app').getAttribute('data-playing'), 'no');
   assert.deepEqual(await project(), original);
@@ -106,14 +150,62 @@ try {
   await menu(); await page.getByLabel('Project name', { exact: true }).fill('Preview accepted'); await save(); assert.deepEqual((await file()).project.patterns, accepted.patterns);
   // Recover a later unsaved revision explicitly after a reload, never autoplay.
   await page.getByLabel('Project name', { exact: true }).fill('Recovery café');
-  await page.waitForFunction(async () => new Promise((resolve) => {
+  // waitForFunction treats a promise as true, so this has to poll for itself.
+  const recovered = () => page.evaluate(() => new Promise((resolve) => {
     const r = indexedDB.open('bckgrnd-projects', 1);
     r.onsuccess = () => { const q = r.result.transaction('projects').objectStore('projects').getAll(); q.onsuccess = () => { resolve(q.result.some((x) => x.recovery?.project.name === 'Recovery café')); r.result.close(); }; };
   }));
+  for (let tries = 0; !(await recovered()); tries++) {
+    assert.ok(tries < 50, 'the recovery copy was never written');
+    await page.waitForTimeout(100);
+  }
   await page.reload(); await page.waitForFunction(() => !!window.__BCKGRND_PROJECT__?.()); await menu();
   await page.locator('li', { hasText: 'Preview accepted' }).getByRole('button', { name: /^Recover r/ }).last().click();
   await page.waitForFunction(() => document.querySelector('[data-testid="project-status"]')?.textContent?.includes('Opened Recovery café'));
   assert.equal(await page.locator('.app').getAttribute('data-playing'), 'no');
   assert.deepEqual((await file()).project.patterns, accepted.patterns);
+  // A library update warns and opens; a render, with no one to warn, still refuses.
+  const changed = await file(); const realHash = changed.source.sha256; changed.source.sha256 = 'a'.repeat(64);
+  await assert.rejects(readSnapshot(changed, library.tracks, source), /Source library mismatch/);
+  await assert.rejects(readSnapshot({ ...changed, source: { trackId: 'not-this-track', sha256: realHash } }, library.tracks, source, () => {}), /different track/);
+  const changedPath = join(temp, 'library-changed.bckgrnd.json'); writeFileSync(changedPath, JSON.stringify(changed));
+  await page.locator('input[type=file]').setInputFiles(changedPath);
+  await page.locator('[data-testid="source-warning"]').waitFor();
+  assert.equal(await page.locator('.save-status').textContent(), 'Unsaved');
+  assert.deepEqual((await file()).project.patterns, changed.project.patterns);
+  assert.equal(await page.locator('.app').getAttribute('data-playing'), 'no');
+  await save();
+  assert.equal(await page.locator('[data-testid="source-warning"]').count(), 0);
+  assert.equal((await file()).source.sha256, realHash);
+  // Desktop: Save As ties the project to its file, and Save keeps that file current. The
+  // bridge is mocked here; ProjectFilesTest covers the real file writes.
+  const desktop = await browser.newContext(); const desk = await desktop.newPage();
+  desk.on('dialog', (d) => void d.accept());
+  let calls = []; let fileFails = false; const chosen = '/music/song.bckgrnd.json';
+  await desk.route(new URL('/', base).href, async (route) => {
+    const response = await route.fetch();
+    await route.fulfill({ response, body: (await response.text()).replace('<head>', '<head><meta name="bckgrnd-native-token" content="test">') });
+  });
+  await desk.route('**/api/native/projects/*', (route) => {
+    const action = route.request().url().split('/').pop(); calls.push(action);
+    if (action === 'update-file' && fileFails) return route.fulfill({ status: 422, json: { message: 'the disk is gone' } });
+    return route.fulfill({ json: action === 'list' ? [] : action === 'save-file' || action === 'update-file' ? { path: chosen } : { ok: true } });
+  });
+  const said = (text) => desk.waitForFunction((t) => document.querySelector('[data-testid="project-status"]')?.textContent?.includes(t), text);
+  const writes = () => calls.filter((c) => c === 'save-file' || c === 'write' || c === 'update-file');
+  const rename = (name) => desk.getByLabel('Project name', { exact: true }).fill(name);
+  const saveProject = () => desk.getByRole('button', { name: 'Save project', exact: true }).click();
+  await desk.goto(base); await desk.waitForFunction(() => !!window.__BCKGRND_PROJECT__?.());
+  await desk.getByRole('button', { name: /^Projects ·/ }).click();
+  await rename('Desk song'); await desk.getByRole('button', { name: 'Save As', exact: true }).click(); await said(chosen);
+  assert.deepEqual(writes(), ['save-file', 'write']);
+  calls = []; await rename('Desk song 2'); await saveProject(); await said(`Desk song 2 · r`); await said(chosen);
+  assert.deepEqual(writes(), ['write', 'update-file']);
+  // A file that can't be written is said out loud, and the next Save retries only the file.
+  calls = []; fileFails = true; await rename('Desk song 3'); await saveProject(); await said('The project file was not updated: the disk is gone');
+  assert.deepEqual(writes(), ['write', 'update-file']);
+  calls = []; fileFails = false; await saveProject(); await said(`Desk song 3 · r`); await said(chosen);
+  assert.deepEqual(writes(), ['update-file']);
+  await desktop.close();
   console.log(`PASS project save/reopen/no-autoplay, Full → Drop → Cancel → save, failed save, migration, preview exclusion, recovery, export cancellation, PCM WAV (${bytes.length} bytes). Artifacts: ${temp}`);
 } finally { await context.close(); await browser.close(); }
