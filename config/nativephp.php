@@ -1,63 +1,16 @@
 <?php
 
 return [
-    /**
-     * The version of your app.
-     * It is used to determine if the app needs to be updated.
-     * Increment this value every time you release a new version of your app.
-     */
     'version' => env('NATIVEPHP_APP_VERSION', '0.1.0'),
-
-    /**
-     * The ID of your application. This should be a unique identifier
-     * usually in the form of a reverse domain name.
-     * For example: com.nativephp.app
-     */
-    'app_id' => env('NATIVEPHP_APP_ID', 'dev.floor.stemmachine'),
-
-    /**
-     * If your application allows deep linking, you can specify the scheme
-     * to use here. This is the scheme that will be used to open your
-     * application from within other applications.
-     * For example: "nativephp"
-     *
-     * This would allow you to open your application using a URL like:
-     * nativephp://some/path
-     */
+    'app_id' => env('NATIVEPHP_APP_ID', 'com.chrislanejones.bckgrndmsc'),
     'deeplink_scheme' => env('NATIVEPHP_DEEPLINK_SCHEME'),
+    'author' => env('NATIVEPHP_APP_AUTHOR', 'Chris Lane Jones'),
+    'copyright' => env('NATIVEPHP_APP_COPYRIGHT', 'Copyright © 2026 Chris Lane Jones'),
+    'description' => env('NATIVEPHP_APP_DESCRIPTION', 'A hands-on stem machine for building, editing, and performing music.'),
+    'website' => env('NATIVEPHP_APP_WEBSITE', 'https://bckgrnd-msc.netlify.app'),
 
-    /**
-     * The author of your application.
-     */
-    'author' => env('NATIVEPHP_APP_AUTHOR'),
+    'provider' => \\App\\Providers\\NativeAppServiceProvider::class,
 
-    /**
-     * The copyright notice for your application.
-     */
-    'copyright' => env('NATIVEPHP_APP_COPYRIGHT'),
-
-    /**
-     * The description of your application.
-     */
-    'description' => env('NATIVEPHP_APP_DESCRIPTION', 'An awesome app built with NativePHP'),
-
-    /**
-     * The Website of your application.
-     */
-    'website' => env('NATIVEPHP_APP_WEBSITE', 'https://nativephp.com'),
-
-    /**
-     * The default service provider for your application. This provider
-     * takes care of bootstrapping your application and configuring
-     * any global hotkeys, menus, windows, etc.
-     */
-    'provider' => \App\Providers\NativeAppServiceProvider::class,
-
-    /**
-     * A list of environment keys that should be removed from the
-     * .env file when the application is bundled for production.
-     * You may use wildcards to match multiple keys.
-     */
     'cleanup_env_keys' => [
         'AWS_*',
         'AZURE_*',
@@ -75,11 +28,7 @@ return [
         'NATIVEPHP_AZURE_CODE_SIGNING_ACCOUNT_NAME',
     ],
 
-    /**
-     * A list of files and folders that should be removed from the
-     * final app before it is bundled for production.
-     * You may use glob / wildcard patterns here.
-     */
+    // Keep public/build: the packaged webview serves the frontend from it.
     'cleanup_exclude_files' => [
         'build',
         'temp',
@@ -88,23 +37,10 @@ return [
         '*/tests',
     ],
 
-    /**
-     * The NativePHP updater configuration.
-     */
+    // Disabled until a real, tested update feed is configured.
     'updater' => [
-        /**
-         * Whether or not the updater is enabled. Please note that the
-         * updater will only work when your application is bundled
-         * for production.
-         */
-        'enabled' => env('NATIVEPHP_UPDATER_ENABLED', true),
-
-        /**
-         * The updater provider to use.
-         * Supported: "github", "s3", "spaces"
-         */
-        'default' => env('NATIVEPHP_UPDATER_PROVIDER', 'spaces'),
-
+        'enabled' => env('NATIVEPHP_UPDATER_ENABLED', false),
+        'default' => env('NATIVEPHP_UPDATER_PROVIDER', 'github'),
         'providers' => [
             'github' => [
                 'driver' => 'github',
@@ -116,7 +52,6 @@ return [
                 'channel' => env('GITHUB_CHANNEL', 'latest'),
                 'releaseType' => env('GITHUB_RELEASE_TYPE', 'draft'),
             ],
-
             's3' => [
                 'driver' => 's3',
                 'key' => env('AWS_ACCESS_KEY_ID'),
@@ -126,7 +61,6 @@ return [
                 'endpoint' => env('AWS_ENDPOINT'),
                 'path' => env('NATIVEPHP_UPDATER_PATH', null),
             ],
-
             'spaces' => [
                 'driver' => 'spaces',
                 'key' => env('DO_SPACES_KEY_ID'),
@@ -138,9 +72,6 @@ return [
         ],
     ],
 
-    /**
-     * The queue workers that get auto-started on your application start.
-     */
     'queue_workers' => [
         'default' => [
             'queues' => ['default'],
@@ -150,25 +81,14 @@ return [
         ],
     ],
 
-    /**
-     * Define your own scripts to run before and after the build process.
-     */
     'prebuild' => [
-        // Rebuild the wasm engine and the frontend before packaging. pnpm, not
-        // npm: the lockfile is pnpm-lock.yaml and `npm run build` would resolve
-        // against a different dependency tree.
         'pnpm run build:engine',
         'pnpm run build',
     ],
 
     'postbuild' => [
-        // The build products are needed at runtime, so nothing is pruned here.
-        // (An earlier note suggested removing public/build; that is wrong — the
-        // packaged app serves these files from the webview.)
+        // Runtime assets must remain available to the packaged webview.
     ],
 
-    /**
-     * Custom PHP binary path.
-     */
     'binary_path' => env('NATIVEPHP_PHP_BINARY_PATH', null),
 ];
