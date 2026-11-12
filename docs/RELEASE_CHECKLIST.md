@@ -22,7 +22,9 @@ release evidence.
 - [x] Freeze clean source commit, rebuild native/static/MCP, record final hashes.
 - [x] Recheck the final distributable after all packaging transformations.
 - [ ] Installed app, after a rebuild: Save As, edit, Save. The chosen file updates and a `.bak` appears. Then move the file, Save again, and read the warning.
-- [ ] Execute saved-project validation/render/narration from this actual T3 client.
+- [x] Execute saved-project validation/render/narration from this actual T3 client.
+  11-07-2026, MCP 0.4.0-rc.1-d47ee15-deps: validate valid with no warnings, an 8 s
+  render in 583 ms, narration mix at -17.7 LUFS.
 - [ ] Human listening on the installed Linux app, including solo/held effects.
 - [ ] Physical sleep/resume and output-device changes.
 - [ ] Actual minimization: WSL ignored the test request; no pass is claimed.
