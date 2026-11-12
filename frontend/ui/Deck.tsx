@@ -168,7 +168,7 @@ export const DeckWave = memo(function DeckWave({
 
   return (
     <div className="deck-wave" data-live={live ? 'yes' : 'no'}>
-      <div className="flex items-baseline justify-between gap-2 px-2.5 pt-1.5">
+      <div className="deck-wave-head flex items-baseline justify-between gap-2">
         <p className="truncate text-xs font-semibold">
           <span className={side === 'a' ? 'text-acid' : 'text-deck-b'}>{side.toUpperCase()}</span>
           <span className="text-muted"> · </span>
@@ -177,12 +177,12 @@ export const DeckWave = memo(function DeckWave({
         <p className="shrink-0 text-xs text-muted">{live && mixing ? 'Mixing' : status}</p>
       </div>
       <div
-        className={cx('relative mx-2 mb-5 mt-1', grabbable && 'wave-scrub', scrub.held && 'is-held')}
+        className={cx('deck-wave-body relative', grabbable && 'wave-scrub', scrub.held && 'is-held')}
         {...(grabbable ? scrub.handlers : {})}
       >
         <svg
           viewBox="0 0 256 48"
-          className="block h-12 w-full"
+          className="deck-wave-svg block w-full"
           preserveAspectRatio="none"
           role="img"
           aria-label={`Deck ${side.toUpperCase()} waveform`}

@@ -324,7 +324,8 @@ export function Segmented<T extends string | number>({
   perKnobColumn,
 }: {
   label: string;
-  options: Array<{ value: T; label: string; aria?: string }>;
+  /** `short` replaces the label on the phone tier; the full label stays the name. */
+  options: Array<{ value: T; label: string; short?: string; aria?: string }>;
   value: T;
   onPick: (value: T) => void;
   hideLabel?: boolean;
@@ -335,16 +336,23 @@ export function Segmented<T extends string | number>({
   perKnobColumn?: number;
 }) {
   const id = useId();
-  const pill = (o: { value: T; label: string; aria?: string }) => (
+  const pill = (o: { value: T; label: string; short?: string; aria?: string }) => (
     <button
       key={String(o.value)}
       type="button"
       className="segment tap"
       aria-pressed={value === o.value}
-      aria-label={o.aria}
+      aria-label={o.aria ?? (o.short ? o.label : undefined)}
       onClick={() => onPick(o.value)}
     >
-      {o.label}
+      {o.short ? (
+        <>
+          <span className="seg-full">{o.label}</span>
+          <span className="seg-short">{o.short}</span>
+        </>
+      ) : (
+        o.label
+      )}
     </button>
   );
   const cells: Array<typeof options> = [];

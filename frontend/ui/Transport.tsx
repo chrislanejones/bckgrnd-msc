@@ -5,7 +5,7 @@
  */
 
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { Library as LibraryIcon, Play, SlidersHorizontal, Square } from 'lucide-react';
+import { Library as LibraryIcon, OctagonX, Play, SlidersHorizontal, Square } from 'lucide-react';
 import { engine } from '../lib/engine';
 import { PARTS } from '../lib/stems';
 import type { TrackArrangement } from '../lib/types';
@@ -126,6 +126,7 @@ export function TransportBar({
   mixing,
   liveDeck,
   onTogglePlay,
+  onPanic,
   libraryToggle,
   inspectorToggle,
 }: {
@@ -138,6 +139,8 @@ export function TransportBar({
   mixing: string | null;
   liveDeck: 'a' | 'b';
   onTogglePlay: () => void;
+  /** Present when Panic lives in the bar (every width but the phone's, which docks it). */
+  onPanic?: () => void;
   /** Present when the library is an overlay; opens it. */
   libraryToggle?: { open: boolean; onToggle: () => void };
   /** Present when the inspector can give its column back to the decks; hides it. */
@@ -223,6 +226,8 @@ export function TransportBar({
         )}
       </div>}
 
+      {onPanic ? <PanicButton onPanic={onPanic} /> : null}
+
       {inspectorToggle ? (
         <button
           type="button"
@@ -236,5 +241,25 @@ export function TransportBar({
         </button>
       ) : null}
     </header>
+  );
+}
+
+/**
+ * Panic stops everything and clears the tails. It sits in chrome that never scrolls away
+ * (the bar, or the phone's bottom dock) so it is one press from any view. Its name is
+ * always "Panic", even where only the stop sign shows.
+ */
+export function PanicButton({ onPanic, className }: { onPanic: () => void; className?: string }) {
+  return (
+    <button
+      type="button"
+      className={cx('panic-button', className)}
+      aria-label="Panic"
+      title="Panic: stop everything and clear the tails"
+      onClick={onPanic}
+    >
+      <OctagonX className="size-4 shrink-0" strokeWidth={2.2} aria-hidden />
+      <span className="panic-word">Panic</span>
+    </button>
   );
 }

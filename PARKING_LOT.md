@@ -285,3 +285,12 @@ not. Things to settle before or while building it:
   action "Open", where people may expect Save to write back. The reverse also holds: a
   copy of a file already saved with Save As shares its project ID, so Save updates the
   original Save As file (with a `.bak`) and never the copy. The notice names the path.
+- **The phone bar's second row overflows below about 370px.** The part chips plus the
+  "Stopped" / bar readout need about 210px, but the song-position cell is capped by the
+  first row's columns (168px at 320). The readout runs under the meter's L/R labels. This
+  predates the 11-11 compact pass (old 8px chips overflowed by 68px at 320, now 50px), and
+  verify-ui's bar-overlap check compares element boxes, so it doesn't see text spilling out.
+  The fix is a content decision: drop the readout below 380px, or move the meter. (Lacey, 11-11-2026)
+- **README still puts Panic "under the pads"** (README.md lines 90 and 364). Since the
+  11-11 compact pass it lives in the transport bar, and in the bottom dock on phones.
+  Docs pass for Dara. (Lacey, 11-11-2026)

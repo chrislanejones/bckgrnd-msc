@@ -1080,6 +1080,105 @@ try {
     await page.close();
   }
 
+  // ---- Density, reach and the text floor. ---------------------------------------
+  // Rendered text under 11px, ignoring visually hidden text and words collapsed to 0.
+  const smallText = (page) =>
+    page.evaluate(() => {
+      const found = new Set();
+      const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+      while (walker.nextNode()) {
+        const node = walker.currentNode;
+        const el = node.parentElement;
+        if (!node.textContent.trim() || !el || el.closest('.sr-only, dialog:not([open]), [hidden]')) continue;
+        const box = el.getBoundingClientRect();
+        const style = getComputedStyle(el);
+        if (box.width <= 1 || box.height <= 1 || style.visibility === 'hidden') continue;
+        const size = parseFloat(style.fontSize);
+        if (size > 0 && size < 11) found.add(`${size}px ${el.className || el.tagName} "${node.textContent.trim().slice(0, 16)}"`);
+      }
+      return [...found];
+    });
+  const inView = (page, selector) =>
+    page.evaluate((sel) => {
+      const b = document.querySelector(sel)?.getBoundingClientRect();
+      return Boolean(b && b.width && b.top >= 0 && b.left >= 0 && b.bottom <= innerHeight && b.right <= innerWidth);
+    }, selector);
+
+  {
+    // Compact density is the default for a mouse on a desktop-sized window.
+    const { page } = await open(1440, 900);
+    check('1440x900: Panic is on screen without scrolling', await inView(page, '.panic-button'));
+    const mixer = await page.evaluate(() => {
+      const bank = document.querySelector('.mixer-bank').getBoundingClientRect();
+      const reset = Math.max(...[...document.querySelectorAll('.channel-reset')].map((el) => el.getBoundingClientRect().bottom));
+      return { bottom: Math.round(Math.max(bank.bottom, reset)), height: innerHeight };
+    });
+    check('1440x900: the whole mixer, Reset row included, is above the fold', mixer.bottom <= mixer.height, `bottom at ${mixer.bottom}px`);
+    // Compact must not shrink a mouse target below 24px.
+    const compactTargets = await page.evaluate(() =>
+      ['.channel-actions .stem-badge', '.stems-toolbar .segment', '.track-badge', '.fav', '.panic-button', '.play']
+        .flatMap((sel) => [...document.querySelectorAll(sel)].map((el) => ({ sel, b: el.getBoundingClientRect() })))
+        .filter(({ b }) => b.width && (b.height < 24 || b.width < 24))
+        .map(({ sel, b }) => `${sel} ${Math.round(b.width)}x${Math.round(b.height)}`),
+    );
+    check('1440x900: compact targets stay at least 24px', compactTargets.length === 0, compactTargets.join(', '));
+    let small = await smallText(page);
+    check('1440x900: no rendered text under 11px', small.length === 0, small.join('; '));
+    await page.getByRole('button', { name: 'Edit patterns' }).click();
+    await page.locator('#pattern-drawer').waitFor({ state: 'visible' });
+    small = await smallText(page);
+    check('1440x900 patterns open: no rendered text under 11px', small.length === 0, small.join('; '));
+    await page.close();
+  }
+
+  for (const width of [1179, 960, 900]) {
+    const { page } = await open(width, 800);
+    check(`${width}px: Panic is on screen without scrolling`, await inView(page, '.panic-button'));
+    const small = await smallText(page);
+    check(`${width}px: no rendered text under 11px`, small.length === 0, small.join('; '));
+    await page.close();
+  }
+
+  {
+    const { page } = await open(390, 844, { hasTouch: true, isMobile: true });
+    check('390x844: Panic is on screen without scrolling', await inView(page, '.panic-button'));
+    const small = await smallText(page);
+    check('390x844: no rendered text under 11px', small.length === 0, small.join('; '));
+    const targets = await page.evaluate(() => {
+      const groups = {
+        Panic: '.panic-button',
+        'Release FX': '.deck-safety .text-button',
+        'Loop segments': '.deck-panel .segment',
+        'library toggle': '.transport-brand .icon-button',
+        'fader readouts': '.vfader-readout',
+        'scene options': '.scene-menu-button',
+        'stem selection': '.stems-toolbar .segment',
+      };
+      return Object.entries(groups).map(([name, sel]) => {
+        const boxes = [...document.querySelectorAll(sel)].map((el) => el.getBoundingClientRect()).filter((b) => b.width);
+        return { name, n: boxes.length, min: boxes.length ? Math.round(Math.min(...boxes.map((b) => Math.min(b.width, b.height)))) : 0 };
+      });
+    });
+    for (const t of targets) check(`390x844: ${t.name} targets are at least 44px`, t.n > 0 && t.min >= 44, `${t.n} found, smallest ${t.min}px`);
+    // The short stem-selection labels stay on one line, and keep their full names.
+    const lines = await page.evaluate(() =>
+      [...document.querySelectorAll('.stems-toolbar .segment')].map((el) => {
+        const range = document.createRange();
+        range.selectNodeContents(el);
+        return new Set([...range.getClientRects()].filter((r) => r.width).map((r) => Math.round(r.top))).size;
+      }),
+    );
+    check('390x844: stem selection labels are one line each', lines.every((n) => n === 1), lines.join(','));
+    check('390x844: stem selection keeps its full names',
+      (await page.getByRole('button', { name: 'Drums only', exact: true }).count()) === 1);
+    await page.locator('.save-status').click();
+    const dialogButtons = await page.evaluate(() =>
+      [...document.querySelectorAll('.project-dialog button')].filter((el) => el.getBoundingClientRect().width).map((el) => Math.round(el.getBoundingClientRect().height)),
+    );
+    check('390x844: project dialog buttons are at least 44px', dialogButtons.length > 0 && Math.min(...dialogButtons) >= 44, dialogButtons.join(','));
+    await page.close();
+  }
+
   // ---- Phone: one view at a time. --------------------------------------------
   {
     const { page } = await open(390, 844, { hasTouch: true, isMobile: true });

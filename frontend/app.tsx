@@ -26,7 +26,7 @@ import { MixerChannel } from './ui/MixerChannel';
 import { SceneStrip } from './ui/SceneStrip';
 import { CompareBar } from './ui/CompareBar';
 import { SCENE_SLOTS } from './lib/contract';
-import { TransportBar } from './ui/Transport';
+import { PanicButton, TransportBar } from './ui/Transport';
 
 type View = 'perform' | 'mix' | 'edit';
 
@@ -235,6 +235,7 @@ export function App() {
         mixing={inst.mixing}
         liveDeck={inst.liveDeck}
         onTogglePlay={() => void inst.togglePlay()}
+        onPanic={phone ? undefined : inst.panic}
         libraryToggle={
           libraryDocked
             ? undefined
@@ -307,9 +308,9 @@ export function App() {
                 value={inst.mask}
                 onPick={(m) => m !== 'custom' && inst.applyMask(m)}
                 options={[
-                  { value: 'full', label: 'All sounds' },
-                  { value: 'nomusic', label: 'Drums only' },
-                  { value: 'nodrums', label: 'Music only' },
+                  { value: 'full', label: 'All sounds', short: 'All' },
+                  { value: 'nomusic', label: 'Drums only', short: 'Drums' },
+                  { value: 'nodrums', label: 'Music only', short: 'Music' },
                 ]}
               />
               <button
@@ -438,8 +439,9 @@ export function App() {
               </div>
             </div>
             {/* Three different exits, kept apart: Cancel scene (in the scene strip)
-                restores the previous mix, Release FX lets go of held effects, Panic
-                stops everything and clears the tails. */}
+                restores the previous mix, Release FX (here, beside the held pads) lets
+                go of held effects, and Panic (in the bar, or the phone's bottom dock, so
+                it never scrolls away) stops everything and clears the tails. */}
             <div className="deck-safety">
               <button
                 type="button"
@@ -448,9 +450,6 @@ export function App() {
                 onClick={inst.releaseAllEffects}
               >
                 Release FX
-              </button>
-              <button type="button" className="panic-button" onClick={inst.panic}>
-                Panic
               </button>
             </div>
             <Segmented<number>
@@ -537,25 +536,28 @@ export function App() {
       />
 
       {phone ? (
-        <nav className="view-tabs" aria-label="Views">
-          {(
-            [
-              ['perform', 'Perform'],
-              ['mix', 'Mix'],
-              ['edit', 'Edit'],
-            ] as const
-          ).map(([id, label]) => (
-            <button
-              key={id}
-              type="button"
-              className={cx('view-tab tap')}
-              aria-pressed={view === id}
-              onClick={() => changeView(id)}
-            >
-              {label}
-            </button>
-          ))}
-        </nav>
+        <div className="phone-dock">
+          <nav className="view-tabs" aria-label="Views">
+            {(
+              [
+                ['perform', 'Perform'],
+                ['mix', 'Mix'],
+                ['edit', 'Edit'],
+              ] as const
+            ).map(([id, label]) => (
+              <button
+                key={id}
+                type="button"
+                className={cx('view-tab tap')}
+                aria-pressed={view === id}
+                onClick={() => changeView(id)}
+              >
+                {label}
+              </button>
+            ))}
+          </nav>
+          <PanicButton onPanic={inst.panic} className="dock-panic" />
+        </div>
       ) : null}
     </div>
   );
