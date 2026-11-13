@@ -177,6 +177,26 @@ try {
   await save();
   assert.equal(await page.locator('[data-testid="source-warning"]').count(), 0);
   assert.equal((await file()).source.sha256, realHash);
+  // The static (Netlify) build has no /api behind it. Even a page that carries a desktop
+  // token must keep using browser storage there and never call the native bridge.
+  const isStatic = (await fetch(new URL('/api/tracks', base))).status === 404;
+  if (isStatic) {
+    const web = await browser.newContext(); const tab = await web.newPage(); const nativeCalls = [];
+    await tab.route(new URL('/', base).href, async (route) => {
+      const response = await route.fetch();
+      await route.fulfill({ response, body: (await response.text()).replace('<head>', '<head><meta name="bckgrnd-native-token" content="test">') });
+    });
+    tab.on('request', (r) => { if (r.url().includes('/api/native/')) nativeCalls.push(r.url()); });
+    await tab.goto(base); await tab.waitForFunction(() => !!window.__BCKGRND_PROJECT__?.());
+    await tab.getByRole('button', { name: /^Projects ·/ }).click();
+    await tab.getByLabel('Project name', { exact: true }).fill('Static stays web');
+    await tab.getByRole('button', { name: 'Save project', exact: true }).click();
+    await tab.waitForFunction(() => document.querySelector('[data-testid="project-status"]')?.textContent?.includes('Saved Static stays web'));
+    assert.equal(await tab.getByRole('button', { name: 'Reveal Export' }).count(), 0, 'static build offers no desktop file actions');
+    assert.deepEqual(nativeCalls, [], 'static build never calls the native bridge');
+    await web.close();
+    console.log(`PASS (static) project save/reopen/no-autoplay, Full → Drop → Cancel → save, failed save, migration, preview exclusion, recovery, export cancellation, PCM WAV (${bytes.length} bytes), browser storage despite a desktop token. Artifacts: ${temp}`);
+  } else {
   // Desktop: Save As ties the project to its file, and Save keeps that file current. The
   // bridge is mocked here; ProjectFilesTest covers the real file writes.
   const desktop = await browser.newContext(); const desk = await desktop.newPage();
@@ -208,4 +228,5 @@ try {
   assert.deepEqual(writes(), ['update-file']);
   await desktop.close();
   console.log(`PASS project save/reopen/no-autoplay, Full → Drop → Cancel → save, failed save, migration, preview exclusion, recovery, export cancellation, PCM WAV (${bytes.length} bytes). Artifacts: ${temp}`);
+  }
 } finally { await context.close(); await browser.close(); }

@@ -14,7 +14,7 @@ declare(strict_types=1);
 use App\Support\Music\Library;
 use App\Support\Project\Patterns;
 
-require __DIR__.'/../vendor/autoload.php';
+require __DIR__.'/autoload-app.php';
 
 $out = [];
 foreach (Library::all() as $id => $track) {

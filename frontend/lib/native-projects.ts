@@ -1,9 +1,11 @@
 import type { ProjectRecord, ProjectStore } from './project-store';
 import type { Snapshot } from './snapshot';
 
-export const isDesktop = () => !!document.querySelector('meta[name="bckgrnd-native-token"]');
+// The static (Netlify) build is never the desktop app, whatever the page carries:
+// there is no /api/native behind it. Constant-folded out of the static bundle.
+export const isDesktop = () => import.meta.env.VITE_STATIC !== '1' && !!document.querySelector('meta[name="bckgrnd-native-token"]');
 export async function nativeAction<T = { cancelled?: boolean; path?: string; document?: unknown }>(action: string, body: unknown = {}): Promise<T> {
-  const token = document.querySelector<HTMLMetaElement>('meta[name="bckgrnd-native-token"]')?.content;
+  const token = import.meta.env.VITE_STATIC === '1' ? undefined : document.querySelector<HTMLMetaElement>('meta[name="bckgrnd-native-token"]')?.content;
   if (!token) throw new Error('Native file actions are available in the installed desktop app.');
   const binary = body instanceof ArrayBuffer;
   const response = await fetch(`/api/native/projects/${action}`, { method: 'POST',
