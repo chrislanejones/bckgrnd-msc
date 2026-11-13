@@ -1,5 +1,5 @@
 # ADR-018: A library update warns instead of locking a project out; desktop Save As ties a project to its file
-Date: 2026-11-07   Status: draft
+Date: 2026-11-07   Status: accepted (11-13-2026)
 
 ## Context
 `readSnapshot` threw on any source hash difference, so every saved project refused to

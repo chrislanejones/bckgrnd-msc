@@ -22,12 +22,17 @@ release evidence.
 - [x] Freeze clean source commit, rebuild native/static/MCP, record final hashes.
 - [x] Recheck the final distributable after all packaging transformations.
 - [ ] Installed app, after a rebuild: Save As, edit, Save. The chosen file updates and a `.bak` appears. Then move the file, Save again, and read the warning.
+  11-13-2026: Chris reports Save As and Save work, but the installed app is RC1 (11-06),
+  built before the save fixes. Recheck on rc.2.
 - [x] Execute saved-project validation/render/narration from this actual T3 client.
   11-07-2026, MCP 0.4.0-rc.1-d47ee15-deps: validate valid with no warnings, an 8 s
   render in 583 ms, narration mix at -17.7 LUFS.
-- [ ] Human listening on the installed Linux app, including solo/held effects.
-- [ ] Physical sleep/resume and output-device changes.
-- [ ] Actual minimization: WSL ignored the test request; no pass is claimed.
+- [x] Human listening on the installed Linux app, including solo/held effects.
+  11-13-2026: Chris, hands-on, installed RC1: pass.
+- [x] Physical sleep/resume and output-device changes.
+  11-13-2026: Chris, hands-on, installed RC1: pass.
+- [x] Actual minimization (WSL ignored the automated request).
+  11-13-2026: Chris, hands-on, installed RC1: pass.
 - [x] Verify the intended production deployment identity and cached/fresh clients.
 - [x] Record final rollback locations and source/artifact evidence in the handoff.
 
@@ -54,13 +59,18 @@ Section 1 — architecture
 
 Section 2 — desktop (laptop)
 - [ ] Installed rc.2: Save As, edit, Save; file updates, `.bak` appears, mode not 0600.
+  11-13-2026: Chris reported pass on the installed RC1; rc.2 not built yet, so not rc.2 evidence.
 - [ ] Move the file, Save: warning names the missing file; quit asks; recovery available.
+  11-13-2026: Chris reported pass on the installed RC1; rc.2 not built yet, so not rc.2 evidence.
 - [ ] Human listening: eight stems, solo/mute, Echo Throw, Filter Hold, scenes, fills, drops,
   start/stop clicks, stereo, kick/bass, exported WAV vs live.
+  11-13-2026: Chris reported pass on the installed RC1; rc.2 not built yet, so not rc.2 evidence.
 - [ ] Sleep/resume, output-device change, headphones unplug/replug, minimize/restore,
   close while exporting; nothing stuck.
+  11-13-2026: Chris reported pass on the installed RC1; rc.2 not built yet, so not rc.2 evidence.
 - [ ] `.deb` through the package manager: menu launch, identity/icon, storage, audio, export,
   remove + reinstall keeps projects.
+  11-13-2026: Chris reported pass on the installed RC1; rc.2 not built yet, so not rc.2 evidence.
 
 Section 3 — release (laptop)
 - [ ] Netlify preview from the rc.2 `dist/`, fresh and cached; promote only after Section 2.
