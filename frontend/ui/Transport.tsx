@@ -181,11 +181,16 @@ export function TransportBar({
 
       <div className="now-playing">
         <p className="now-title">
-          <span className={liveDeck === 'a' ? 'text-acid' : 'text-deck-b'}>{liveDeck.toUpperCase()}</span>
-          <span className="text-muted"> · </span>
+          {/* The deck letter needs the decks beside it; a phone shows one view at a time. */}
+          <span className="now-deck">
+            <span className={liveDeck === 'a' ? 'text-acid' : 'text-deck-b'}>{liveDeck.toUpperCase()}</span>
+            <span className="text-muted"> · </span>
+          </span>
           <span className="truncate" title={track.name}>{track.name}</span>
         </p>
         <p className="now-sub">
+          {/* On a phone the tempo rides under the name instead of taking its own column. */}
+          <span className="now-sub-bpm">{bpm} BPM · </span>
           {mixing ? `Mixing into ${mixing}` : [track.section, track.style].filter(Boolean).join(' · ')}
         </p>
       </div>

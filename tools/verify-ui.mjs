@@ -1192,10 +1192,45 @@ try {
     check('phone Perform: deck and stems, no inspector', p.decks && p.stems && !p.inspector && !p.drawer, JSON.stringify(p));
     await page.getByRole('button', { name: 'Mix', exact: true }).click();
     p = await panels();
-    check('phone Mix: stems and inspector, no deck', !p.decks && p.stems && p.inspector && !p.drawer, JSON.stringify(p));
+    check('phone Mix: stems, no deck, inspector waits for its button', !p.decks && p.stems && !p.inspector && !p.drawer, JSON.stringify(p));
     await page.getByRole('button', { name: 'Edit', exact: true }).click();
     p = await panels();
-    check('phone Edit: inspector and pattern', !p.decks && !p.stems && p.inspector && p.drawer, JSON.stringify(p));
+    check('phone Edit: pattern only', !p.decks && !p.stems && !p.inspector && p.drawer, JSON.stringify(p));
+    await page.getByRole('button', { name: 'Perform', exact: true }).click();
+    await page.waitForTimeout(100);
+
+    // The knobs live in a sheet from the right, opened like the library.
+    const knobsButton = page.locator('.transport .inspector-toggle');
+    const kb = await knobsButton.boundingBox();
+    check('phone: the inspector button is in the bar at 44px', Boolean(kb && kb.width >= 44 && kb.height >= 44 && kb.x + kb.width <= 390), JSON.stringify(kb));
+    await page.getByRole('button', { name: 'Show the inspector' }).click();
+    await page.waitForTimeout(300);
+    const sheet = await page.locator('.inspector').boundingBox();
+    check('phone: the inspector opens over Perform', await visible(page, '.inspector'));
+    check('phone: the inspector sheet fits the screen', Boolean(sheet && sheet.x >= 0 && sheet.x + sheet.width <= 390 && sheet.y >= 0), JSON.stringify(sheet));
+    // Edit left it on the stem's tab; the master rack is one tap away.
+    await page.locator('.inspector').getByText('Master', { exact: true }).click();
+    const sheetKnobs = await page.locator('.inspector .knob').count();
+    check('phone: the sheet has the master knobs', sheetKnobs === 14, `${sheetKnobs} knobs`);
+    const tabsBox = await page.locator('.view-tabs').boundingBox();
+    check('phone: the sheet stops above the view tabs', Boolean(sheet && tabsBox && sheet.y + sheet.height <= tabsBox.y + 1), `${sheet && sheet.y + sheet.height} vs ${tabsBox && tabsBox.y}`);
+    await page.getByRole('button', { name: 'Close the inspector' }).click({ position: { x: 10, y: 300 } });
+    await page.waitForTimeout(300);
+    check('phone: tapping outside closes the inspector', !(await visible(page, '.inspector')));
+    await page.getByRole('button', { name: 'Show the inspector' }).click();
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(300);
+    check('phone: Escape closes the inspector', !(await visible(page, '.inspector')));
+    await page.getByRole('button', { name: 'Show the inspector' }).click();
+    await page.getByRole('button', { name: 'Open the library' }).click();
+    await page.waitForTimeout(300);
+    check('phone: opening the library closes the inspector', !(await visible(page, '.inspector')) && (await visible(page, '.library-panel')));
+    await page.getByRole('button', { name: 'Close the library' }).first().click();
+    await page.waitForTimeout(300);
+    await page.getByRole('button', { name: 'Inspect Kick' }).click();
+    await page.waitForTimeout(300);
+    check('phone: Inspect opens the sheet on that stem',
+      (await visible(page, '.inspector')) && (await page.locator('.inspector-stem-name').textContent()) === 'Kick');
     const tabs = await page.locator('.view-tabs').boundingBox();
     check('phone: the view tabs sit at the bottom of the screen', Boolean(tabs && tabs.y + tabs.height <= 844 && tabs.y > 700));
     await page.close();

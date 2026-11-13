@@ -285,7 +285,7 @@ not. Things to settle before or while building it:
   action "Open", where people may expect Save to write back. The reverse also holds: a
   copy of a file already saved with Save As shares its project ID, so Save updates the
   original Save As file (with a `.bak`) and never the copy. The notice names the path.
-- **The phone bar's second row overflows below about 370px.** The part chips plus the
+- ~~**The phone bar's second row overflows below about 370px.**~~ Fixed 11-12-2026: below 380px the readout hides. The part chips plus the
   "Stopped" / bar readout need about 210px, but the song-position cell is capped by the
   first row's columns (168px at 320). The readout runs under the meter's L/R labels. This
   predates the 11-11 compact pass (old 8px chips overflowed by 68px at 320, now 50px), and

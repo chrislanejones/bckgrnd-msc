@@ -65,6 +65,8 @@ export function App() {
   const [view, setView] = useState<View>('perform');
   const [libraryOpen, setLibraryOpen] = useState(false);
   const [inspectorOpen, setInspectorOpen] = useState(true);
+  // On a phone the inspector is a sheet from the right, closed until asked for.
+  const [knobsOpen, setKnobsOpen] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [selected, setSelected] = useState<StemId>('kick');
   const [inspectorTab, setInspectorTab] = useState<InspectorTab>('master');
@@ -106,6 +108,8 @@ export function App() {
     setInspectorTab('stem');
     // "Inspect" has to show something, even after the inspector was hidden for room.
     setInspectorOpen(true);
+    setKnobsOpen(true);
+    setLibraryOpen(false);
   }, []);
 
   function openPattern(id?: StemId) {
@@ -142,6 +146,10 @@ export function App() {
         if (libraryOpen) {
           setLibraryOpen(false);
           document.querySelector<HTMLElement>('[aria-controls="library"]')?.focus();
+        }
+        if (phone && knobsOpen) {
+          setKnobsOpen(false);
+          document.querySelector<HTMLElement>('[aria-controls="inspector"]')?.focus();
         }
         return;
       }
@@ -187,6 +195,11 @@ export function App() {
     if (libraryDocked) setLibraryOpen(false);
   }, [libraryDocked]);
 
+  // The phone's inspector sheet doesn't carry over to a window with a column for it.
+  useEffect(() => {
+    if (!phone) setKnobsOpen(false);
+  }, [phone]);
+
   if (error && (!library || !track || !vols)) {
     return (
       <main className="grid min-h-dvh place-items-center bg-bg p-6 text-fg">
@@ -222,7 +235,7 @@ export function App() {
       data-view={view}
       data-playing={inst.playing ? 'yes' : 'no'}
       data-library={libraryDocked ? 'docked' : libraryOpen ? 'open' : 'closed'}
-      data-inspector={inspectorOpen ? 'open' : 'closed'}
+      data-inspector={(phone ? knobsOpen : inspectorOpen) ? 'open' : 'closed'}
     >
       {error && <div className="audio-error" role="alert"><span>{error}</span><button onClick={() => void inst.togglePlay()}>Resume Audio</button></div>}
       <TransportBar
@@ -241,16 +254,27 @@ export function App() {
             ? undefined
             : {
                 open: libraryOpen,
-                onToggle: () => setLibraryOpen((o) => !o),
+                onToggle: () => {
+                  setLibraryOpen((o) => !o);
+                  setKnobsOpen(false);
+                },
               }
         }
         inspectorToggle={
-          libraryDocked || phone
-            ? undefined
-            : {
-                open: inspectorOpen,
-                onToggle: () => setInspectorOpen((o) => !o),
+          phone
+            ? {
+                open: knobsOpen,
+                onToggle: () => {
+                  setKnobsOpen((o) => !o);
+                  setLibraryOpen(false);
+                },
               }
+            : libraryDocked
+              ? undefined
+              : {
+                  open: inspectorOpen,
+                  onToggle: () => setInspectorOpen((o) => !o),
+                }
         }
       />
 
@@ -262,6 +286,15 @@ export function App() {
             aria-label="Close the library"
             tabIndex={-1}
             onClick={() => setLibraryOpen(false)}
+          />
+        ) : null}
+        {phone && knobsOpen ? (
+          <button
+            type="button"
+            className="scrim"
+            aria-label="Close the inspector"
+            tabIndex={-1}
+            onClick={() => setKnobsOpen(false)}
           />
         ) : null}
         <aside
@@ -512,7 +545,7 @@ export function App() {
 
         </main>
 
-        <aside id="inspector" className="inspector panel" aria-label="Inspector" data-views="mix edit">
+        <aside id="inspector" className="inspector panel" aria-label="Inspector">
           <Inspector
             tab={inspectorTab}
             onTab={setInspectorTab}
