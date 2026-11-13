@@ -221,7 +221,9 @@ body {
 /* Phone: one view at a time — Perform, Mix or Edit — with the transport pinned. */
 @media (max-width: 899.98px) {
   :root {
-    --transport-h: 6.75rem;
+    /* Three rows (name, controls, position): 7.75rem plus the top padding, which
+       grows to clear a notch. Sheets and the scrim start at this line. */
+    --transport-h: calc(7.75rem + max(0.5rem, env(safe-area-inset-top)));
   }
 
   .workspace,
@@ -616,29 +618,33 @@ body {
   .transport {
     grid-template-columns: auto auto minmax(0, 1fr) auto auto;
     grid-template-areas:
-      "brand play now save knobs"
+      "word word word word word"
+      "lib play now save knobs"
       "pos pos pos meter meter";
     row-gap: var(--space-2);
     /* Tighter than the desktop bar: the 44px library toggle comes out of these gaps,
        not out of the track name. */
     column-gap: var(--space-2);
     padding: var(--space-2) var(--space-4);
+    padding-top: max(var(--space-2), env(safe-area-inset-top));
   }
 
-  .transport-brand { grid-area: brand; }
+  /* The name gets the top row to itself; the library button joins row two. */
+  .transport-brand { display: contents; }
+  .transport-brand > .icon-button { grid-area: lib; }
   .play { grid-area: play; width: var(--control-md); height: var(--control-md); }
   .now-playing { grid-area: now; }
 
-  /* Row one reads library, play, track, save, knobs. The wordmark stays for screen
-     readers only, the deck letter goes (no decks beside it), and the tempo moves
-     under the track name. */
+  /* Row two reads library, play, track, save, knobs. The deck letter goes (no decks
+     beside it), and the tempo moves under the track name. */
   .transport .wordmark {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    overflow: hidden;
-    clip-path: inset(50%);
-    white-space: nowrap;
+    grid-area: word;
+    font-size: 1rem;
+    line-height: 1.1;
+  }
+
+  .transport .wordmark::before {
+    content: none;
   }
 
   .now-deck,
