@@ -294,3 +294,22 @@ not. Things to settle before or while building it:
 - **README still puts Panic "under the pads"** (README.md lines 90 and 364). Since the
   11-11 compact pass it lives in the transport bar, and in the bottom dock on phones.
   Docs pass for Dara. (Lacey, 11-11-2026)
+
+## Found in the rc.2 acceptance run (11-13-2026)
+
+- **The MCP's shared renderer is one change behind the app.** MCP `0.4.0-rc.1` vendors
+  `shared/runtime.js` and `snapshot.d.ts` from RC1. The app's copies now carry ADR-018's
+  optional `onSourceChanged` callback (`ecb3d41`). The MCP never passes it, so it still
+  refuses a changed library exactly as before, and engine, contracts, library and
+  fixtures all match byte for byte (55 of 57 vendored files). Resyncing means an MCP
+  `0.4.0-rc.2`; Chris decides whether that's needed for this release.
+- **`bckgrnd_render_project` gives a raw `ENOENT … mkdtemp` when the output folder
+  doesn't exist.** It should create the folder or say "the folder … doesn't exist".
+  (MCP repo.)
+- **Narration under a hot voice peaks at -0.4 dBTP** when `final_lufs` isn't set (voice
+  raised +5 dB to -16 LUFS). Fine for MP3 at that level, but close to the line; a
+  default ceiling of about -1 dBTP would be safer. (MCP repo.)
+- **verify-ui can time out under heavy machine load.** Inside `verify:desktop` on
+  11-13-2026, the wait for playback after "Bring in Clap" + Space (verify-ui.mjs line
+  218) hit its 30 s limit while another session ran Playwright. Five standalone runs
+  passed 301/301 right after. If it repeats on a quiet machine, look at it then.
