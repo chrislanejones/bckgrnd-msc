@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@import "./fonts/fonts.css";
 
 /*
  * Tokens. The rules for using them are in docs/DESIGN_PHILOSOPHY.md: color explains
@@ -506,6 +507,14 @@ body {
 @media (max-width: 1379.98px) {
   .master-meter-readout {
     display: none;
+  }
+}
+
+/* Syne is wide: below 1280px the wordmark steps down so the track name and Panic
+   keep their room. (Measured with the bundled fonts, not a fallback.) */
+@media (max-width: 1279.98px) {
+  .wordmark {
+    font-size: 0.9375rem;
   }
 }
 

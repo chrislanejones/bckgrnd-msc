@@ -64,6 +64,14 @@ const app = readFileSync(resolve(dist, 'build/assets/app.js'), 'utf8');
 check('shell carries no desktop token', !html.includes('bckgrnd-native-token'));
 check('shell cache-busts app.js/app.css with this build',
   html.includes(`app.js?v=${manifest.buildId}`) && html.includes(`app.css?v=${manifest.buildId}`));
+// The bundled typefaces ship, and every file the stylesheet points at is there.
+const css = readFileSync(resolve(dist, 'build/assets/app.css'), 'utf8');
+const refs = [...css.matchAll(/url\(["']?(\/build\/[^"')?#]+)/g)].map((m) => m[1]);
+const missingRefs = refs.filter((r) => !files.includes(r.slice(1)));
+check('stylesheet references resolve in dist', missingRefs.length === 0, missingRefs.join(', ') || `${refs.length} files`);
+for (const font of ['outfit-latin', 'outfit-latin-ext', 'syne-latin', 'syne-latin-ext']) {
+  check(`bundled font ${font} ships`, files.some((f) => new RegExp(`^build/assets/${font}-[\\w-]+\\.woff2$`).test(f)) && css.includes(`/${font}-`));
+}
 check('bundle has the desktop store folded out', !app.includes('bckgrnd-native-token'),
   'isDesktop() must be constant-false when VITE_STATIC=1');
 check('bundle is pinned to this build (worklet/wasm cache key)', app.includes(manifest.buildId));
