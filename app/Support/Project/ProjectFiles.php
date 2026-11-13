@@ -68,8 +68,12 @@ final class ProjectFiles
     public static function saveFile(string $path, array $snapshot): void
     {
         $snapshot['project'] = Contract::migrate($snapshot['project']);
-        if (is_file($path) && !copy($path, $path.'.bak')) throw new RuntimeException('Cannot back up the existing project file.');
-        self::atomicWrite($path, json_encode($snapshot, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR));
+        // A symlinked project file is updated where it points, never replaced by a copy.
+        if (is_link($path) && ($target = realpath($path)) !== false) $path = $target;
+        $existed = is_file($path);
+        if ($existed && !copy($path, $path.'.bak')) throw new RuntimeException('Cannot back up the existing project file.');
+        // A new file the person chose gets ordinary permissions, not the temp file's 0600.
+        self::atomicWrite($path, json_encode($snapshot, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR), $existed ? null : 0666 & ~umask());
     }
 
     /** Save As ties a project to its file, so a later Save can keep that file current. */
@@ -114,11 +118,17 @@ final class ProjectFiles
         } finally { flock($lock, LOCK_UN); fclose($lock); }
     }
 
-    public static function atomicWrite(string $path, string $bytes): void
+    /**
+     * Replace $path with $bytes, or leave it untouched. An existing file keeps its
+     * permissions; a new one gets $mode, or tempnam's private 0600 when none is given.
+     */
+    public static function atomicWrite(string $path, string $bytes, ?int $mode = null): void
     {
         $temp = tempnam(dirname($path), '.bckgrnd-');
         if (!$temp) throw new RuntimeException('Cannot create a temporary output file.');
         try {
+            $keep = is_file($path) ? fileperms($path) & 0777 : $mode;
+            if ($keep !== null && !chmod($temp, $keep)) throw new RuntimeException('Cannot set output file permissions.');
             $file = fopen($temp, 'wb');
             if (!$file) throw new RuntimeException('Cannot open output file.');
             try {
