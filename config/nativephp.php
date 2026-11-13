@@ -25,7 +25,6 @@ return [
      * nativephp://some/path
      */
     'deeplink_scheme' => env('NATIVEPHP_DEEPLINK_SCHEME'),
-
     /**
      * The author of your application.
      */
@@ -34,12 +33,12 @@ return [
     /**
      * The copyright notice for your application.
      */
-    'copyright' => env('NATIVEPHP_APP_COPYRIGHT'),
+    'copyright' => env('NATIVEPHP_APP_COPYRIGHT', 'Copyright © 2026 Chris Lane Jones'),
 
     /**
      * The description of your application.
      */
-    'description' => env('NATIVEPHP_APP_DESCRIPTION', 'Create, save and render music locally with bckgrnd-msc.'),
+    'description' => env('NATIVEPHP_APP_DESCRIPTION', 'A hands-on stem machine for building, editing, and performing music.'),
 
     /**
      * The Website of your application.
@@ -75,11 +74,7 @@ return [
         'NATIVEPHP_AZURE_CODE_SIGNING_ACCOUNT_NAME',
     ],
 
-    /**
-     * A list of files and folders that should be removed from the
-     * final app before it is bundled for production.
-     * You may use glob / wildcard patterns here.
-     */
+    // Keep public/build: the packaged webview serves the frontend from it.
     'cleanup_exclude_files' => [
         'build',
         'temp',
@@ -121,9 +116,7 @@ return [
         'screenshots',
     ],
 
-    /**
-     * The NativePHP updater configuration.
-     */
+    // Disabled until a real, tested update feed is configured.
     'updater' => [
         /**
          * Whether or not the updater is enabled. Please note that the
@@ -136,7 +129,7 @@ return [
          * The updater provider to use.
          * Supported: "github", "s3", "spaces"
          */
-        'default' => env('NATIVEPHP_UPDATER_PROVIDER', 'spaces'),
+        'default' => env('NATIVEPHP_UPDATER_PROVIDER', 'github'),
 
         'providers' => [
             'github' => [
@@ -149,7 +142,6 @@ return [
                 'channel' => env('GITHUB_CHANNEL', 'latest'),
                 'releaseType' => env('GITHUB_RELEASE_TYPE', 'draft'),
             ],
-
             's3' => [
                 'driver' => 's3',
                 'key' => env('AWS_ACCESS_KEY_ID'),
@@ -159,7 +151,6 @@ return [
                 'endpoint' => env('AWS_ENDPOINT'),
                 'path' => env('NATIVEPHP_UPDATER_PATH', null),
             ],
-
             'spaces' => [
                 'driver' => 'spaces',
                 'key' => env('DO_SPACES_KEY_ID'),
@@ -176,25 +167,14 @@ return [
      */
     'queue_workers' => [],
 
-    /**
-     * Define your own scripts to run before and after the build process.
-     */
     'prebuild' => [
-        // Rebuild the wasm engine and the frontend before packaging. pnpm, not
-        // npm: the lockfile is pnpm-lock.yaml and `npm run build` would resolve
-        // against a different dependency tree.
         'pnpm run build:engine',
         'pnpm run build',
     ],
 
     'postbuild' => [
-        // The build products are needed at runtime, so nothing is pruned here.
-        // (An earlier note suggested removing public/build; that is wrong — the
-        // packaged app serves these files from the webview.)
+        // Runtime assets must remain available to the packaged webview.
     ],
 
-    /**
-     * Custom PHP binary path.
-     */
     'binary_path' => env('NATIVEPHP_PHP_BINARY_PATH', null),
 ];
