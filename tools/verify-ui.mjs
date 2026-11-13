@@ -38,8 +38,18 @@ async function open(width, height, extra = {}) {
   page.on('console', (m) => m.type() === 'error' && errors.push(m.text()));
   await page.goto(`${baseUrl}/`, { waitUntil: 'networkidle' });
   await page.waitForSelector('article.stem');
+  // Layout is measured in the bundled typefaces, never in whatever the machine falls back to.
+  const fonts = await page.evaluate(async () => {
+    await document.fonts.ready;
+    return ['Outfit', 'Syne'].map((f) => [f, document.fonts.check(`700 16px "${f}"`) && [...document.fonts].some((x) => x.family.replaceAll('"', '') === f && x.status === 'loaded')]);
+  });
+  if (!fontsChecked) {
+    fontsChecked = true;
+    for (const [f, ok] of fonts) check(`the bundled ${f} typeface is loaded`, ok);
+  }
   return { page, errors };
 }
+let fontsChecked = false;
 
 const stemState = (page, id) =>
   page.evaluate((stem) => {

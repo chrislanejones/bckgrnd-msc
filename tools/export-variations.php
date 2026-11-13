@@ -21,7 +21,7 @@ use App\Support\Music\Library;
 use App\Support\Project\Patterns;
 use App\Support\Project\Variation;
 
-require __DIR__.'/../vendor/autoload.php';
+require __DIR__.'/autoload-app.php';
 
 $outDir = $argv[1] ?? __DIR__.'/../public/library/variations';
 if (! is_dir($outDir) && ! mkdir($outDir, 0o755, true) && ! is_dir($outDir)) {

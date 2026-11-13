@@ -29,10 +29,13 @@ function run(command, args, label) {
 
 // 1. Export the library from PHP. This is the same `App\Support\Music\Library` the API
 //    serves, so the two shapes are guaranteed to describe the same instrument.
-if (!existsSync(resolve(root, 'vendor/autoload.php'))) {
-  console.error(
-    '[static] vendor/ is missing — run `composer install` before the static build.',
-  );
+//    Only the PHP CLI is needed: the exporters autoload `App\` themselves
+//    (tools/autoload-app.php), so the web build never runs `composer install` and never
+//    installs NativePHP or its PHP platform requirement.
+try {
+  execFileSync('php', ['--version'], { stdio: 'ignore' });
+} catch {
+  console.error('[static] the PHP CLI is needed at build time (not at runtime) to export the library.');
   process.exit(1);
 }
 run('php', ['tools/export-library.php', 'public/library'], 'exporting the track library');

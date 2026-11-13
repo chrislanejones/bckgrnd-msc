@@ -35,3 +35,34 @@ Unsigned Linux candidate only. `.deb` package-manager installation, Windows,
 macOS and real iOS/Android devices are untested until separate evidence exists.
 No automatic updater is enabled. No release may infer those platforms from WSL
 signal measurements or responsive browser checks.
+
+## Night 6G — final acceptance (rc.2)
+
+Cloud half done 11-13-2026; laptop runbook in
+[sessions/2026-11-13-night6g.md](sessions/2026-11-13-night6g.md). Desktop runtime changed
+(file permissions/symlink fix, UI), so the desktop is rebuilt as `0.6.0-rc.2`. The musical
+bundle (engine, library, contracts, shared renderer) did not change.
+
+Section 1 — architecture
+- [x] Netlify build needs no Composer install, no NativePHP, PHP CLI at build time only
+  (verified with no `vendor/`, PHP 8.3).
+- [x] Static bundle cannot select the native store; zero `/api/native` calls even with a token.
+- [x] `check:dist`: dist assets, manifest hashes, and desktop↔web parity of engine, worklet,
+  contracts, shared renderer, project/snapshot versions and track library.
+- [x] Separate `verify:web` (7/7 pass in cloud) and `verify:desktop` commands.
+- [ ] `verify:desktop` and Rust gates on the laptop with the RC toolchain; engine hash = RC1.
+
+Section 2 — desktop (laptop)
+- [ ] Installed rc.2: Save As, edit, Save; file updates, `.bak` appears, mode not 0600.
+- [ ] Move the file, Save: warning names the missing file; quit asks; recovery available.
+- [ ] Human listening: eight stems, solo/mute, Echo Throw, Filter Hold, scenes, fills, drops,
+  start/stop clicks, stereo, kick/bass, exported WAV vs live.
+- [ ] Sleep/resume, output-device change, headphones unplug/replug, minimize/restore,
+  close while exporting; nothing stuck.
+- [ ] `.deb` through the package manager: menu launch, identity/icon, storage, audio, export,
+  remove + reinstall keeps projects.
+
+Section 3 — release (laptop)
+- [ ] Netlify preview from the rc.2 `dist/`, fresh and cached; promote only after Section 2.
+- [ ] MCP through T3 against rc.2 projects; hashes match.
+- [ ] rc.2 release record, hashes, deploy ID, Codeberg/GitHub sync, integration PR, rollback.

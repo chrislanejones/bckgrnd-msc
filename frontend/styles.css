@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@import "./fonts/fonts.css";
 
 /*
  * Tokens. The rules for using them are in docs/DESIGN_PHILOSOPHY.md: color explains
@@ -449,7 +450,9 @@ body {
 /* Master meter: two thin bars, a peak-hold tick, a numeric peak, and a clip light. */
 .master-meter {
   display: grid;
-  grid-template-columns: 8rem auto auto;
+  /* The meter gives way first when the bar is tight (fallback fonts are wider than
+     Segoe UI), so Panic is never pushed past the window edge. */
+  grid-template-columns: minmax(4rem, 8rem) auto auto;
   align-items: center;
   gap: var(--space-2);
 }
@@ -530,6 +533,14 @@ body {
 @media (max-width: 1379.98px) {
   .master-meter-readout {
     display: none;
+  }
+}
+
+/* Syne is wide: below 1280px the wordmark steps down so the track name and Panic
+   keep their room. (Measured with the bundled fonts, not a fallback.) */
+@media (max-width: 1279.98px) {
+  .wordmark {
+    font-size: 0.9375rem;
   }
 }
 

@@ -42,7 +42,9 @@ export default defineConfig({
       output: {
         entryFileNames: 'assets/app.js',
         chunkFileNames: 'assets/[name].js',
-        assetFileNames: 'assets/app.[ext]',
+        // The stylesheet keeps its fixed name for the shell; everything else it pulls
+        // in (the bundled fonts) is hashed, or the files would overwrite each other.
+        assetFileNames: (asset) => (asset.names?.[0] ?? asset.name ?? '').endsWith('.css') ? 'assets/app.css' : 'assets/[name]-[hash][extname]',
       },
     },
   },

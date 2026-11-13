@@ -1,7 +1,10 @@
 # Night 6 — release evidence
 
 Status: Linux candidate built/installed and website deployed; **not final Night 6
-signoff**. Browser persistence/export, installed automation and packed MCP pass.
+signoff**. Night 6G (11-13): web/desktop build independence and a desktop file fix landed;
+the desktop becomes `0.6.0-rc.2`. Remaining gates and the laptop runbook are in
+[sessions/2026-11-13-night6g.md](sessions/2026-11-13-night6g.md).
+Browser persistence/export, installed automation and packed MCP pass.
 Actual T3 tool execution, physical audio listening and device interruptions remain
 open. Night 5 persistence/export was absent at baseline and was implemented here.
 

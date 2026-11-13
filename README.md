@@ -448,7 +448,7 @@ files on disk ([ADR-002](docs/adr/002-laravel-runs-stateless.md)).
 |---|---|
 | `pnpm run build:engine` | Rust engine → `public/wasm/` via `wasm-pack`. |
 | `pnpm run build` | Worklet and app → `public/build/`. |
-| `pnpm run build:static` | The PHP-free shell, `public/index.html`, and the variation catalog. |
+| `pnpm run build:static` | The PHP-free shell, `public/index.html`, and the variation catalog. Needs the PHP CLI at build time only — no `composer install`, no NativePHP. |
 | `pnpm run build:netlify` | Engine, app and static export, assembled into `dist/`. |
 | `pnpm run dev` | Vite dev server with the worklet on watch. |
 | `composer test` | PHPUnit, Rust tests, parity, arrangement, the contract, the scene and editing logic, `verify:audio`, `verify:ui` and `verify:editor`. The last three need the app running on `:8080`. |
@@ -470,6 +470,9 @@ files on disk ([ADR-002](docs/adr/002-laravel-runs-stateless.md)).
 | `pnpm run verify:audio` | Drives the real worklet in Chromium and asserts audio, pattern edits landing on the bar included. |
 | `pnpm run verify:static` | The same, against the static build, plus no API calls and the variation catalog. |
 | `pnpm run verify:projects` | Save/reopen/export, Cancel restoration, failure, recovery, migrations and preview exclusion. |
+| `pnpm run check:dist` | Audits `dist/` without a browser: required assets, nothing PHP/env/vendor, manifest hashes, and the same engine/worklet/contracts/renderer/library as the desktop build. |
+| `pnpm run verify:web` | The Netlify distribution end to end: shared gates, `check:dist`, then `verify:static` and `verify:projects` against `dist/` on a plain static server. Build with `build:netlify` first. |
+| `pnpm run verify:desktop` | The desktop distribution: shared gates, PHPUnit, then the UI/editor/audio/project checks against `artisan serve`; `VERIFY_NATIVE=1` adds the installed-app check. |
 | `node tools/verify-transitions.mjs` | Actual forward playback across Break and Drop, with bounded event conditions. |
 | `node tools/verify-resume.mjs` | Simulated audio interruption and failed/successful resume. |
 | `node tools/verify-native.mjs` | Installed Linux/X11 file dialogs, persistence, close failures and export cancellation. See release protocol for its test-only environment variables. |

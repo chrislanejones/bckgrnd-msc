@@ -76,6 +76,24 @@ final class ProjectFilesTest extends TestCase
         $this->assertNull($reopened->linkedFile($first['id']));
         $this->assertFileExists($file);
     }
+    public function test_saving_a_file_keeps_its_permissions_and_follows_a_symlink(): void
+    {
+        $file = $this->dir.'/shared.bckgrnd'; $old = umask(0022);
+        try {
+            ProjectFiles::saveFile($file, $this->snapshot(1));
+            $this->assertSame(0644, fileperms($file) & 0777, 'A new file gets ordinary permissions, not 0600');
+            chmod($file, 0664);
+            ProjectFiles::saveFile($file, $this->snapshot(2));
+            $this->assertSame(0664, fileperms($file) & 0777, 'Saving again keeps the permissions the person set');
+            $this->assertSame(2, json_decode(file_get_contents($file))->revision);
+
+            $link = $this->dir.'/link.bckgrnd'; symlink($file, $link);
+            ProjectFiles::saveFile($link, $this->snapshot(3));
+            $this->assertTrue(is_link($link), 'The symlink is still a symlink');
+            $this->assertSame(3, json_decode(file_get_contents($file))->revision, 'The file it points to was updated');
+            $this->assertSame(2, json_decode(file_get_contents($file.'.bak'))->revision);
+        } finally { umask($old); }
+    }
     public function test_unknown_versions_and_invalid_patterns_fail_before_write(): void
     {
         $store = new ProjectFiles($this->dir);

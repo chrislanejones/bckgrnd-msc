@@ -20,7 +20,7 @@
     "verify:audio": "node tools/verify-audio.mjs",
     "verify:static": "node tools/verify-static.mjs",
     "serve": "php artisan serve --host=0.0.0.0 --port=8080",
-    "serve:static": "php -S 0.0.0.0:8090 -t dist",
+    "serve:static": "node tools/serve-dist.mjs 8090 0.0.0.0",
     "dev": "pnpm exec concurrently -k \"node scripts/build-worklet.mjs --watch\" \"vite\"",
     "verify:ui": "node tools/verify-ui.mjs",
     "verify:editor": "node tools/verify-editor.mjs",
@@ -28,7 +28,10 @@
     "check:scenes": "node tools/check-scenes.mjs",
     "check:editing": "node tools/check-editing.mjs",
     "verify:projects": "node tools/verify-projects.mjs",
-    "build:shared": "node scripts/build-shared.mjs"
+    "build:shared": "node scripts/build-shared.mjs",
+    "check:dist": "node tools/check-dist.mjs",
+    "verify:web": "node tools/verify-suite.mjs web",
+    "verify:desktop": "node tools/verify-suite.mjs desktop"
   },
   "dependencies": {
     "lucide-react": "^0.510.0",
