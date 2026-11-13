@@ -58,8 +58,19 @@ const browser = await chromium.launch({
 try {
   const page = await browser.newPage();
   const consoleErrors = [];
+  // Netlify's free plan injects /.netlify/scripts/hud (the "Powered by
+  // Netlify" badge), and that can't be turned off. The script builds an
+  // about:srcdoc iframe with an inline script, which our CSP blocks. The app
+  // never uses srcdoc, so only that exact error is skipped, and only when the
+  // badge script is on the page. Every other console error still fails.
+  const netlifyBadgeErrors = [];
   page.on('console', (m) => {
-    if (m.type() === 'error') consoleErrors.push(m.text());
+    if (m.type() !== 'error') return;
+    if (m.location().url === 'about:srcdoc' && m.text().includes('Content Security Policy')) {
+      netlifyBadgeErrors.push(m.text());
+      return;
+    }
+    consoleErrors.push(m.text());
   });
   page.on('pageerror', (e) => consoleErrors.push(e.message));
   page.on('requestfailed', (r) => consoleErrors.push(`request failed: ${r.url()}`));
@@ -168,6 +179,13 @@ try {
   check('meters show signal', audio.maxLevel > 0.001, `max level ${audio.maxLevel.toFixed(4)}`);
   check('no worklet errors', audio.errors.length === 0, audio.errors.join('; '));
   check('no console errors', consoleErrors.length === 0, consoleErrors.join('; '));
+  if (netlifyBadgeErrors.length) {
+    const badgeOnPage = await page
+      .locator('script[src^="/.netlify/scripts/hud"]')
+      .count();
+    check('skipped errors come only from the Netlify badge', badgeOnPage > 0,
+      `${netlifyBadgeErrors.length} skipped, badge script ${badgeOnPage ? 'present' : 'MISSING'}`);
+  }
 } finally {
   await browser.close();
 }
