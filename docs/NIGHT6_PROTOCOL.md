@@ -1,12 +1,13 @@
 # Night 6 — release evidence
 
-Status: Linux candidate built/installed and website deployed; **not final Night 6
-signoff**. Night 6G (11-13): web/desktop build independence and a desktop file fix landed;
-the desktop becomes `0.6.0-rc.2`. Remaining gates and the laptop runbook are in
-[sessions/2026-11-13-night6g.md](sessions/2026-11-13-night6g.md).
-Browser persistence/export, installed automation and packed MCP pass.
-Actual T3 tool execution, physical audio listening and device interruptions remain
-open. Night 5 persistence/export was absent at baseline and was implemented here.
+Status: **rc.2 built, installed and previewed; not final Night 6 signoff.**
+11-13-2026: `0.6.0-rc.2` built from `5b0c6ad` with RC1's toolchain and lockfiles, engine
+hash identical to RC1, web and desktop on one build `e479e3e1ae63`. `verify:web` 7/7,
+`verify:desktop` 9/9, Rust 259, PHPUnit 247, installed rc.2 ↔ browser ↔ MCP byte-identical,
+MCP through T3 passes. Chris passed listening, sleep/resume, device changes and minimize
+on the installed RC1. Record: [releases/2026-11-13-linux-rc2.json](releases/2026-11-13-linux-rc2.json).
+Still open: `.deb` via apt, `verify-native` on rc.2 (needs xdotool), hands-on Save As/
+moved-file checks on rc.2, promotion to production and the cached-session reload.
 
 ## Baseline, 2026-11-06
 
@@ -139,23 +140,19 @@ because the generated launcher disabled the sandbox.
 
 ## Remaining manual or external evidence
 
-Actual speaker listening (including solo/Filter Hold), physical sleep/resume and
-output-device changes remain unverified. Minimization is unverified because WSL's
-window manager left WM_STATE Normal after the minimize request. This is explicitly
-separate from a passed simulated AudioContext interruption/resume test.
+Updated 11-13-2026. Chris passed speaker listening (including solo/held effects),
+physical sleep/resume, output-device changes and minimize on the installed RC1. The
+engine is byte-identical in rc.2, so those sound results carry over; the rc.2 runtime
+changes are file saving and layout.
 
-The permanent WSL launcher selects Electron 40's native GTK dialog fallback.
-Import, Save As, export, dialog cancellation and close recovery passed without the
-temporary portal processes. The installed app launches with the checkout hidden;
-its probe also passed with development servers stopped. Export workers completed
-while the live app continued playing. Ordinary playback/export has no ffmpeg or
-developer-tool dependency. Test CDP flags are not used for normal startup.
+Still open for rc.2: `.deb` installation through the package manager, `verify-native`
+against the installed rc.2 (xdotool is not installed), and the hands-on Save As /
+moved-file checks that exercise tonight's file fixes. T3 tool execution now passes
+(see the rc.2 record). Windows/macOS, real phones and a signed distribution remain
+untested.
 
-Only the `bckgrnd-msc` client entry was added. This active T3 session has not
-reloaded the tools, so it cannot yet execute the final validation/render/narration
-sequence. The installed SDK stdio test is not client signoff. Windows/macOS, real
-phones, `.deb` installation and a signed distribution remain untested.
-
-Rollback instructions and preserved locations are in the
-[latest handoff](sessions/2026-11-06-night6-release.md). Do not mark Night 6 complete
-while its required client and physical-audio gates remain open.
+Rollback: RC1 stays installed under `~/.local/share/bckgrnd-msc/versions/c5ec3db0…` and
+packaged in `releases/night6-rc1-4f5a5e3`; rc.2 is packaged in
+`releases/night6-rc2-5b0c6ad`. Projects live in `~/.config/bckgrnd-msc/storage/app/projects`
+and neither version touches them. Do not mark Night 6 complete while the rc.2
+installation and file checks remain open.

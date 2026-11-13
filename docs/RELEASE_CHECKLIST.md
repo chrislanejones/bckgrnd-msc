@@ -55,7 +55,8 @@ Section 1 — architecture
 - [x] `check:dist`: dist assets, manifest hashes, and desktop↔web parity of engine, worklet,
   contracts, shared renderer, project/snapshot versions and track library.
 - [x] Separate `verify:web` (7/7 pass in cloud) and `verify:desktop` commands.
-- [ ] `verify:desktop` and Rust gates on the laptop with the RC toolchain; engine hash = RC1.
+- [x] `verify:desktop` and Rust gates on the laptop with the RC toolchain; engine hash = RC1.
+  11-13-2026: verify:desktop 9/9, Rust 259, PHPUnit 247; engine `6ed97035573c` = RC1.
 
 Section 2 — desktop (laptop)
 - [ ] Installed rc.2: Save As, edit, Save; file updates, `.bak` appears, mode not 0600.
@@ -74,5 +75,10 @@ Section 2 — desktop (laptop)
 
 Section 3 — release (laptop)
 - [ ] Netlify preview from the rc.2 `dist/`, fresh and cached; promote only after Section 2.
-- [ ] MCP through T3 against rc.2 projects; hashes match.
+  11-13-2026: preview `6af6c83ce8d6948f50e91aa2` (build `e479e3e1ae63`) passes 12/12 fresh.
+  Cached reload runs after promotion.
+- [x] MCP through T3 against rc.2 projects; hashes match.
+  11-13-2026: all workflows pass; installed rc.2 ↔ browser ↔ MCP WAVs byte-identical. 55/57 vendored
+  files identical; the 2 shared-renderer files differ only by ADR-018's unused callback.
 - [ ] rc.2 release record, hashes, deploy ID, Codeberg/GitHub sync, integration PR, rollback.
+  11-13-2026: record drafted with hashes and rollback; production deploy ID and sync follow promotion.

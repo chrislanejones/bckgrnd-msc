@@ -1,0 +1,116 @@
+{
+  "candidate": "night6-linux-rc2",
+  "releaseSignoff": false,
+  "date": "2026-11-13",
+  "runtimeAppCommit": "5b0c6ada6b250923d37220f90b8a288a41980570",
+  "mcpCommit": "d47ee150cc193c3360617ffac223399c6aed3dd6",
+  "mcpVersion": "0.4.0-rc.1",
+  "desktopVersion": "0.6.0-rc.2",
+  "buildId": "e479e3e1ae63158e0d647602759fdae36d1c4a9a4464382f729ef5b305896eba",
+  "engineSha256": "6ed97035573c5598c6e262d75d1e9954c1a8ed24f2510298604d2187a8972daa",
+  "engineBytes": 231072,
+  "engineMatchesRc1": true,
+  "renderer": "project-renderer-1",
+  "projectSchema": 3,
+  "snapshotSchema": 1,
+  "changesSinceRc1": [
+    "Desktop project files keep their permissions and symlinks on Save (5297ca6)",
+    "Library updates warn instead of locking a project out; Save As ties a project to its file (ecb3d41, ADR-018)",
+    "Bundled Outfit and Syne fonts; the only new files in the package",
+    "Compact desktop layout, Panic in reach, phone knobs sheet, phone top bar with the name on its own row",
+    "Netlify build no longer needs Composer or NativePHP (10c2747)",
+    "Identity: copyright and description; updater stays off"
+  ],
+  "runtimes": {
+    "developmentPhp": "8.4.26",
+    "composer": "2.10.3",
+    "node": "24.21.0",
+    "pnpm": "10.26.0",
+    "rust": "1.98.1",
+    "wasmPack": "0.15.0",
+    "wasmOpt": "116",
+    "nativePhp": "2.4.0",
+    "note": "Same toolchain and lockfiles as RC1; Electron and packaged PHP come from the unchanged nativephp lockfile"
+  },
+  "lockfiles": {
+    "composer.lock": "89fe27526bed9a7f858ab8dbad2eaa9d025a07ecb0fecad4d817cf2b6cdcb6c3",
+    "pnpm-lock.yaml": "a91b3f834b67b3603774330ec2de392935366308f46b5a6e8daff6b75e29ed11",
+    "engine-core/Cargo.lock": "635811d19f56434edf2dece26e09bd76638635d9fd65c219980fa072b9f6ef20",
+    "nativephp/pnpm-lock.yaml": "a4b02f4661f66aeb342cd31ad2876f865b6569dea17b6138dd6d0aab08f172ec"
+  },
+  "artifacts": {
+    "bckgrnd-msc-0.6.0-rc.2.tar.xz": {
+      "sha256": "c41f83f470947b7e422a20eeb2f29a9c034ad613c9895ce9c09e4643d6d01699",
+      "bytes": 101239548
+    },
+    "bckgrnd-msc_0.6.0-rc.2_amd64.deb": {
+      "sha256": "c4e3503af04f08b01800e6328fb75e93430c0934f7743680421f298370385418",
+      "bytes": 117501708
+    },
+    "bckgrnd-msc-mcp-0.4.0-rc.1.tgz": {
+      "sha256": "e385e4320996e94bce368adc7fb0874ab0eccb15fb450759f17ec0a1f464a396",
+      "bytes": 434902
+    },
+    "bckgrnd-msc-static-e479e3e1ae63.tar.xz": {
+      "sha256": "6a21b8d1bdf3fd2325c9f620ea94ace214f49fc2dfbe281827366a009dd64fe5",
+      "bytes": 468852
+    },
+    "install-linux.sh": {
+      "sha256": "f03285c8695580d1c84b5ce5e232cc0aa57e4ea09e3ca33bd41c43a6c8123be8",
+      "bytes": 2077
+    },
+    "build-manifest.json": {
+      "sha256": "1b6cfcccd2147c841be4a27dcd20d1ddd2f2a972cb43c1bed04320f5ca0b8d6d",
+      "bytes": 11369
+    }
+  },
+  "packageAudit": "rc.2 tar holds RC1's 7,632 paths plus the four bundled font files, nothing else. Packaged build ID and engine hash match dist/. resources/build/app/.env is present, as in RC1 (NativePHP writes it with cleanup_env_keys removed); its contents were not opened in this run.",
+  "platforms": {
+    "linux-x64": "installed tar under Debian 13 WSL2/WSLg; unsigned",
+    "linux-deb": "built and hashed; package-manager installation not yet run for rc.2",
+    "windows": "not tested",
+    "macos": "not tested",
+    "ios": "not tested",
+    "android": "not tested"
+  },
+  "tests": {
+    "php": { "tests": 247, "assertions": 5848 },
+    "rust": 259,
+    "web": "verify:web 7/7 (contract, scenes, editing, typecheck, dist audit, static library/catalog/audio, static projects)",
+    "desktop": "verify:desktop 9/9 (contract, scenes, editing, typecheck, phpunit, ui 301, editor 73, audio, projects)",
+    "parity": "installed rc.2, Laravel browser and MCP 0.4.0-rc.1: identical resolved events, frame counts and byte-identical PCM WAV for the edited and silent fixtures",
+    "native": "verify-native not run for rc.2: xdotool is not installed on this host",
+    "mcpThroughT3": "10 tools; validate and render edited, scenes and silent projects; narration over a saved project and a stock track; stock-track render; missing ffmpeg gives install instructions and writes nothing; changed library refused (ADR-018 no-callback path)",
+    "mcpVendorParity": "55 of 57 vendored files byte-identical to the app (engine, contracts, library, fixtures). shared/runtime.js and snapshot.d.ts differ only by ADR-018's optional onSourceChanged callback, which the MCP does not pass"
+  },
+  "humanChecks": {
+    "installedRc1": "Chris, 11-13-2026: listening, sleep/resume, output-device changes and minimize pass",
+    "installedRc2": "not yet run: Save As/Save permissions, moved-file warning, .deb install/remove/reinstall"
+  },
+  "netlify": {
+    "url": "https://bckgrnd-msc.netlify.app",
+    "productionDeployId": "6af6b434aa3215de71a06c18",
+    "productionBuild": "2ae6c399f35f (app 8ff4d64)",
+    "productionCheck": "verify-static 13/13 after skipping only the Netlify badge's CSP error",
+    "previewDeployId": "6af6c83ce8d6948f50e91aa2",
+    "previewUrl": "https://6af6c83ce8d6948f50e91aa2--bckgrnd-msc.netlify.app",
+    "previewBuild": "e479e3e1ae63",
+    "previewCheck": "verify-static 12/12, fresh session",
+    "cachedSession": "profile saved on production build 2ae6c399f35f; reload after promotion still to run",
+    "previousProductionDeployId": "6aed8624a1f55f1aabaa7b8a"
+  },
+  "remaining": [
+    "Install the .deb through the package manager; launch from the menu; remove and reinstall keeps projects",
+    "verify-native against installed rc.2 (needs xdotool)",
+    "Hands-on on rc.2: Save As, edit, Save, .bak, permissions not 0600; moved file warns, quit asks, recovery opens",
+    "Promote the preview to production, then reload the cached profile",
+    "Decide whether MCP needs a 0.4.0-rc.2 resync for the ADR-018 renderer change"
+  ],
+  "rollback": {
+    "rc1Installation": "~/.local/share/bckgrnd-msc/versions/c5ec3db091142a10014ecbb5dd86db9aeacbbad5cb547226c0745a3d783ba103",
+    "rc1Packages": "~/.local/share/bckgrnd-msc/releases/night6-rc1-4f5a5e3",
+    "rc2Packages": "~/.local/share/bckgrnd-msc/releases/night6-rc2-5b0c6ad",
+    "web": "Netlify → Deploys → 6af6b434aa3215de71a06c18 → Publish deploy",
+    "preserveProjects": "~/.config/bckgrnd-msc/storage/app/projects"
+  }
+}
