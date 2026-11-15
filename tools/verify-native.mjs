@@ -1,7 +1,7 @@
 /** Installed Linux/X11 acceptance. Test tools are not runtime dependencies. */
 import { chromium } from 'playwright';
 import { execFileSync, spawn } from 'node:child_process';
-import { readFileSync, writeFileSync, mkdtempSync, openSync, realpathSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdtempSync, openSync, realpathSync, statSync } from 'node:fs';
 import { resolve, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import assert from 'node:assert/strict';
@@ -63,6 +63,17 @@ async function fileDialog(title, path) {
   await new Promise(resolve => setTimeout(resolve, 200));
   xdo('mousemove', '--window', id, Number(geometry.match(/WIDTH=(\d+)/)[1]) - 50, Number(geometry.match(/HEIGHT=(\d+)/)[1]) - 24, 'click', 1);
 }
+const running = () => child && child.exitCode === null && child.signalCode === null;
+// A run is finished only when the app is. After a pass or a failure, close the
+// last launch the way a person would, then force it if it does not go.
+async function quit() {
+  if (!running()) return;
+  if (page && !page.isClosed()) page.on('dialog', d => void d.accept().catch(() => {}));
+  try { closeWindow(); } catch {}
+  try { await poll(() => !running(), 15000); return; } catch {}
+  child.kill('SIGTERM');
+  try { await poll(() => !running(), 5000); } catch { child.kill('SIGKILL'); }
+}
 const menu = () => page.getByRole('button', { name: /^Projects ·/ }).click();
 const status = (text) => page.waitForFunction(t => document.querySelector('[data-testid="project-status"]')?.textContent?.includes(t), text);
 try {
@@ -117,11 +128,17 @@ try {
   const wav = join(dir, 'native-export.wav');
   await fileDialog('Export WAV', wav); await status('Exported ');
   const bytes = readFileSync(wav); assert.equal(bytes.toString('ascii', 0, 4), 'RIFF'); assert(bytes.subarray(44).some(b => b));
+  // Files the person chose get ordinary permissions (this umask's default), never 0600.
+  const probe = join(dir, 'umask-probe'); writeFileSync(probe, '');
+  const mode = (path) => (statSync(path).mode & 0o777).toString(8);
+  assert.equal(mode(savedFile), mode(probe), 'Save As file permissions');
+  assert.equal(mode(wav), mode(probe), 'Exported WAV permissions');
   const diagnostics = await page.evaluate(async () => (await fetch('/api/native/projects/diagnostics', { method: 'POST', headers: { 'X-Bckgrnd-Token': document.querySelector('meta[name="bckgrnd-native-token"]').content } })).json());
   assert(diagnostics.php.startsWith('8.4.')); assert(!diagnostics.storage.startsWith(binary));
-  writeFileSync(join(dir, 'evidence.json'), JSON.stringify({ binary, checkoutHidden: !!process.env.BWRAP, diagnostics, savedFile, wav, bytes: bytes.length }, null, 2));
+  writeFileSync(join(dir, 'evidence.json'), JSON.stringify({ binary, checkoutHidden: !!process.env.BWRAP, diagnostics, savedFile, wav, bytes: bytes.length, modes: { savedFile: mode(savedFile), wav: mode(wav) } }, null, 2));
   console.log(`PASS installed Linux: native import/cancel/save-as/export, edited drums+bass, Full → Drop → Cancel, failed-save close, keep-open/cancel-export quit, persistent reopen without autoplay. ${dir}`);
 } finally {
-  if (browser) await browser.close();
+  await quit();
+  if (browser) await browser.close().catch(() => {});
   execFileSync('xclip', ['-selection', 'clipboard', '-in'], { input: priorClipboard, stdio: ['pipe', 'ignore', 'ignore'] });
 }
