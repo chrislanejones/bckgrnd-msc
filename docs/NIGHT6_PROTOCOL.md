@@ -145,6 +145,19 @@ physical sleep/resume, output-device changes and minimize on the installed RC1. 
 engine is byte-identical in rc.2, so those sound results carry over; the rc.2 runtime
 changes are file saving and layout.
 
+Night 6H, 11-15-2026: no code changed since `5b0c6ad`, so the rc.2 build was not
+redone; its artifacts still match `SHA256SUMS`. New rc.2 evidence: `verify-transitions`
+passes on the static build (209 steps through Break, riser and Drop), and `verify-resume`
+passes on both the static build and the installed rc.2 (Electron 40.10.6, connected over
+its debugging port; no xdotool needed). The section 4 audio list (click-free mute/solo,
+Panic, Echo Throw, Filter Hold, export tails) is covered at engine level by
+`engine-core/tests/smoothing.rs` and `perform_tests.rs`; the listening pass is still
+Chris's. Projects were backed up to
+`~/.local/share/bckgrnd-msc/backups/projects-before-night6h-11-15-2026` (28 files)
+before the installed-app run, which added one test project and changed none. The
+cached-session profile from 11-13 was lost with `/tmp`; a new one, seeded on production
+build `2ae6c399f35f`, lives in `~/ai-repo/bckgrnd-cache-check/profile`.
+
 Still open for rc.2: `.deb` installation through the package manager, `verify-native`
 against the installed rc.2 (xdotool is not installed), and the hands-on Save As /
 moved-file checks that exercise tonight's file fixes. T3 tool execution now passes

@@ -81,7 +81,9 @@
     "parity": "installed rc.2, Laravel browser and MCP 0.4.0-rc.1: identical resolved events, frame counts and byte-identical PCM WAV for the edited and silent fixtures",
     "native": "verify-native not run for rc.2: xdotool is not installed on this host",
     "mcpThroughT3": "10 tools; validate and render edited, scenes and silent projects; narration over a saved project and a stock track; stock-track render; missing ffmpeg gives install instructions and writes nothing; changed library refused (ADR-018 no-callback path)",
-    "mcpVendorParity": "55 of 57 vendored files byte-identical to the app (engine, contracts, library, fixtures). shared/runtime.js and snapshot.d.ts differ only by ADR-018's optional onSourceChanged callback, which the MCP does not pass"
+    "mcpVendorParity": "55 of 57 vendored files byte-identical to the app (engine, contracts, library, fixtures). shared/runtime.js and snapshot.d.ts differ only by ADR-018's optional onSourceChanged callback, which the MCP does not pass",
+    "transitions": "11-15-2026: verify-transitions on the static build, 209 steps through Break, riser and Drop, no worklet errors",
+    "resume": "11-15-2026: verify-resume passes on the static build and on the installed rc.2 over its debugging port (Electron 40.10.6)"
   },
   "humanChecks": {
     "installedRc1": "Chris, 11-13-2026: listening, sleep/resume, output-device changes and minimize pass",
@@ -96,7 +98,7 @@
     "previewUrl": "https://6af6c83ce8d6948f50e91aa2--bckgrnd-msc.netlify.app",
     "previewBuild": "e479e3e1ae63",
     "previewCheck": "verify-static 12/12, fresh session",
-    "cachedSession": "profile saved on production build 2ae6c399f35f; reload after promotion still to run",
+    "cachedSession": "profile re-seeded 11-15-2026 on production build 2ae6c399f35f in ~/ai-repo/bckgrnd-cache-check/profile (the 11-13 profile was lost with /tmp); reload after promotion still to run",
     "previousProductionDeployId": "6aed8624a1f55f1aabaa7b8a"
   },
   "remaining": [
@@ -112,5 +114,6 @@
     "rc2Packages": "~/.local/share/bckgrnd-msc/releases/night6-rc2-5b0c6ad",
     "web": "Netlify → Deploys → 6af6b434aa3215de71a06c18 → Publish deploy",
     "preserveProjects": "~/.config/bckgrnd-msc/storage/app/projects"
-  }
+  },
+  "projectBackup": "~/.local/share/bckgrnd-msc/backups/projects-before-night6h-11-15-2026"
 }
