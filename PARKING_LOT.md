@@ -313,3 +313,14 @@ not. Things to settle before or while building it:
   11-13-2026, the wait for playback after "Bring in Clap" + Space (verify-ui.mjs line
   218) hit its 30 s limit while another session ran Playwright. Five standalone runs
   passed 301/301 right after. If it repeats on a quiet machine, look at it then.
+
+## Found in Night 6H (11-15-2026)
+
+- **An exported WAV is private (`-rw-------`).** `NativeProjectController` (line 57)
+  calls `ProjectFiles::atomicWrite($path, $wav)` without a mode, so a new WAV keeps
+  `tempnam`'s 0600. Project files got this fix in `5297ca6`; the WAV path didn't. One-line
+  fix: pass `0666 & ~umask()` for a new file, plus a PHPUnit case. A runtime change, so it
+  means an rc.3 build; Chris decides whether it goes in this release.
+- **`verify-native` never closes its second app launch.** After the PASS line, Node
+  waits on the still-open window, so the run looks hung until someone closes it. Close
+  the window (the same `close-window` helper) at the end of the test.

@@ -79,7 +79,7 @@
     "web": "verify:web 7/7 (contract, scenes, editing, typecheck, dist audit, static library/catalog/audio, static projects)",
     "desktop": "verify:desktop 9/9 (contract, scenes, editing, typecheck, phpunit, ui 301, editor 73, audio, projects)",
     "parity": "installed rc.2, Laravel browser and MCP 0.4.0-rc.1: identical resolved events, frame counts and byte-identical PCM WAV for the edited and silent fixtures",
-    "native": "verify-native not run for rc.2: xdotool is not installed on this host",
+    "native": "11-15-2026: verify-native PASS on installed rc.2 (tar): native import/cancel/Save As/export, edited drums+bass, Full → Drop → Cancel, failed-save close, keep-open/cancel-export quit, persistent reopen without autoplay; PHP 8.4.27. Save As file -rw-r--r--; exported WAV -rw------- (parked)",
     "mcpThroughT3": "10 tools; validate and render edited, scenes and silent projects; narration over a saved project and a stock track; stock-track render; missing ffmpeg gives install instructions and writes nothing; changed library refused (ADR-018 no-callback path)",
     "mcpVendorParity": "55 of 57 vendored files byte-identical to the app (engine, contracts, library, fixtures). shared/runtime.js and snapshot.d.ts differ only by ADR-018's optional onSourceChanged callback, which the MCP does not pass",
     "transitions": "11-15-2026: verify-transitions on the static build, 209 steps through Break, riser and Drop, no worklet errors",
@@ -103,7 +103,6 @@
   },
   "remaining": [
     "Install the .deb through the package manager; launch from the menu; remove and reinstall keeps projects",
-    "verify-native against installed rc.2 (needs xdotool)",
     "Hands-on on rc.2: Save As, edit, Save, .bak, permissions not 0600; moved file warns, quit asks, recovery opens",
     "Promote the preview to production, then reload the cached profile",
     "Decide whether MCP needs a 0.4.0-rc.2 resync for the ADR-018 renderer change"

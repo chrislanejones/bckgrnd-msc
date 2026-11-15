@@ -6,8 +6,8 @@ hash identical to RC1, web and desktop on one build `e479e3e1ae63`. `verify:web`
 `verify:desktop` 9/9, Rust 259, PHPUnit 247, installed rc.2 ↔ browser ↔ MCP byte-identical,
 MCP through T3 passes. Chris passed listening, sleep/resume, device changes and minimize
 on the installed RC1. Record: [releases/2026-11-13-linux-rc2.json](releases/2026-11-13-linux-rc2.json).
-Still open: `.deb` via apt, `verify-native` on rc.2 (needs xdotool), hands-on Save As/
-moved-file checks on rc.2, promotion to production and the cached-session reload.
+11-15-2026: `verify-native` passes on the installed rc.2. Still open: `.deb` via apt,
+Chris's hands-on `.bak`/moved-file checks on rc.2, promotion to production and the cached-session reload.
 
 ## Baseline, 2026-11-06
 
@@ -158,9 +158,15 @@ before the installed-app run, which added one test project and changed none. The
 cached-session profile from 11-13 was lost with `/tmp`; a new one, seeded on production
 build `2ae6c399f35f`, lives in `~/ai-repo/bckgrnd-cache-check/profile`.
 
-Still open for rc.2: `.deb` installation through the package manager, `verify-native`
-against the installed rc.2 (xdotool is not installed), and the hands-on Save As /
-moved-file checks that exercise tonight's file fixes. T3 tool execution now passes
+Later on 11-15-2026, with xdotool installed, `verify-native` passed on the installed rc.2:
+native import/cancel, Save As, WAV export, failed-save close, keep-open/cancel-export quit,
+persistent reopen without autoplay; PHP 8.4.27. The Save As project file came out
+`-rw-r--r--`, but the exported WAV came out `-rw-------` (see PARKING_LOT). The test
+writes only its own projects (`release-edited`, plus one new snapshot); Chris's were
+backed up first and are unchanged.
+
+Still open for rc.2: `.deb` installation through the package manager, and the hands-on
+`.bak` / moved-file checks that exercise tonight's file fixes. T3 tool execution now passes
 (see the rc.2 record). Windows/macOS, real phones and a signed distribution remain
 untested.
 

@@ -60,6 +60,8 @@ Section 1 — architecture
 
 Section 2 — desktop (laptop)
 - [ ] Installed rc.2: Save As, edit, Save; file updates, `.bak` appears, mode not 0600.
+  11-15-2026: `verify-native` on rc.2 passes Save As; the new project file is `-rw-r--r--`.
+  `.bak` and the moved-file warning are still Chris's hands-on check.
   11-13-2026: Chris reported pass on the installed RC1; rc.2 not built yet, so not rc.2 evidence.
 - [ ] Move the file, Save: warning names the missing file; quit asks; recovery available.
   11-13-2026: Chris reported pass on the installed RC1; rc.2 not built yet, so not rc.2 evidence.
