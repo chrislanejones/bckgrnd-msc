@@ -94,6 +94,26 @@ final class ProjectFilesTest extends TestCase
             $this->assertSame(2, json_decode(file_get_contents($file.'.bak'))->revision);
         } finally { umask($old); }
     }
+    public function test_an_exported_file_gets_ordinary_permissions_and_the_store_stays_private(): void
+    {
+        $wav = $this->dir.'/mix.wav'; $old = umask(0022);
+        try {
+            ProjectFiles::writeChosenFile($wav, 'RIFF one');
+            $this->assertSame(0644, fileperms($wav) & 0777, 'A new export gets ordinary permissions, not 0600');
+            chmod($wav, 0664);
+            ProjectFiles::writeChosenFile($wav, 'RIFF two');
+            $this->assertSame(0664, fileperms($wav) & 0777, 'Exporting over a file keeps the permissions the person set');
+            $this->assertSame('RIFF two', file_get_contents($wav));
+
+            $link = $this->dir.'/link.wav'; symlink($wav, $link);
+            ProjectFiles::writeChosenFile($link, 'RIFF three');
+            $this->assertTrue(is_link($link), 'The symlink is still a symlink');
+            $this->assertSame('RIFF three', file_get_contents($wav), 'The file it points to was updated');
+
+            (new ProjectFiles($this->dir))->write($this->snapshot(1), 0);
+            $this->assertSame(0600, fileperms($this->dir.'/release-test.json') & 0777, 'The app\'s own store stays private');
+        } finally { umask($old); }
+    }
     public function test_unknown_versions_and_invalid_patterns_fail_before_write(): void
     {
         $store = new ProjectFiles($this->dir);

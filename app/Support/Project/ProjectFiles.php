@@ -70,10 +70,19 @@ final class ProjectFiles
         $snapshot['project'] = Contract::migrate($snapshot['project']);
         // A symlinked project file is updated where it points, never replaced by a copy.
         if (is_link($path) && ($target = realpath($path)) !== false) $path = $target;
-        $existed = is_file($path);
-        if ($existed && !copy($path, $path.'.bak')) throw new RuntimeException('Cannot back up the existing project file.');
-        // A new file the person chose gets ordinary permissions, not the temp file's 0600.
-        self::atomicWrite($path, json_encode($snapshot, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR), $existed ? null : 0666 & ~umask());
+        if (is_file($path) && !copy($path, $path.'.bak')) throw new RuntimeException('Cannot back up the existing project file.');
+        self::writeChosenFile($path, json_encode($snapshot, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR));
+    }
+
+    /**
+     * Write a file at a place the person chose (a project file, a WAV export). A new
+     * file gets ordinary permissions, not the temp file's 0600; an existing one keeps
+     * its own; a symlink is updated where it points. The app's store stays private.
+     */
+    public static function writeChosenFile(string $path, string $bytes): void
+    {
+        if (is_link($path) && ($target = realpath($path)) !== false) $path = $target;
+        self::atomicWrite($path, $bytes, is_file($path) ? null : 0666 & ~umask());
     }
 
     /** Save As ties a project to its file, so a later Save can keep that file current. */

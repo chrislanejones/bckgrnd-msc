@@ -54,7 +54,7 @@ final class NativeProjectController
                     abort_unless(substr($wav, 0, 4) === 'RIFF' && substr($wav, 8, 4) === 'WAVE', 422);
                     $path = Dialog::new()->asSheet('main')->title('Export WAV')->filter('WAV audio', ['wav'])->save();
                     if (!$path) return response()->json(['cancelled' => true]);
-                    ProjectFiles::atomicWrite($path, $wav);
+                    ProjectFiles::writeChosenFile($path, $wav);
                     ProjectFiles::atomicWrite(storage_path('app/last-export.json'), json_encode(['path' => $path], JSON_THROW_ON_ERROR));
                     return response()->json(['path' => $path]);
                 case 'reveal':
