@@ -84,3 +84,24 @@ Section 3 — release (laptop)
   files identical; the 2 shared-renderer files differ only by ADR-018's unused callback.
 - [ ] rc.2 release record, hashes, deploy ID, Codeberg/GitHub sync, integration PR, rollback.
   11-13-2026: record drafted with hashes and rollback; production deploy ID and sync follow promotion.
+
+## Night 6I — rc.3 (11-15-2026)
+
+rc.2's installed run found exported WAVs written 0600. rc.3 (`19c93c5`) fixes that and
+nothing else at runtime; the musical bundle is unchanged (engine = RC1). Section 2 above
+now applies to rc.3.
+
+- [x] WAV export gets ordinary permissions; an existing file keeps its own; the store stays
+  0600. PHPUnit 248 (new regression test).
+- [x] `verify-native` closes the app after a pass or a failure, and asserts the Save As file
+  and WAV permissions. Red on rc.2 (`600` vs `644`, exits in 13 s, no app left); green on
+  rc.3 three runs in a row, no app left.
+- [x] `verify:web` 7/7, `verify:desktop` 9/9, Rust 259, fmt and Clippy clean; engine
+  `6ed97035573c` = RC1; web and desktop build `073a8e825fb4`.
+- [x] Package audit: same 7,636 paths as rc.2; only the two fixed PHP files, the version,
+  the build stamp and Composer's commit reference differ.
+- [x] Installed rc.3 (tar) ↔ browser ↔ MCP: byte-identical WAVs (`verify-render-parity`).
+- [x] Preview `6af9d459f084f3cad0d32243`: verify-static 12/12, verify-projects pass, fonts load.
+- [x] MCP through T3: rc.3 Save As project validates (schema 3, no warnings) and renders.
+- [ ] Chris: `.deb` via apt, `.bak` and moved-file warning, listening pass, remove + reinstall.
+- [ ] Promote the preview, reload the cached profile, record the production deploy ID.

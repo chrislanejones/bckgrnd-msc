@@ -1,0 +1,115 @@
+{
+  "candidate": "night6-linux-rc3",
+  "releaseSignoff": false,
+  "date": "2026-11-15",
+  "runtimeAppCommit": "19c93c5b24f4b649b8910174ef00d0b1a7e279fa",
+  "mcpCommit": "d47ee150cc193c3360617ffac223399c6aed3dd6",
+  "mcpVersion": "0.4.0-rc.1",
+  "desktopVersion": "0.6.0-rc.3",
+  "buildId": "073a8e825fb47282a553cf0a4b876d70ed70c78b45bb4ba3c59cc61a29a83acc",
+  "engineSha256": "6ed97035573c5598c6e262d75d1e9954c1a8ed24f2510298604d2187a8972daa",
+  "engineBytes": 231072,
+  "engineMatchesRc1": true,
+  "renderer": "project-renderer-1",
+  "projectSchema": 3,
+  "snapshotSchema": 1,
+  "changesSinceRc2": [
+    "Exported WAVs get ordinary permissions (0666 & ~umask), an existing file keeps its own, a symlink is followed; the app's store stays 0600 (7e2b8a5)",
+    "verify-native closes the app after a pass or a failure and asserts saved-file permissions (70a2d23)",
+    "Desktop version 0.6.0-rc.3 (19c93c5)"
+  ],
+  "runtimes": {
+    "developmentPhp": "8.4.26",
+    "composer": "2.10.3",
+    "node": "24.21.0",
+    "pnpm": "10.26.0",
+    "rust": "1.98.1",
+    "wasmPack": "0.15.0",
+    "wasmOpt": "116",
+    "nativePhp": "2.4.0",
+    "note": "Same toolchain and lockfiles as RC1; Electron and packaged PHP come from the unchanged nativephp lockfile"
+  },
+  "lockfiles": {
+    "composer.lock": "89fe27526bed9a7f858ab8dbad2eaa9d025a07ecb0fecad4d817cf2b6cdcb6c3",
+    "pnpm-lock.yaml": "a91b3f834b67b3603774330ec2de392935366308f46b5a6e8daff6b75e29ed11",
+    "engine-core/Cargo.lock": "635811d19f56434edf2dece26e09bd76638635d9fd65c219980fa072b9f6ef20",
+    "nativephp/pnpm-lock.yaml": "a4b02f4661f66aeb342cd31ad2876f865b6569dea17b6138dd6d0aab08f172ec"
+  },
+  "artifacts": {
+    "bckgrnd-msc-0.6.0-rc.3.tar.xz": {
+      "sha256": "ffcae3874a4b77245ae4af6985e29adac4f035f268540a3b2c5cd949a248003a",
+      "bytes": 101230404
+    },
+    "bckgrnd-msc_0.6.0-rc.3_amd64.deb": {
+      "sha256": "6c80df78b3ef38a1ede72c7e5cecc0914bddebf50fbddce175e08218f82e73a2",
+      "bytes": 117500384
+    },
+    "bckgrnd-msc-mcp-0.4.0-rc.1.tgz": {
+      "sha256": "e385e4320996e94bce368adc7fb0874ab0eccb15fb450759f17ec0a1f464a396",
+      "bytes": 434902
+    },
+    "bckgrnd-msc-static-073a8e825fb4.tar.xz": {
+      "sha256": "12b9763b3f92cfd2a440dc4eb910c740d15f1f202c06bafed0511b791a931e30",
+      "bytes": 468772
+    },
+    "install-linux.sh": {
+      "sha256": "f03285c8695580d1c84b5ce5e232cc0aa57e4ea09e3ca33bd41c43a6c8123be8",
+      "bytes": 2077
+    },
+    "build-manifest.json": {
+      "sha256": "f4e08218e2bcefa715583cce9158991b20ad26ebbf161b8b389f330962359953",
+      "bytes": 11369
+    }
+  },
+  "packageAudit": "rc.3 tar holds the same 7,636 paths as rc.2. Differences: NativeProjectController.php and ProjectFiles.php (the fix), config/nativephp.php (version), app.asar (version), build-manifest.json and app.js (build stamp only; same size, no frontend source change), vendor/composer/installed.php (commit reference). resources/build/app/.env is unchanged from rc.2; its contents were not opened.",
+  "platforms": {
+    "linux-x64": "installed tar under Debian 13 WSL2/WSLg; unsigned",
+    "linux-deb": "built and hashed; package-manager installation not yet run for rc.3",
+    "windows": "not tested",
+    "macos": "not tested",
+    "ios": "not tested",
+    "android": "not tested"
+  },
+  "tests": {
+    "php": { "tests": 248, "assertions": 5854 },
+    "rust": 259,
+    "web": "verify:web 7/7",
+    "desktop": "verify:desktop 9/9 (contract, scenes, editing, typecheck, phpunit, ui, editor, audio, projects)",
+    "native": "verify-native 3/3 consecutive passes on installed rc.3, 13-14 s each, no app process left; Save As file and exported WAV both 644; PHP 8.4.27. Against rc.2 the new permission assert fails ('600' !== '644') and the run still exits cleanly",
+    "parity": "verify-render-parity: installed rc.3, static browser (rc.3 dist) and MCP 0.4.0-rc.1 give identical resolved events, frame counts and byte-identical PCM WAV for the edited and silent fixtures",
+    "mcpThroughT3": "check_setup ok; the rc.3 Save As project validates (schema 3, no warnings) and renders 8 s at 48 kHz",
+    "static": "preview: verify-static 12/12, verify-projects pass, 4 bundled fonts served as font/woff2"
+  },
+  "humanChecks": {
+    "installedRc1": "Chris, 11-13-2026: listening, sleep/resume, output-device changes and minimize pass",
+    "installedRc2": "not yet run: Save As/Save permissions, moved-file warning, .deb install/remove/reinstall",
+    "installedRc3": "not yet run: .deb install/remove/reinstall, .bak and moved-file warning, listening pass"
+  },
+  "netlify": {
+    "url": "https://bckgrnd-msc.netlify.app",
+    "productionDeployId": "6af6b434aa3215de71a06c18",
+    "productionBuild": "2ae6c399f35f (app 8ff4d64)",
+    "previewDeployId": "6af9d459f084f3cad0d32243",
+    "previewUrl": "https://6af9d459f084f3cad0d32243--bckgrnd-msc.netlify.app",
+    "previewBuild": "073a8e825fb4",
+    "previewCheck": "verify-static 12/12 and verify-projects pass, fresh session",
+    "cachedSession": "profile seeded 11-15-2026 on production build 2ae6c399f35f in ~/ai-repo/bckgrnd-cache-check/profile; reload after promotion still to run"
+  },
+  "remaining": [
+    "Install the rc.3 .deb through apt; launch from the menu; remove and reinstall keeps projects",
+    "Hands-on on rc.3: Save As, edit, Save, .bak; moved file warns; quit asks; recovery opens",
+    "Listening pass on rc.3",
+    "Promote preview 6af9d459f084f3cad0d32243, then reload the cached profile and record the deploy ID",
+    "Release PR"
+  ],
+  "rollback": {
+    "rc1Installation": "~/.local/share/bckgrnd-msc/versions/c5ec3db091142a10014ecbb5dd86db9aeacbbad5cb547226c0745a3d783ba103",
+    "rc1Packages": "~/.local/share/bckgrnd-msc/releases/night6-rc1-4f5a5e3",
+    "rc2Packages": "~/.local/share/bckgrnd-msc/releases/night6-rc2-5b0c6ad",
+    "web": "Netlify → Deploys → 6af6b434aa3215de71a06c18 → Publish deploy",
+    "preserveProjects": "~/.config/bckgrnd-msc/storage/app/projects",
+    "rc2Installation": "~/.local/share/bckgrnd-msc/versions/c41f83f470947b7e422a20eeb2f29a9c034ad613c9895ce9c09e4643d6d01699",
+    "rc3Packages": "~/.local/share/bckgrnd-msc/releases/night6-rc3-19c93c5",
+    "projectBackup": "~/.local/share/bckgrnd-msc/backups/projects-before-rc3-11-15-2026"
+  }
+}

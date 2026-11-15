@@ -1,6 +1,14 @@
 # Night 6 — release evidence
 
-Status: **rc.2 built, installed and previewed; not final Night 6 signoff.**
+Status: **rc.3 built, installed and previewed; not final Night 6 signoff.**
+11-15-2026: `0.6.0-rc.3` from `19c93c5` fixes exported WAVs written 0600 and makes
+`verify-native` close the app after every run. Engine = RC1, build `073a8e825fb4` on web and
+desktop, `verify:web` 7/7, `verify:desktop` 9/9, Rust 259, PHPUnit 248, `verify-native` 3/3 on
+the installed rc.3, rc.3 ↔ browser ↔ MCP byte-identical, preview `6af9d459…` 12/12. Record:
+[releases/2026-11-15-linux-rc3.json](releases/2026-11-15-linux-rc3.json). Still open: `.deb` via
+apt, Chris's `.bak`/moved-file and listening checks on rc.3, promotion and the cached reload.
+
+Earlier:
 11-13-2026: `0.6.0-rc.2` built from `5b0c6ad` with RC1's toolchain and lockfiles, engine
 hash identical to RC1, web and desktop on one build `e479e3e1ae63`. `verify:web` 7/7,
 `verify:desktop` 9/9, Rust 259, PHPUnit 247, installed rc.2 ↔ browser ↔ MCP byte-identical,
