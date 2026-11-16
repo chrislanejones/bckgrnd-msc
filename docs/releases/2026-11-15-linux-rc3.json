@@ -87,19 +87,21 @@
   },
   "netlify": {
     "url": "https://bckgrnd-msc.netlify.app",
-    "productionDeployId": "6af6b434aa3215de71a06c18",
-    "productionBuild": "2ae6c399f35f (app 8ff4d64)",
+    "productionDeployId": "6afa88d474abbd321c4f629a",
+    "productionBuild": "073a8e825fb4 (app 19c93c5)",
     "previewDeployId": "6af9d459f084f3cad0d32243",
     "previewUrl": "https://6af9d459f084f3cad0d32243--bckgrnd-msc.netlify.app",
     "previewBuild": "073a8e825fb4",
     "previewCheck": "verify-static 12/12 and verify-projects pass, fresh session",
-    "cachedSession": "profile seeded 11-15-2026 on production build 2ae6c399f35f in ~/ai-repo/bckgrnd-cache-check/profile; reload after promotion still to run"
+    "cachedSession": "11-15-2026: the profile seeded on 2ae6c399f35f reloaded production and ran /build/assets/app.js?v=073a8e825fb4…, whose only build ID is 073a8e825fb4",
+    "previousProductionDeployId": "6af6b434aa3215de71a06c18",
+    "previousProductionBuild": "2ae6c399f35f (app 8ff4d64)",
+    "productionCheck": "verify-static 13/13 after skipping only the Netlify badge CSP error"
   },
   "remaining": [
     "Install the rc.3 .deb through apt; launch from the menu; remove and reinstall keeps projects",
     "Hands-on on rc.3: Save As, edit, Save, .bak; moved file warns; quit asks; recovery opens",
     "Listening pass on rc.3",
-    "Promote preview 6af9d459f084f3cad0d32243, then reload the cached profile and record the deploy ID",
     "Release PR"
   ],
   "rollback": {

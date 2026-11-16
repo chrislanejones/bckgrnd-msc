@@ -104,4 +104,6 @@ now applies to rc.3.
 - [x] Preview `6af9d459f084f3cad0d32243`: verify-static 12/12, verify-projects pass, fonts load.
 - [x] MCP through T3: rc.3 Save As project validates (schema 3, no warnings) and renders.
 - [ ] Chris: `.deb` via apt, `.bak` and moved-file warning, listening pass, remove + reinstall.
-- [ ] Promote the preview, reload the cached profile, record the production deploy ID.
+- [x] Promote the preview, reload the cached profile, record the production deploy ID.
+  Production `6afa88d474abbd321c4f629a` (build `073a8e825fb4`) passes 13/13; the profile cached
+  on `2ae6c399f35f` ran the rc.3 `app.js`. Rollback: publish `6af6b434aa3215de71a06c18`.

@@ -5,8 +5,9 @@ Status: **rc.3 built, installed and previewed; not final Night 6 signoff.**
 `verify-native` close the app after every run. Engine = RC1, build `073a8e825fb4` on web and
 desktop, `verify:web` 7/7, `verify:desktop` 9/9, Rust 259, PHPUnit 248, `verify-native` 3/3 on
 the installed rc.3, rc.3 ↔ browser ↔ MCP byte-identical, preview `6af9d459…` 12/12. Record:
-[releases/2026-11-15-linux-rc3.json](releases/2026-11-15-linux-rc3.json). Still open: `.deb` via
-apt, Chris's `.bak`/moved-file and listening checks on rc.3, promotion and the cached reload.
+[releases/2026-11-15-linux-rc3.json](releases/2026-11-15-linux-rc3.json). Production is
+`6afa88d474abbd321c4f629a` (13/13; a cached visitor gets rc.3). Still open: `.deb` via apt and
+Chris's `.bak`/moved-file and listening checks on rc.3.
 
 Earlier:
 11-13-2026: `0.6.0-rc.2` built from `5b0c6ad` with RC1's toolchain and lockfiles, engine
