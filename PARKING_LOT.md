@@ -324,3 +324,7 @@ not. Things to settle before or while building it:
 - **Fixed in rc.3 (`70a2d23`).** ~~`verify-native` never closes its second app launch.~~ After the PASS line, Node
   waits on the still-open window, so the run looks hung until someone closes it. Close
   the window (the same `close-window` helper) at the end of the test.
+
+## Found while adding the hip-hop tracks (11-16-2026)
+
+- **The MCP companion doesn't have Cipher or Boulevard.** `bckgrnd-msc-mcp` vendors its own copy of the library (`vendor/library/`), so `bckgrnd_list_tracks` and project renders won't know the two new tracks until its bundle is refreshed from this repo and republished.

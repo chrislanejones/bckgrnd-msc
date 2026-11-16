@@ -16,7 +16,7 @@ a phone, without learning the detailed controls first.
 
 ## Product Purpose
 
-An instrument with eighteen tracks and eight independently controllable sounds
+An instrument with twenty tracks and eight independently controllable sounds
 per track. Users change the balance, remove sounds, compare mixes, launch scenes,
 and open detailed sound or pattern controls when needed.
 

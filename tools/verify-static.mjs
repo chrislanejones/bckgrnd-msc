@@ -89,7 +89,7 @@ try {
   }));
   check('static shell renders the app', ui.h1 === 'bckgrnd-msc' && ui.stems === 8,
     `h1 ${ui.h1}, ${ui.stems} stems, ${ui.tracks} tracks`);
-  check('library loaded from JSON', ui.tracks === 18, `${ui.tracks} track buttons`);
+  check('library loaded from JSON', ui.tracks === 20, `${ui.tracks} track buttons`);
 
   // 2. No PHP route was contacted — everything came from static files.
   const phpRequests = requests.filter((p) => p.startsWith('/api/'));
