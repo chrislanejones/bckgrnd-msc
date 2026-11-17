@@ -96,16 +96,17 @@ On a phone the same panels show one view at a time: **Perform**, **Mix** and
 
 ## The library
 
-Three sections, each split into styles. Every track badge shows its bpm.
+Four sections, each split into styles. Every track badge shows its bpm.
 
 | Section | Style | Tracks | Tempo |
 |---|---|---|---|
 | EDM | House | Warehouse, Basement, Tunnel | 122–128 bpm |
 | EDM | Deep | Night Drive, Glass | 110–116 bpm |
 | EDM | Acid | Acid Line | 134 bpm |
+| Hip-hop | Boom Bap | Cipher | 100 bpm |
+| Hip-hop | West Coast | Boulevard | 105 bpm |
 | Lofi | Chillhop | Rain, Study, Porch | 76–92 bpm |
 | Lofi | Dusty | Tape, Nightbus | 80–88 bpm |
-| Lofi | Hip-hop | Cipher, Boulevard | 90–94 bpm |
 | Lofi | Jazz | Kettle | 78 bpm |
 | Breaks | Garage | Southside, Pirate | 132–134 bpm |
 | Breaks | Breakbeat | Bricks, Rave Tape | 130–136 bpm |
