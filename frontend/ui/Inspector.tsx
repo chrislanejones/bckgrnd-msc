@@ -12,7 +12,8 @@
  * off, its feedback and return have nothing to act on and are disabled.
  */
 
-import { useId } from 'react';
+import { useId, useState } from 'react';
+import { ChevronRight } from 'lucide-react';
 import { defaultSend, param, stemRange } from '../lib/contract';
 import type { Instrument } from '../lib/instrument';
 import { EFFECT_DEFAULTS, MASTER_DEFAULT } from '../lib/instrument';
@@ -30,6 +31,7 @@ import {
   SWING,
   TEMPO,
   WIDTH,
+  display,
 } from '../lib/mappings';
 import { STEM_NAMES, STEM_ROLES, type StemState } from '../lib/stems';
 import type { StemId, StemMeta } from '../lib/types';
@@ -71,6 +73,8 @@ export function Inspector({
   inst: Instrument;
   onShowPattern: () => void;
 }) {
+  // Kept here rather than in the rack, so a visit to the stem tab doesn't fold it again.
+  const [outputOpen, setOutputOpen] = useState(false);
   return (
     <div className="inspector-body">
       <Segmented<InspectorTab>
@@ -84,7 +88,7 @@ export function Inspector({
         ]}
       />
       {tab === 'master' ? (
-        <MasterRack inst={inst} />
+        <MasterRack inst={inst} outputOpen={outputOpen} onOutputOpen={setOutputOpen} />
       ) : (
         <StemControls
           stem={stem}
@@ -105,8 +109,17 @@ function echoLive(inst: Instrument): boolean {
   return inst.echoBeats > 0 || inst.echo;
 }
 
-function MasterRack({ inst }: { inst: Instrument }) {
+function MasterRack({
+  inst,
+  outputOpen,
+  onOutputOpen,
+}: {
+  inst: Instrument;
+  outputOpen: boolean;
+  onOutputOpen: (open: boolean) => void;
+}) {
   const { track, effects, setEffect } = inst;
+  const outputId = useId();
   const echoOn = echoLive(inst);
   const echoNote = !echoOn ? 'Echo is off' : inst.echo ? 'Held open by the throw' : '';
   const echoNoteId = useId();
@@ -185,12 +198,14 @@ function MasterRack({ inst }: { inst: Instrument }) {
         </div>
       </fieldset>
 
-      <fieldset className="inspector-group">
-        <legend className="inspector-legend">Echo</legend>
+      <fieldset className="inspector-group inspector-echo">
+        {/* Held open by the throw is an override, said in the heading like a held
+            filter, so the Time label stays one short line beside the knobs. */}
+        <legend className="inspector-legend">{inst.echo ? 'Echo · held open by the throw' : 'Echo'}</legend>
         {/* The echo's state is said once, in the Time label, rather than as the same
             note under both knobs. Screen readers get it on each knob as well. */}
         <Segmented<number>
-          label={!echoOn ? 'Time · off' : inst.echo ? 'Time · held open by the throw' : 'Time'}
+          label={!echoOn ? 'Time · off' : 'Time'}
           value={inst.echoBeats}
           onPick={inst.pickEchoTime}
           options={ECHO_OPTIONS}
@@ -252,9 +267,29 @@ function MasterRack({ inst }: { inst: Instrument }) {
         </div>
       </fieldset>
 
-      <fieldset className="inspector-group">
-        <legend className="inspector-legend">Output</legend>
-        <div className="knob-row">
+      {/* Output is set once and left: it folds, with its three values on the heading,
+          so the rack above fits a 1440 x 900 screen without scrolling. */}
+      <fieldset className="inspector-group inspector-fold" aria-label="Output">
+        <legend className="inspector-legend">
+          <button
+            type="button"
+            className="inspector-fold-toggle"
+            aria-expanded={outputOpen}
+            aria-controls={outputId}
+            onClick={() => onOutputOpen(!outputOpen)}
+          >
+            <ChevronRight className="inspector-fold-chevron" aria-hidden="true" size={12} strokeWidth={2.5} />
+            Output
+            {outputOpen ? null : (
+              <span className="inspector-fold-values">
+                {/* A pause between the heading and its values when read aloud. */}
+                <span className="sr-only">, </span>
+                {display(WIDTH, effects['fx.width'])} · {display(BALANCE, inst.stereo)} · {display(LEVEL, inst.master)}
+              </span>
+            )}
+          </button>
+        </legend>
+        <div id={outputId} className="knob-row" hidden={!outputOpen}>
           <Knob
             label="Width"
             historyId="fx.width"

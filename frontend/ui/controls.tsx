@@ -322,6 +322,7 @@ export function Segmented<T extends string | number>({
   onPick,
   hideLabel = false,
   perKnobColumn,
+  title,
 }: {
   label: string;
   /** `short` replaces the label on the phone tier; the full label stays the name. */
@@ -334,6 +335,8 @@ export function Segmented<T extends string | number>({
    * pills above or below knobs lines up with them (Echo's Time over Feedback/Return).
    */
   perKnobColumn?: number;
+  /** A tooltip for this control alone, not the row it sits in. */
+  title?: string;
 }) {
   const id = useId();
   const pill = (o: { value: T; label: string; short?: string; aria?: string }) => (
@@ -360,7 +363,7 @@ export function Segmented<T extends string | number>({
     for (let i = 0; i < options.length; i += perKnobColumn) cells.push(options.slice(i, i + perKnobColumn));
   }
   return (
-    <div className="segmented-block">
+    <div className="segmented-block" title={title}>
       <span id={id} className={cx('control-label', hideLabel && 'sr-only')}>
         {label}
       </span>
