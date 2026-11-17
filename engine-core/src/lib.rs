@@ -510,8 +510,16 @@ pub struct Engine {
     scheduler: scheduler::Scheduler,
     /// The pending standalone pattern edit (one at most; the latest replaces it).
     edit: Option<PendingPatterns>,
-    /// Lanes a pending scene sets, applied when that scene commits.
+    /// Lanes a pending scene sets, applied when that scene commits. Lanes for a timed
+    /// build wait here too, for the moment between their message and the build's, until
+    /// [`Engine::queue_build`] moves them to `build_lanes`.
     linked: Option<PendingPatterns>,
+    /// Lanes the timed build sets, applied on the onset it ends on
+    /// (`docs/NIGHT7_PROTOCOL.md`). Only ever the current build's.
+    build_lanes: Option<PendingPatterns>,
+    /// A build's lanes withdrawn on the audio path (a scene committing over the build),
+    /// kept until the next pattern or build message so `process()` frees nothing.
+    parked: Option<PendingPatterns>,
     /// Lanes swapped out at a boundary, kept until the next pattern message so nothing
     /// is freed on the audio path. Capacity for two full revisions is reserved.
     retired: Vec<patterns::LaneData>,
@@ -593,6 +601,8 @@ impl Engine {
             scheduler: scheduler::Scheduler::default(),
             edit: None,
             linked: None,
+            build_lanes: None,
+            parked: None,
             retired: Vec::with_capacity(2 * patterns::LANES),
             fx_base: build::FX_DEFAULTS,
             build: None,
@@ -1065,9 +1075,15 @@ impl Engine {
     /// - `link` = a scene request id: the lanes that scene sets. They apply when that
     ///   scene commits, after any edit due on the same onset, and are withdrawn with
     ///   it. The host queues them just before the scene.
+    /// - `link` = a timed build's request id: the lanes that build sets. The host
+    ///   queues them just before [`Engine::queue_build`], which takes them on; they
+    ///   apply on the onset the build ends on, after its landing scene, and are
+    ///   withdrawn with it (`docs/NIGHT7_PROTOCOL.md`).
     pub fn queue_patterns(&mut self, request_id: u32, timing: u8, link: u32, data: &[f32]) -> u8 {
-        // What the last boundary swapped out is freed here, off the audio path.
+        // What the last boundary swapped out (or a scene withdrew from a build) is
+        // freed here, off the audio path.
         self.retired.clear();
+        self.parked = None;
         let verdict = match (
             scheduler::Timing::from_code(timing),
             patterns::PatternSet::parse(data),
@@ -1156,8 +1172,9 @@ impl Engine {
         verdict
     }
 
-    /// Withdraw a pending pattern revision (standalone or scene-linked) by request id.
-    /// False when it is not pending: already applied, replaced or unknown.
+    /// Withdraw a pending pattern revision (standalone, scene-linked or build-linked)
+    /// by request id. False when it is not pending: already applied, replaced or
+    /// unknown.
     pub fn cancel_patterns(&mut self, request_id: u32) -> bool {
         if self
             .edit
@@ -1171,6 +1188,12 @@ impl Engine {
             .is_some_and(|l| l.request_id == request_id)
         {
             self.linked = None;
+        } else if self
+            .build_lanes
+            .as_ref()
+            .is_some_and(|l| l.request_id == request_id)
+        {
+            self.build_lanes = None;
         } else {
             return false;
         }
@@ -1427,8 +1450,8 @@ impl Engine {
                     self.commit_scene(p.request_id, &p.values, step as i32);
                 }
                 //    Then move a timed build on (or start it, or end it and commit its
-                //    landing scene), after a scene that would have replaced it.
-                //    NIGHT7_PROTOCOL.md.
+                //    landing scene and its lanes), after a scene that would have
+                //    replaced it. NIGHT7_PROTOCOL.md.
                 if self.build.is_some() {
                     self.build_onset(step);
                 }

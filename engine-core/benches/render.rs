@@ -15,6 +15,9 @@
 //!   each queued again on the onset the last one ends, alternating between two targets
 //!   and landing a scene on every other one. The next one starts on the following bar
 //!   line, so the build path runs on 8 of every 9 bars.
+//! - `lanes`: `build`, with every build carrying linked pattern lanes (the kick and
+//!   hat lanes, alternating between two versions) that swap in on its end onset. The
+//!   lanes are staged with `queue_patterns` just before each build, as the worklet does.
 //!
 //! Events are drained every block, as the worklet does.
 
@@ -28,6 +31,8 @@ const SR: f32 = 48_000.0;
 const BLOCK: usize = 128;
 const SECONDS: usize = 60;
 const RUNS: usize = 7;
+/// `patterns applied`, as it comes out of the event ring.
+const PATTERNS_APPLIED: f64 = bckgrnd_msc_engine::scene::event::PATTERNS_APPLIED as f64;
 
 /// The library track the bench plays, by id, from the same arrangement JSON the
 /// backend serves and the integration tests read.
@@ -46,6 +51,7 @@ fn warehouse() -> Track {
 enum Case {
     Plain,
     Build,
+    Lanes,
 }
 
 impl Case {
@@ -53,6 +59,7 @@ impl Case {
         match self {
             Case::Plain => "plain",
             Case::Build => "build",
+            Case::Lanes => "lanes",
         }
     }
 }
@@ -75,6 +82,18 @@ fn targets(e: &Engine) -> ([f32; SCENE_LEN], [f32; SCENE_LEN]) {
     (rise, base)
 }
 
+/// A pattern payload (`docs/NIGHT4_PROTOCOL.md`) setting the kick lane to four on the
+/// floor and the closed hat to `hat` on every off-beat eighth.
+fn drum_payload(hat: f32) -> Vec<f32> {
+    let steps = bckgrnd_msc_engine::STEPS;
+    let mut out = vec![2.0];
+    out.extend([0.0, 0.0, steps as f32]);
+    out.extend((0..steps).map(|s| if s % 4 == 0 { 1.0 } else { 0.0 }));
+    out.extend([2.0, 0.0, steps as f32]);
+    out.extend((0..steps).map(|s| if s % 4 == 2 { hat } else { 0.0 }));
+    out
+}
+
 /// Render one run of `case`, returning the time spent in `process` and the build
 /// glue around it (not the engine's construction or the track load).
 fn run(case: Case, track: &Track) -> Duration {
@@ -87,11 +106,18 @@ fn run(case: Case, track: &Track) -> Duration {
     let mut events = [0.0f64; 4 * 64];
     let blocks = SR as usize * SECONDS / BLOCK;
     let mut next_id = 1u32;
+    let payloads = [drum_payload(0.6), drum_payload(0.3)];
+    let mut lanes_applied = 0usize;
 
     let started = Instant::now();
     for _ in 0..blocks {
-        if let Case::Build = case {
+        if let Case::Build | Case::Lanes = case {
             if e.pending_build().is_none() && e.active_build().is_none() {
+                if let Case::Lanes = case {
+                    let data = &payloads[next_id as usize % 2];
+                    let verdict = e.queue_patterns(next_id + 1000, 2, next_id, data);
+                    assert_eq!(verdict, 0, "lanes for build {next_id} refused");
+                }
                 let (target, land): (&[f32], &[f32]) = if next_id % 2 == 1 {
                     (&rise, &[])
                 } else {
@@ -104,13 +130,20 @@ fn run(case: Case, track: &Track) -> Duration {
         }
         e.process(&mut l, &mut r);
         while e.event_count() > 0 {
-            e.take_events_into(&mut events);
+            let n = e.take_events_into(&mut events) as usize;
+            lanes_applied += events.as_chunks::<4>().0[..n]
+                .iter()
+                .filter(|ev| ev[0] == PATTERNS_APPLIED)
+                .count();
         }
         black_box((&l, &r));
     }
     let spent = started.elapsed();
-    if let Case::Build = case {
+    if let Case::Build | Case::Lanes = case {
         assert!(next_id > 4, "only {} builds ran", next_id - 1);
+    }
+    if let Case::Lanes = case {
+        assert!(lanes_applied >= 3, "only {lanes_applied} lane sets landed");
     }
     spent
 }
@@ -127,7 +160,7 @@ fn main() {
         "render: {} s of Warehouse at {} Hz in {}-frame blocks, best of {}",
         SECONDS, SR as u32, BLOCK, RUNS
     );
-    for case in [Case::Plain, Case::Build] {
+    for case in [Case::Plain, Case::Build, Case::Lanes] {
         let mut times: Vec<Duration> = (0..RUNS).map(|_| run(case, &track)).collect();
         times.sort();
         let best = times[0].as_secs_f64() * 1e3;

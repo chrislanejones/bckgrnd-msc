@@ -12,7 +12,9 @@
 //!   [`value_at`] for the progress so far, and the existing smoothing (ADR-013) glides
 //!   between onsets. Gestures stay overrides on top of that moving base.
 //! - On the end onset it writes the target exactly, then commits the landing scene as a
-//!   whole, before that step's notes: the scene transaction, sample-accurate.
+//!   whole, then swaps in the pattern lanes linked to it, before that step's notes:
+//!   the scene transaction, sample-accurate. The lanes come and go with the build the
+//!   way a scene's linked lanes do with the scene.
 //! - Cancelled (by the user, or by stop, seek, scratch, brake, backspin, a track change,
 //!   panic or the host), it puts back the base it started from. Nothing is left
 //!   half-built. Replaced (by a scene that commits, or by a newer build), it is not
@@ -21,7 +23,9 @@
 //!   build: the user's value stands, and a cancel does not restore it.
 //!
 //! Nothing here allocates. The build is a fixed-size value in an `Option`, and the
-//! per-onset work is 44 multiply-adds and the writes for the slots that moved.
+//! per-onset work is 44 multiply-adds and the writes for the slots that moved. Its
+//! lanes are parsed in the message handler, swapped in by pointer, and if withdrawn
+//! on the audio path, parked until the next message rather than freed.
 
 use crate::scheduler::{self, event, reason, slot_kind, SlotKind, FX_BASE, SCENE_LEN, STEM_FIELDS};
 use crate::{band_db, Engine};
@@ -42,6 +46,10 @@ pub mod detail {
     pub const BARS: u8 = 1;
     pub const TARGET: u8 = 2;
     pub const LAND: u8 = 3;
+    /// The lanes the build sets. The worklet reports this one: it stages the lanes,
+    /// and the engine refuses a bad payload as `patterns rejected` before the build is
+    /// asked for.
+    pub const LANES: u8 = 4;
 }
 
 /// The fx slots, as engine indices into [`Engine::fx_base`].
@@ -181,6 +189,12 @@ impl Engine {
     /// by it (`scene replaced`, `a` = this id), and so is a build already queued or
     /// running (`build replaced`); a running one hands over where it has got to, and
     /// cancelling this one restores the base from before either.
+    ///
+    /// Pattern lanes staged just before with [`Engine::queue_patterns`] and `link` =
+    /// `request_id` go with the build: they apply on its end onset, after the landing
+    /// scene and before that step's notes, and are withdrawn (`patterns cancelled`)
+    /// when it is refused (with its reason), cancelled (with the cancel's), or
+    /// replaced (10), exactly as a scene's linked lanes are.
     pub fn queue_build(&mut self, request_id: u32, bars: u32, target: &[f32], land: &[f32]) -> u8 {
         let (verdict, part) = if !BUILD_BARS.contains(&bars) {
             (reason::INVALID, detail::BARS)
@@ -202,9 +216,15 @@ impl Engine {
                 verdict as f64,
                 part as f64,
             );
+            // A refused build's lanes are withdrawn; anything else stays as it was.
+            if self.linked.as_ref().is_some_and(|l| l.link == request_id) {
+                self.cancel_linked(verdict);
+            }
             return verdict;
         }
 
+        // The lanes this build sets, staged just before it, are the build's from here.
+        let lanes = self.linked.take_if(|l| l.link == request_id);
         // Latest wins over a pending scene, and the lanes that scene carried go with it.
         if self.scheduler.replace_pending(request_id) {
             self.cancel_linked(reason::USER);
@@ -218,6 +238,7 @@ impl Engine {
                     request_id as f64,
                     0.0,
                 );
+                self.withdraw_build_lanes(reason::USER);
                 if old.started {
                     // Hand over mid-build: the mix stays where the old one left it until
                     // this one starts, and a cancel still goes back to before the old one.
@@ -246,6 +267,10 @@ impl Engine {
             keep,
             touched: 0,
         });
+        self.build_lanes = lanes;
+        // Freed here, in the message handler: a replaced build's lanes, and any a scene
+        // withdrew on the audio path since the last message.
+        self.parked = None;
         self.announce_build();
         reason::OK
     }
@@ -484,23 +509,39 @@ impl Engine {
         self.scheduler
             .events
             .push(event::BUILD_CANCELLED, b.request_id, why as f64, 0.0);
+        self.withdraw_build_lanes(why);
         true
     }
 
     /// A scene request `by` has just been committed over the build: it is replaced,
-    /// with no restore (the scene is complete). `by` is 0 for the idle deck's follower.
+    /// with no restore (the scene is complete), and its lanes are withdrawn. `by` is 0
+    /// for the idle deck's follower.
     pub(crate) fn replace_build(&mut self, by: u32) {
         if let Some(b) = self.build.take() {
             self.scheduler
                 .events
                 .push(event::BUILD_REPLACED, b.request_id, by as f64, 0.0);
+            self.withdraw_build_lanes(reason::USER);
+        }
+    }
+
+    /// Withdraw the build's linked lanes, reported as `patterns cancelled` with `why`,
+    /// as a scene's are when it goes. Parked rather than dropped, because a scene
+    /// committing over the build does this on the audio path; the next pattern or build
+    /// message frees them.
+    fn withdraw_build_lanes(&mut self, why: u8) {
+        if let Some(l) = self.build_lanes.take() {
+            self.scheduler
+                .events
+                .push(event::PATTERNS_CANCELLED, l.request_id, why as f64, 0.0);
+            self.parked = Some(l);
         }
     }
 
     /// The build's part of an onset on `step`, run after the scene due here (which
     /// would have replaced it) and before the fill and the notes: start a waiting build
     /// on its bar line, or move a running one on, and end it on its last bar line with
-    /// the target exact and the landing scene committed.
+    /// the target exact, the landing scene committed and its lanes swapped in.
     #[inline(never)]
     pub(crate) fn build_onset(&mut self, step: usize) {
         let Some(mut b) = self.build.take() else {
@@ -544,6 +585,11 @@ impl Engine {
                     #[cfg(test)]
                     self.trace
                         .push(crate::Trace::Apply(b.request_id, self.clock));
+                }
+                // The lanes after the landing, as a scene's follow its targets.
+                if let Some(lanes) = self.build_lanes.take() {
+                    debug_assert_eq!(lanes.link, b.request_id);
+                    self.apply_patterns(lanes, step as i32);
                 }
                 self.scheduler.events.push(
                     event::BUILD_APPLIED,
