@@ -4090,6 +4090,20 @@ html[data-control-drag="yes"] * {
   }
 }
 
+/* Switch on takes its short names (Beat, Bar, as on the phone) once the panel is too
+   narrow for Rise's 2 · 4 · 8 to share the row with the full names: with Rise on, the
+   full row needs about 44rem. Keyed to width, not to Rise, so choosing Rise never
+   moves the pills under the pointer. The full names stay the accessible names. */
+@container scenes (max-width: 45rem) {
+  .scene-toolbar > .segmented-block .seg-full {
+    display: none;
+  }
+
+  .scene-toolbar > .segmented-block .seg-short {
+    display: inline;
+  }
+}
+
 /* Narrow cards (tablet, half a screen): the state takes its own line under the
    preview, so "Available after mix" is never cut short. */
 @container scenes (max-width: 46rem) {
