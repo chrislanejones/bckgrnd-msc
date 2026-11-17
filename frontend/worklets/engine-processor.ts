@@ -227,6 +227,12 @@ class EngineProcessor extends AudioWorkletProcessor {
   private buildPendingId = -1;
   /** The live engine's base, read back for that. */
   private baseBuf = new Float32Array(SCENE_LEN);
+  /**
+   * The build whose base the host's knobs follow, until its last event is drained.
+   * Kept apart from `buildPendingId`, which stop, panic, track load and a host cancel
+   * clear before their `build cancelled` is drained; the knobs must still glide back.
+   */
+  private buildShownId = -1;
 
   /** Accumulated sample clock, used to schedule the auto-mix handover. */
   private frames = 0;
@@ -615,6 +621,7 @@ class EngineProcessor extends AudioWorkletProcessor {
     );
     if (verdict === 0) {
       this.buildPendingId = requestId;
+      this.buildShownId = requestId;
       // A build replaces a pending scene (`scene replaced`), so its mix will never land.
       this.scenePendingId = -1;
     }
@@ -706,6 +713,9 @@ class EngineProcessor extends AudioWorkletProcessor {
     const n = engine.take_events_into(this.eventBuf);
     if (n === 0) return;
     const buf = this.eventBuf;
+    // The build whose base to send ahead of its events (applied or cancelled), so the
+    // host's knobs already stand where the build left them when it reads the outcome.
+    let baseFor = -1;
     if (deck === this.live) {
       for (let k = 0; k < n; k += 1) {
         const kind = buf[k * EVENT_WIDTH];
@@ -731,9 +741,29 @@ class EngineProcessor extends AudioWorkletProcessor {
             this.buildPendingId = -1;
           }
         }
+        if (id === this.buildShownId) {
+          // Applied, or cancelled and gliding back to where it started: the knobs follow.
+          if (kind === EVENT_BUILD_APPLIED || kind === EVENT_BUILD_CANCELLED) {
+            if (engine.base_into(this.baseBuf)) baseFor = id;
+            this.buildShownId = -1;
+          } else if (kind === EVENT_BUILD_REPLACED || kind === EVENT_BUILD_REJECTED) {
+            this.buildShownId = -1;
+          }
+        }
       }
     }
+    if (baseFor >= 0) this.postBuildBase(deck, baseFor);
     this.postSceneEvents(deck, Array.from(buf.subarray(0, n * EVENT_WIDTH)));
+  }
+
+  /**
+   * The base a build has moved the live deck to, read into `baseBuf` just before, for
+   * the host's knobs (docs/NIGHT7_PROTOCOL.md, Worklet messages). Sent ~30 times a
+   * second while a build runs and once more when it ends, so the message is the only
+   * allocation.
+   */
+  private postBuildBase(deck: DeckId, requestId: number): void {
+    this.port.postMessage({ type: 'buildBase', deck, requestId, values: Array.from(this.baseBuf) });
   }
 
   /**
@@ -1054,6 +1084,15 @@ class EngineProcessor extends AudioWorkletProcessor {
       this.peakL = 0;
       this.peakR = 0;
       this.port.postMessage({ type: 'telemetry', frame: this.telemetry.slice() });
+      // A running build moves the base on every sixteenth; the host shows it moving.
+      if (
+        live &&
+        this.buildPendingId >= 0 &&
+        live.active_build() === this.buildPendingId &&
+        live.base_into(this.baseBuf)
+      ) {
+        this.postBuildBase(this.live, this.buildPendingId);
+      }
     }
   }
 }

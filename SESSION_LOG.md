@@ -203,3 +203,34 @@ changes; Dara writes the ADR.
 | `pnpm run typecheck`, `pnpm run build:netlify` | pass |
 | `verify:desktop` | pass, 9/9 steps (498 ok), including the two new build checks in `verify-audio`. The first run failed one editor check ("velocity: held arrow is one undoable gesture") while another session's heavy job held the machine. It passed 3/3 standalone (73/73), then the full suite passed. Keyboard-repeat timing under load; no editor code changed. |
 | `verify:web` | pass, 7/7 steps (142 ok) |
+
+# Night 7 session log: the Rise button (timed builds in the UI)
+
+Branch `night7/build-ui`, worktree `~/ai-repo/bckgrnd-night7-buildui`, from
+`night7/timed-build` (`2028030`) with `night7/density` merged in (parking-lot sections
+both kept), 11-17-2026. Protocol: `docs/NIGHT7_PROTOCOL.md`, "The UI: Rise".
+
+## Decisions
+
+| Decision | Why |
+|---|---|
+| A fourth **Switch on** choice, Rise, plus 2 · 4 · 8 bars, instead of a separate Build pad | You pick the scene to rise into with the pad you'd press anyway, and Shift+1–4 work unchanged. |
+| Called Rise in the UI, build in code and protocol | One factory scene is already called Build. |
+| A build is a `SceneRequest` with `build: {bars, bar}` | Cancel, the other pads, Compare A/B and the status line already handle a pending request. |
+| The worklet streams `buildBase` (~30 Hz, plus a final one before applied or cancelled) | The knobs move with the rise, and capture, Compare and Save read the moving mix. |
+| A control the user moves during a rise is theirs, on screen as in the engine | The host sees a value it didn't show and stops moving it. A snapshot React hasn't rendered yet doesn't count. |
+| `buildShownId` kept apart from `buildPendingId` in the worklet | Stop, panic and the host cancel clear the pending id before `build cancelled` is drained, so the knobs didn't glide back (caught by verify-ui). |
+| Stopped: a Rise press only says to press Play | The engine refuses it (reason 7) anyway. |
+
+## Gates
+
+| Gate | Result |
+|---|---|
+| `check-scenes` | pass, 12 new build checks |
+| `pnpm run typecheck` | pass |
+| `pnpm run build:netlify` | pass (engine unchanged) |
+| `verify:web` | pass, 7/7 steps (153 ok) |
+| `verify:desktop` | pass, 9/9 steps (523 ok), with 14 new Rise checks in `verify-ui` |
+| 1440 × 900 scene toolbar | 74 px with Rise off and with Rise on (no growth) |
+| 1280 × 800 | +38 px while Rise is on (parked) |
+| 390 phone | Switch on uses Beat / Bar short labels; the bars row adds 56 px while Rise is on |

@@ -125,11 +125,14 @@ type WorkletMessage =
   | { type: 'fillCancelResult'; deck: Deck; requestId: number; cancelled: boolean }
   | { type: 'patternsCancelResult'; deck: Deck; requestId: number; cancelled: boolean }
   | { type: 'buildCancelResult'; deck: Deck; requestId: number; cancelled: boolean }
+  | { type: 'buildBase'; deck: Deck; requestId: number; values: number[] }
   | { type: 'gestureBeginResult'; deck: Deck; token: number; accepted: boolean };
 
 type Listener = (telemetry: Telemetry) => void;
 type ErrorListener = (message: string) => void;
 type SceneEventListener = (events: readonly EngineEvent[]) => void;
+/** Where a running build has moved the live deck's base: 44 scene-vector values. */
+export type BuildBaseListener = (requestId: number, values: readonly number[]) => void;
 
 // Stamped with the build, because the file names never change and a browser that
 // had cached the old engine kept playing it after a rebuild.
@@ -142,6 +145,7 @@ export class EngineHost {
   private listeners = new Set<Listener>();
   private errorListeners = new Set<ErrorListener>();
   private sceneListeners = new Set<SceneEventListener>();
+  private buildBaseListeners = new Set<BuildBaseListener>();
   /** `cancelScene` callers waiting on the worklet's answer, by request id. */
   private cancelWaiters = new Map<number, Array<(cancelled: boolean) => void>>();
   /** `cancelFill` callers, kept apart: scene and fill ids may coincide. */
@@ -314,6 +318,10 @@ export class EngineHost {
     }
     if (message.type === 'buildCancelResult') {
       settle(this.buildCancelWaiters, message.requestId, message.cancelled);
+      return;
+    }
+    if (message.type === 'buildBase') {
+      for (const listener of this.buildBaseListeners) listener(message.requestId, message.values);
       return;
     }
     if (message.type === 'gestureBeginResult') {
@@ -730,6 +738,16 @@ export class EngineHost {
   onSceneEvents(listener: SceneEventListener): () => void {
     this.sceneListeners.add(listener);
     return () => this.sceneListeners.delete(listener);
+  }
+
+  /**
+   * Subscribe to the base a running build has reached (~30 Hz), and its final base
+   * when it is applied or cancelled. The final one always arrives before the event
+   * that ends the build. Returns an unsubscribe function.
+   */
+  onBuildBase(listener: BuildBaseListener): () => void {
+    this.buildBaseListeners.add(listener);
+    return () => this.buildBaseListeners.delete(listener);
   }
 
   /**

@@ -129,15 +129,53 @@ has booted.
 | `{type: 'build', requestId, generation, bars, target, land?, deck?}` | `queue_build`; bars other than 2, 4 or 8 go in as 0 (refused, part 1) |
 | `{type: 'cancelBuild', requestId}` | `cancel_build`, answered with `{type: 'buildCancelResult', deck, requestId, cancelled}` |
 
+| Worklet → host | When |
+|---|---|
+| `{type: 'buildBase', deck, requestId, values}` | The live engine's base (`base_into`, 44 values) while its build runs, on the telemetry tick (~30 Hz), and once more when it is applied or cancelled, posted **before** the event that ends it. Display only: the host moves its knobs, it sends nothing back. |
+
 Events come back on `sceneEvents`. When the live deck reports `build applied`, the
 worklet reads the live engine's base (`base_into`) and carries it to its auto-mix
 mirrors and onto the idle deck (`set_scene`), as it does for an applied scene. The
 host API is `EngineHost.queueBuild(requestId, bars, target, generation, land?)` and
-`EngineHost.cancelBuild(requestId)` in `frontend/lib/engine.ts`.
+`EngineHost.cancelBuild(requestId)` in `frontend/lib/engine.ts`, and
+`EngineHost.onBuildBase(listener)` for the `buildBase` messages.
+
+## The UI: Rise
+
+The scene strip's **Switch on** gains a fourth choice, **Rise**, with a 2 · 4 · 8 bars
+picker beside it (4 the first time, then whatever was last picked). It is called Rise,
+not Build, because one of the four factory scenes is called Build. In Rise, a pad press
+(or Shift+1–4) queues a build into that scene instead of a launch. The request is the
+same record as a launch (`SceneRequest` with `build: {bars, bar}`), so Cancel, the
+other pads and Compare A/B treat it like a pending scene.
+
+| Engine says | Pad line | Status line |
+|---|---|---|
+| (sent) | Sending… | |
+| 41 queued | Rise · Bar N | Drop rises over 4 bars from bar N |
+| 46 started | Rising · 1 of 4, a rule along the foot at 1/4 | Drop rising over 4 bars |
+| 47 progress | Rising · k of 4, the rule at k/4 | (unchanged: once a bar is too chatty for a live region) |
+| 42 applied | Active, or Active · Modified if the user moved a knob | Drop active |
+| 43 cancelled | (cleared) | Drop rise cancelled, plus the reason unless it was the user |
+| 45 rejected | (cleared) | Drop rise not started: press Play first / not while the deck is scratched or braking |
+
+- **Pressing the rising pad again cancels it**, and the mix glides back. Cancel (the
+  button) keeps its meaning: clear the scene and restore the mix from before scene
+  choices, which replaces the build.
+- **The knobs move with the build.** They follow `buildBase`, so the store, and with it
+  capture, Compare A/B and Save, hold the mix as it stands (at most one telemetry tick,
+  ~33 ms, behind the engine).
+- **A knob the user moves during a build stays theirs.** The host notices a value that
+  differs from the last one it showed and stops moving that control, as the engine
+  does. A snapshot that React has not rendered yet is not mistaken for the user's hand.
+- **Stopped:** a Rise press does nothing but say "Drop can rise only during playback:
+  press Play, or switch on Now". The engine would refuse it anyway (reason 7).
+- **Lanes:** a build carries no lanes, so a scene with captured patterns has them sent
+  when the build is applied; they land on the following bar line. The status says so.
 
 ## Not in Night 7
 
 - Pattern lanes on the landing scene (a scene's `patterns`): the request has no lanes,
   so a landing Drop uses the current arrangement.
 - Curves other than the straight line, and a build that starts on a beat.
-- The UI: the progress display, the queued state and the cancel button.
+- A scene's lanes landing on the build's own end bar line (they follow one bar later).

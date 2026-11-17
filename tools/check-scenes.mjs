@@ -100,6 +100,28 @@ const replaced = s.foldSceneEvent(queued, { kind: s.EVENT.sceneReplaced, id: 7, 
 check('replaced settles the request', replaced.status === 'replaced' && !s.isPending(replaced));
 check('the flat event list splits into fours', s.readEvents([1, 7, 9, 128, 2, 7, 128, 0]).length === 2);
 
+// Timed builds (Night 7): kinds 41-47 drive the same request, through a building state.
+const breq = { ...req, requestId: 20, build: { bars: 4 } };
+const bq = s.foldSceneEvent(breq, { kind: s.EVENT.buildQueued, id: 20, a: 5, b: 64 });
+check('a build queued carries its start bar', bq.status === 'queued' && bq.bar === 5 && s.isPending(bq));
+check('scene kinds do not move a build', s.foldSceneEvent(bq, { kind: s.EVENT.sceneApplied, id: 20, a: 0, b: 0 }) === bq);
+const bs = s.foldSceneEvent(bq, { kind: s.EVENT.buildStarted, id: 20, a: 64, b: 4 });
+check('started is bar 1 of n and still pending', bs.status === 'building' && bs.build.bar === 1 && s.isPending(bs));
+const bp = s.foldSceneEvent(bs, { kind: s.EVENT.buildProgress, id: 20, a: 3, b: 4 });
+check('progress carries the bar now playing', bp.status === 'building' && bp.build.bar === 3 && bp.build.bars === 4);
+check('a late queued cannot rewind a running build', s.foldSceneEvent(bp, { kind: s.EVENT.buildQueued, id: 20, a: 9, b: 0 }) === bp);
+const ba = s.foldSceneEvent(bp, { kind: s.EVENT.buildApplied, id: 20, a: 128, b: 0 });
+check('applied settles the build', ba.status === 'applied' && !s.isPending(ba));
+check('nothing moves a build after applied', s.foldSceneEvent(ba, { kind: s.EVENT.buildCancelled, id: 20, a: 2, b: 0 }) === ba);
+const bc = s.foldSceneEvent(bp, { kind: s.EVENT.buildCancelled, id: 20, a: 10, b: 0 });
+check('cancelled settles with its reason', bc.status === 'cancelled' && bc.reason === 10 && !s.isPending(bc));
+const br = s.foldSceneEvent(bq, { kind: s.EVENT.buildRejected, id: 20, a: 7, b: 0 });
+check('rejected settles with its reason', br.status === 'rejected' && br.reason === 7);
+check('build kinds count as launch events', [41, 42, 43, 44, 45, 46, 47].every(s.isLaunchEvent) && !s.isLaunchEvent(11) && !s.isLaunchEvent(31));
+const vec = s.sceneVector(applied);
+const back = s.mixFromVector(vec);
+check('mixFromVector inverts sceneVector', s.sameMix(s.copyMix(back), applied) && s.sceneVector(back).every((v, i) => v === vec[i]));
+
 if (failed) {
   console.error(`\n${failed} scene check(s) failed.`);
   process.exit(1);

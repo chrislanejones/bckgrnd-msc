@@ -9,17 +9,31 @@
  *
  * What the pads show comes from the engine: a pad reads Active only after the engine
  * says the scene was applied. Until then it reads Sending…, then Queued · Bar N.
+ *
+ * Switch on → Rise (Night 7, a timed build) makes a pad press rise into its scene over
+ * 2, 4 or 8 bars: the pad reads Rise · Bar N, then Rising · 2 of 4 with a progress rule along
+ * its foot, then Active. Pressing it again while it waits or builds cancels, and the
+ * mix glides back to where it started.
  */
 
 import { useEffect, useId, useRef, useState } from 'react';
 import { MoreHorizontal, X } from 'lucide-react';
 import type { Scene, SceneSlotId } from '../lib/contract';
 import { SCENE_SLOTS } from '../lib/contract';
-import { isPending, isSceneSlot, sceneLevels, scenePreview, type SceneRequest, type Timing } from '../lib/scenes';
+import {
+  BUILD_BAR_CHOICES,
+  isPending,
+  isSceneSlot,
+  sceneLevels,
+  scenePreview,
+  type BuildBars,
+  type SceneRequest,
+  type Timing,
+} from '../lib/scenes';
 import { STEM_ORDER, STEM_NAMES } from '../lib/stems';
 import type { TrackSummary } from '../lib/types';
 import { cx, Segmented } from './controls';
-import type { ReactNode } from 'react';
+import type { CSSProperties, ReactNode } from 'react';
 
 export type FillState = 'idle' | 'sending' | 'queued' | 'playing';
 
@@ -33,6 +47,8 @@ type Props = {
   /** The latest scene request, pending or just settled. */
   request: SceneRequest | null;
   timing: Timing;
+  /** Build mode's bar count, or null when a press switches on one onset. */
+  buildBars: BuildBars | null;
   /** Why launching is unavailable right now (a mix is running), or null. */
   unavailable: string | null;
   /** The one-bar fill; left out until the engine has one. */
@@ -41,7 +57,8 @@ type Props = {
   fillName?: string;
   /** Why a fill cannot start now, or null. */
   fillUnavailable?: string | null;
-  onTiming: (t: Timing) => void;
+  onTiming: (t: Timing | 'build') => void;
+  onBuildBars: (bars: BuildBars) => void;
   onLaunch: (slot: SceneSlotId) => void;
   onCancel: () => void;
   onFill?: () => void;
@@ -54,7 +71,7 @@ type Props = {
 };
 
 export function SceneStrip(props: Props) {
-  const { scenes, active, modified, request, timing, unavailable } = props;
+  const { scenes, active, modified, request, timing, buildBars, unavailable } = props;
   const pending = isPending(request) && isSceneSlot(request.target) ? request : null;
   const [menuFor, setMenuFor] = useState<SceneSlotId | null>(null);
 
@@ -65,13 +82,15 @@ export function SceneStrip(props: Props) {
           const scene = scenes.find((s) => s.slot === slot)!;
           const preview = scenePreview(scene, props.track);
           const isActive = active === slot;
-          const isQueued = pending?.target === slot;
+          const queued = pending?.target === slot ? pending : null;
           const state = unavailable
             ? 'unavailable'
-            : isQueued
-              ? pending.status === 'sending'
+            : queued
+              ? queued.status === 'sending'
                 ? 'sending'
-                : 'queued'
+                : queued.status === 'building'
+                  ? 'building'
+                  : 'queued'
               : isActive
                 ? modified
                   ? 'modified'
@@ -83,19 +102,37 @@ export function SceneStrip(props: Props) {
               : state === 'sending'
                 ? 'Sending…'
                 : state === 'queued'
-                  ? queuedLine(pending!)
-                  : state === 'modified'
-                    ? 'Active · Modified'
-                    : state === 'active'
-                      ? 'Active'
-                      : '';
+                  ? queuedLine(queued!)
+                  : state === 'building'
+                    ? buildingLine(queued!)
+                    : state === 'modified'
+                      ? 'Active · Modified'
+                      : state === 'active'
+                        ? 'Active'
+                        : '';
           return (
-            <div key={slot} className="scene-slot" data-state={state}>
+            <div
+              key={slot}
+              className="scene-slot"
+              data-state={state}
+              data-build={queued?.build?.bars}
+              style={
+                state === 'building' && queued?.build
+                  ? ({ '--build-progress': (queued.build.bar ?? 1) / queued.build.bars } as CSSProperties)
+                  : undefined
+              }
+            >
               <button
                 type="button"
                 className="scene-pad tap"
                 disabled={state === 'unavailable'}
-                aria-label={`Launch ${scene.name}`}
+                aria-label={
+                  queued
+                    ? `Cancel ${queued.build ? 'the rise into' : 'the queued'} ${scene.name}`
+                    : buildBars !== null
+                      ? `Rise into ${scene.name} over ${buildBars} bars`
+                      : `Launch ${scene.name}`
+                }
                 aria-pressed={isActive}
                 aria-keyshortcuts={`Shift+${i + 1}`}
                 aria-describedby={`scene-summary-${slot} scene-line-${slot}`}
@@ -157,16 +194,29 @@ export function SceneStrip(props: Props) {
         })}
       </div>
       <div className="scene-toolbar">
-        <Segmented<Timing>
+        <Segmented<Timing | 'build'>
           label="Switch on"
-          value={timing}
+          value={buildBars !== null ? 'build' : timing}
           onPick={props.onTiming}
           options={[
             { value: 'now', label: 'Now', aria: 'Launch now' },
-            { value: 'beat', label: 'Next beat', aria: 'Launch on the next beat' },
-            { value: 'bar', label: 'Next bar', aria: 'Launch on the next bar' },
+            { value: 'beat', label: 'Next beat', short: 'Beat', aria: 'Launch on the next beat' },
+            { value: 'bar', label: 'Next bar', short: 'Bar', aria: 'Launch on the next bar' },
+            { value: 'build', label: 'Rise', aria: 'Rise into the scene over several bars' },
           ]}
         />
+        {buildBars !== null ? (
+          <div className="scene-build-bars">
+            <Segmented<BuildBars>
+              label="Rise over"
+              hideLabel
+              value={buildBars}
+              onPick={props.onBuildBars}
+              options={BUILD_BAR_CHOICES.map((n) => ({ value: n, label: `${n}`, aria: `Rise over ${n} bars` }))}
+            />
+            <span className="scene-build-unit" aria-hidden="true">bars</span>
+          </div>
+        ) : null}
         <div className="scene-strip-actions">
           {props.onFill ? <FillButton {...props} /> : null}
           <button
@@ -206,8 +256,14 @@ export function SceneHeader({ status }: { status: string }) {
 }
 
 function queuedLine(r: SceneRequest): string {
+  if (r.build) return r.bar ? `Rise · Bar ${r.bar}` : 'Rise queued';
   if (r.timing === 'now') return 'Queued · now';
   return r.bar ? `Queued · Bar ${r.bar}` : 'Queued';
+}
+
+function buildingLine(r: SceneRequest): string {
+  const b = r.build!;
+  return `Rising · ${b.bar ?? 1} of ${b.bars}`;
 }
 
 function FillButton(props: Props) {

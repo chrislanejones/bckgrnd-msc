@@ -28,18 +28,22 @@ import {
 } from './contract';
 import {
   EVENT,
+  BUILD_REFUSAL,
   REASON,
   captureScene,
   copyMix,
   duplicateScene,
   factoryScenes,
   foldSceneEvent,
+  isLaunchEvent,
   isPending,
   isSceneSlot,
+  mixFromVector,
   renameScene,
   resetScene,
   sameMix,
   sceneVector,
+  type BuildBars,
   type Compare,
   type SceneMix,
   type SceneRequest,
@@ -226,7 +230,27 @@ export function useInstrument() {
   const [sceneRequest, setSceneRequest] = useState<SceneRequest | null>(null);
   const sceneRequestRef = useRef<SceneRequest | null>(null);
   sceneRequestRef.current = sceneRequest;
-  const [sceneTiming, setSceneTiming] = useState<Timing>('bar');
+  const [sceneTiming, setSceneTimingState] = useState<Timing>('bar');
+  /**
+   * Build mode (Night 7): a pad press rises into its scene over this many bars instead
+   * of switching on one onset. Null when Switch on is Now, Next beat or Next bar.
+   */
+  const [buildBars, setBuildBarsState] = useState<BuildBars | null>(null);
+  /** The bar count Build mode comes back with, so 2 or 8 sticks once chosen. */
+  const lastBuildBars = useRef<BuildBars>(4);
+  /**
+   * What the knobs were last moved to by the running build, and the scene-vector slots
+   * the user has moved since (theirs from then on, as in the engine).
+   */
+  const buildShown = useRef<{
+    requestId: number;
+    last: Float32Array | null;
+    touched: Set<number>;
+    /** The render count when `last` was shown; the store only has it after a render. */
+    shownAt: number;
+  }>({ requestId: -1, last: null, touched: new Set(), shownAt: 0 });
+  const renders = useRef(0);
+  renders.current += 1;
   /** One line for assistive technology: discrete changes only, never every beat. */
   const [sceneStatus, setSceneStatus] = useState('');
   const nextRequestId = useRef(1);
@@ -695,7 +719,7 @@ export function useInstrument() {
     () =>
       engine.onSceneEvents((events: readonly WireEvent[]) => {
         for (const e of events) {
-          if (e.kind < EVENT.sceneQueued || e.kind > EVENT.sceneRejected) continue;
+          if (!isLaunchEvent(e.kind)) continue;
           const current = sceneRequestRef.current;
           if (!current || current.requestId !== e.requestId) continue;
           const next = foldSceneEvent(current, { kind: e.kind, id: e.requestId, a: e.a, b: e.b });
@@ -703,6 +727,10 @@ export function useInstrument() {
           sceneRequestRef.current = next;
           setSceneRequest(next);
           const name = sceneNameRef.current(next.target);
+          if (next.build) {
+            buildOutcomeRef.current(next, current);
+            continue;
+          }
           if (next.status === 'queued') {
             setSceneStatus(next.timing === 'now' ? `${name} queued` : `${name} queued for bar ${next.bar}`);
           } else if (next.status === 'applied') {
@@ -722,16 +750,80 @@ export function useInstrument() {
       }),
     [],
   );
+  // Where a running build has moved the base (~30 Hz, then once more as it ends): the
+  // knobs follow it, except the ones the user has moved since it started, which are
+  // theirs (the engine stops driving them too). Display only: nothing is sent back.
+  useEffect(
+    () =>
+      engine.onBuildBase((requestId, values) => {
+        const current = sceneRequestRef.current;
+        if (!current?.build || current.requestId !== requestId) return;
+        followBuildRef.current(requestId, values);
+      }),
+    [],
+  );
+
   // The subscription above lives for the app; it reads these through refs.
   const showMixRef = useRef(showMix);
   showMixRef.current = showMix;
   const sceneNameRef = useRef(sceneName);
   sceneNameRef.current = sceneName;
 
+  /** Move the knobs to where a build has the base, keeping the ones the user moved. */
+  function followBuild(requestId: number, values: readonly number[]) {
+    const shown = buildShown.current;
+    if (shown.requestId !== requestId) {
+      buildShown.current = { requestId, last: null, touched: new Set(), shownAt: 0 };
+    }
+    const state = buildShown.current;
+    const working = sceneVector(workingMix());
+    const next = Float32Array.from(values);
+    // Until React has rendered the last snapshot, the store still holds the one before,
+    // which would look like the user's hand.
+    if (state.last && renders.current > state.shownAt) {
+      for (let i = 0; i < next.length; i += 1) {
+        if (working[i] !== state.last[i]) state.touched.add(i);
+      }
+    }
+    for (const i of state.touched) next[i] = working[i]!;
+    state.last = next;
+    state.shownAt = renders.current;
+    showMix(mixFromVector(next));
+  }
+  const followBuildRef = useRef(followBuild);
+  followBuildRef.current = followBuild;
+
+  /** One build outcome: the pad line comes from the request, the status line from here. */
+  function buildOutcome(next: SceneRequest, prev: SceneRequest) {
+    const name = sceneName(next.target);
+    const bars = next.build!.bars;
+    if (next.status === 'queued') {
+      setSceneStatus(`${name} rises over ${bars} bars from bar ${next.bar}`);
+    } else if (next.status === 'building' && prev.status !== 'building') {
+      setSceneStatus(`${name} rising over ${bars} bars`);
+    } else if (next.status === 'applied') {
+      // The knobs already stand where the build left them (its final base arrives
+      // first). The scene's own mix is what Active compares against, so a control the
+      // user moved during the build reads as Modified.
+      landed(next);
+      const lanes = next.lanes && Object.keys(next.lanes).length > 0;
+      setSceneStatus(lanes ? `${name} active; its patterns follow on the next bar` : `${name} active`);
+    } else if (next.status === 'cancelled') {
+      const why = next.reason === undefined || next.reason === 10 ? '' : `: ${REASON[next.reason] ?? ''}`;
+      setSceneStatus(`${name} rise cancelled${why}`);
+    } else if (next.status === 'rejected') {
+      setSceneStatus(`${name} rise not started: ${BUILD_REFUSAL[next.reason ?? 1] ?? REASON[next.reason ?? 1] ?? 'refused'}`);
+    }
+  }
+  const buildOutcomeRef = useRef(buildOutcome);
+  buildOutcomeRef.current = buildOutcome;
+
   /** What an applied launch means for the active scene and the comparison. */
   function landed(request: SceneRequest) {
     const t = request.target;
-    if (request.lanes) patternsRef.current.adoptScene(sceneName(t), request.lanes, !engine.booted);
+    // A build carries no lanes to the engine (docs/NIGHT7_PROTOCOL.md), so its scene's
+    // lanes are sent now and land on the next bar line.
+    if (request.lanes) patternsRef.current.adoptScene(sceneName(t), request.lanes, !engine.booted || Boolean(request.build));
     if (isSceneSlot(t)) {
       for (const lane of Object.keys(request.lanes ?? {}) as LaneId[]) beforeScenes.current?.changedLanes.add(lane);
       setActiveScene({ slot: t, mix: request.mix });
@@ -853,10 +945,47 @@ export function useInstrument() {
     ) {
       return;
     }
+    if (buildBars !== null && !(engine.booted && playing)) {
+      // A build is measured in bars of playback; stopped, there is nothing to rise over.
+      setSceneStatus(`${scene.name} can rise only during playback: press Play, or switch on Now`);
+      return;
+    }
     if (!beforeScenes.current || (!activeScene && !(pending && isSceneSlot(pending.target)))) {
       beforeScenes.current = { mix: workingMix(), patterns: patterns.sceneLanes(), changedLanes: new Set() };
     }
-    requestLaunch(slot, scene.revision, scene, scene.patterns);
+    if (buildBars !== null) requestBuild(slot, scene.revision, scene, buildBars, scene.patterns);
+    else requestLaunch(slot, scene.revision, scene, scene.patterns);
+  }
+
+  /**
+   * Ask the live deck to rise into a scene over `bars` bars (docs/NIGHT7_PROTOCOL.md).
+   * Same request record as a launch, so the pads, Cancel and the status line treat it
+   * alike; outcomes are kinds 41-47.
+   */
+  function requestBuild(
+    target: SceneSlotId,
+    revision: number,
+    mix: SceneMix,
+    bars: BuildBars,
+    lanes?: ScenePatterns,
+  ) {
+    const sets = lanes && Object.keys(lanes).length ? lanes : undefined;
+    const requestId = nextRequestId.current++;
+    const request: SceneRequest = {
+      requestId,
+      target,
+      revision,
+      generation: generations.current[liveDeck],
+      timing: 'bar',
+      status: 'sending',
+      mix: copyMix(mix),
+      build: { bars },
+      ...(sets ? { lanes: sets } : {}),
+    };
+    buildShown.current = { requestId, last: null, touched: new Set(), shownAt: 0 };
+    sceneRequestRef.current = request;
+    setSceneRequest(request);
+    engine.queueBuild(requestId, bars, sceneVector(request.mix), request.generation);
   }
 
   /** Clear a queued or active scene, restoring the mix from before scene choices. */
@@ -876,12 +1005,30 @@ export function useInstrument() {
     requestLaunch('restoreScene', 0, before.mix, restore, 'now');
   }
 
+  /** Switch on: Now, Next beat, Next bar, or Build (over the bars last chosen). */
+  function setSceneTiming(value: Timing | 'build') {
+    if (value === 'build') {
+      setBuildBarsState(lastBuildBars.current);
+      return;
+    }
+    setBuildBarsState(null);
+    setSceneTimingState(value);
+  }
+
+  /** How many bars a build rises over; picking one also switches Build on. */
+  function setBuildBars(bars: BuildBars) {
+    lastBuildBars.current = bars;
+    setBuildBarsState(bars);
+  }
+
   /** Withdraw the queued launch. Says so if it had already landed. */
   function cancelQueuedScene() {
     const pending = isPending(sceneRequest) ? sceneRequest : null;
     if (!pending) return;
     const name = sceneName(pending.target);
-    void engine.cancelScene(pending.requestId).then((cancelled) => {
+    // A running build glides back to the mix it started from (`build cancelled`).
+    const ask = pending.build ? engine.cancelBuild(pending.requestId) : engine.cancelScene(pending.requestId);
+    void ask.then((cancelled) => {
       if (!cancelled && sceneRequestRef.current?.requestId === pending.requestId) {
         setSceneStatus(`${name} had already applied`);
       }
@@ -1280,6 +1427,7 @@ export function useInstrument() {
     backspin,
     nudge,
     setSceneTiming,
+    setBuildBars,
     launchScene,
     cancelQueuedScene,
     cancelScene,
@@ -1339,6 +1487,8 @@ export function useInstrument() {
     sceneRequest,
     sceneRestoring: isPending(sceneRequest) && sceneRequest.target === 'restoreScene',
     sceneTiming,
+    /** Build mode's bar count, or null when a pad press switches on one onset. */
+    buildBars,
     sceneStatus,
     fill,
     fillName: track?.fills?.[0]?.name ?? 'Fill',

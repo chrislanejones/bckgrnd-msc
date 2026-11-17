@@ -358,3 +358,12 @@ not. Things to settle before or while building it:
 - **`ENGINE_EVENT` in `frontend/lib/engine.ts` has no pattern kinds (31-35).** The
   doc table there skips them too. Night 7 added the build kinds (41-47) but left
   this gap alone.
+- **Rise wraps the scene toolbar under 1440px.** At 1280 × 800 the 2 · 4 · 8 picker
+  pushes Drum fill and Cancel onto their own row while Rise is on (toolbar 74 → 112 px).
+  1440 × 900 is unchanged. Shorter Switch on labels (Beat / Bar) at that width, or
+  folding the bar count into the Rise pill, would keep it on one row. Design follow-up
+  (Lacey).
+- **A rise into a scene with captured patterns lands its lanes a bar late.** The build
+  request carries no lanes, so they are staged when it is applied and land on the next
+  bar line. The fix is the engine `link` noted above (lanes on a landing scene), driven
+  by the build's request id.
