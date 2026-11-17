@@ -28,17 +28,34 @@ returns the base for capture. A control the user moves during a build leaves the
 build, and a cancel doesn't take it back. Events 41–47 (queued, applied, cancelled,
 replaced, rejected, started, progress) give each build exactly one terminal outcome.
 
+Lanes: `queue_build` also takes the lanes staged just before it with
+`queue_patterns(…, link = build id, …)`, moving them from the scene's staging slot
+(`linked`) into the build's own (`build_lanes`). They commit on the end onset, after
+the landing scene and before that step's notes. Refused or cancelled, the build's lanes
+are withdrawn with the same reason; replaced, with reason 10. Withdrawn on the audio
+path, they are parked until the next pattern or build message, so `process()` doesn't
+allocate or free. `build rejected` gains part 4 (lanes), reported by the worklet.
+
+UI: it is called **Rise** (a factory scene is already called Build): a fourth Switch
+on choice with a 2 · 4 · 8 bars picker, on the same `SceneRequest` record as a scene
+launch. The worklet streams a `buildBase` message (~30 Hz, plus a final one before
+applied or cancelled), so the knobs follow the build and capture reads the moving mix.
+A control the user moves mid-build stays theirs on screen as well as in the engine.
+
 ## Consequences
 + Sample-accurate and identical in every host (browser, NativePHP, MCP), because it is
   in the shared engine.
 + One terminal outcome per build, and no partial state after a cancel.
++ A `cargo bench --bench render` harness (no new dependency) now times it: a build,
+  with or without lanes, adds about 11 ms to a 60 s render (~1.3 s) over plain playback.
 - Every effect setter now writes a base mirror (`fx_base`), every base setter marks
   user ownership, and `interrupt` must cancel the build: ADR-015's spreading rules gain
-  a row. +8,249 bytes of wasm (231,072 → 239,321, +3.6%).
+  a row. +9,113 bytes of wasm in all: 231,072 → 239,321 for the build, then
+  → 240,185 (+864) for its lanes.
+- A third lane slot (`build_lanes`) and a parked slot, and every path that ends a build
+  must withdraw its lanes.
 - Stepping once per sixteenth may be audible on a deep filter build at slow tempos
-  (parked). A landing scene can't carry pattern lanes yet (ADR-014's `patterns`).
-- Not wired to the UI yet: nothing calls `queueBuild`, and the UI's scene capture
-  reads its own working mix, not `base_into`.
+  (parked).
 
 ## Alternatives rejected
 - Host-side ramps: jitter, one message per block at best, and the MCP and other hosts
@@ -51,6 +68,11 @@ replaced, rejected, started, progress) give each build exactly one terminal outc
   a bar before the scene lands.
 - A base sent by the host: it can be stale by the time the build starts.
 - Boxing the build state: +795 bytes of wasm over keeping it inline.
+- One staging slot for scenes and builds: a scene queued during a build would take
+  the build's lanes.
+- Staging the lanes after the build: a refused payload would leave an accepted build
+  without its lanes.
+- A separate Build pad: a Switch on mode reuses the four pads, Cancel and Compare A/B.
 
 ## Pre-mortem
 It is six months later and this was a mistake. Most likely reason: the ownership rules
@@ -59,4 +81,6 @@ taken, or a cancel snapped it back. Or a new transport path skipped `interrupt`,
 build kept rising (or restored) a bar after a seek.
 Early warning sign to watch for: a transport command or base setter added to the
 engine without a build cancel or a user-ownership mark, and no test in
-`build_tests.rs` that runs a build across it.
+`build_tests.rs` that runs a build across it. Or a new code path that ends a build
+without going through `cancel_build_for` or `replace_build`: its lanes would never get
+a final 31–35 event.
