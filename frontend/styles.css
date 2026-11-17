@@ -2055,8 +2055,8 @@ body {
 .drawer.editor.is-open {
   /* Head, status, bars, then the body: only the body shrinks and scrolls. */
   grid-template-rows: auto auto auto minmax(0, 1fr);
-  height: min(38rem, 78dvh);
   max-height: min(44rem, 78dvh);
+  container: drawer / inline-size;
 }
 
 .editor-body {
@@ -2068,6 +2068,30 @@ body {
   scrollbar-gutter: stable;
   overscroll-behavior-y: contain;
   padding-right: var(--space-1);
+}
+
+/* The drawer is as tall as its tallest lane, and every lane is that tall: the canvas
+   (one height for all lanes), the selection row, the edit actions and the message
+   line. The body holds exactly that, whatever is in it, so the lane tabs stay put
+   when switching lanes and nothing sits empty under the actions. Humanize, Vary and a
+   preview scroll inside it. Where the actions wrap, a lane reserves both rows, and the
+   selection row a second one for a selected note's fields. */
+@media (min-width: 900px) {
+  .editor-body {
+    --editor-rows: 1;
+    height: calc(
+      16.125rem + 2 * var(--editor-rows) * var(--control-sm) + 2 * (var(--editor-rows) - 1) * var(--space-2) +
+        1.25 * var(--text-value) + 3 * var(--section-gap)
+    );
+    max-height: 100%;
+  }
+
+  /* The actions row is about 65rem wide; below this it takes two rows. */
+  @container drawer (max-width: 67rem) {
+    .editor-body {
+      --editor-rows: 2;
+    }
+  }
 }
 
 /* Every lane uses the same canvas, so its tabs and editing tools stay put. */
