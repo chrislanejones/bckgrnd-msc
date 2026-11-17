@@ -36,8 +36,9 @@ export function CompareBar({
   onExit: () => void;
 }) {
   const queued = isPending(request) ? request.target : null;
+  // One short line, and only the next step: never a paragraph of explanation.
   const hint = !compare
-    ? 'Capture A, adjust the mix, then capture B.'
+    ? 'Compare two mix snapshots.'
     : !compare.a
       ? 'Adjust the mix, then capture A.'
       : !compare.b
@@ -56,7 +57,7 @@ export function CompareBar({
           title={disabled ?? `Capture the current mix as ${name}, for this session`}
           onClick={() => onCapture(which)}
         >
-          <CopyPlus size={16} aria-hidden="true" />
+          <CopyPlus size={14} aria-hidden="true" />
           <span>Capture {name}</span>
         </button>
       );
@@ -77,7 +78,7 @@ export function CompareBar({
         title={disabled ?? `Listen to mix ${name}`}
         onClick={() => onListen(which)}
       >
-        <Headphones size={16} aria-hidden="true" />
+        <Headphones size={14} aria-hidden="true" />
         <span>{label}</span>
       </button>
     );
@@ -85,16 +86,14 @@ export function CompareBar({
 
   return (
     <section className="compare-bar" aria-label="Compare A/B" aria-describedby="compare-hint">
-      <div className="compare-heading">
-        <p className="compare-title">
-          Compare A/B <span className="compare-note">Session only</span>
-        </p>
-        <p className="compare-hint" id="compare-hint">{hint}</p>
-      </div>
+      <p className="compare-title">
+        Compare A/B <span className="compare-note">Session only</span>
+      </p>
       <div className="compare-slots">
         {slot('a')}
         {slot('b')}
       </div>
+      <p className="compare-hint" id="compare-hint">{hint}</p>
       {compare ? (
         <div className="compare-row">
           {compare.listening && modified ? (

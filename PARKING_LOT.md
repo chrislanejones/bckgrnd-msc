@@ -329,6 +329,14 @@ not. Things to settle before or while building it:
 
 - **The MCP companion doesn't have Cipher or Boulevard.** `bckgrnd-msc-mcp` vendors its own copy of the library (`vendor/library/`), so `bckgrnd_list_tracks` and project renders won't know the two new tracks until its bundle is refreshed from this repo and republished.
 
+## Found in Night 7 (11-16-2026)
+
+- **The pattern drawer leaves room unused under its toolbar.** At 1440 × 900 the drum lanes fill about 500 of the drawer's fixed 608 px. The height is fixed on purpose (lane tabs stay put when switching lanes), so the fix is to size the drawer to its tallest lane, not to let it follow content. Design follow-up (Lacey).
+- **The docked inspector still scrolls at 1440 × 900.** After the density pass its content is 1007 px against an 824 px box, so the Output group needs a scroll. A four-across knob rack, or folding Output into a disclosure, would fit it. Design follow-up.
+- **The stems toolbar `title` now covers the Level / Solo / Cut legend.** The tooltip "Sound selection applies immediately; scenes use the timing selector." was written for the selection pills; since the legend joined that row it also shows over the legend. Move the `title` onto the selection's group. One-line markup change.
+- **The Switch on toolbar sits just under the fold at 1440 × 900.** The four scene cards are now in the first screen; the timing row starts about 900 px down. Getting it in would mean a shorter fader travel (11rem today) or folding the stems footer line. Left for Chris to weigh, because both touch performance controls.
+- **`verify:desktop` fails in a fresh worktree until Laravel's runtime folders exist.** `php artisan serve` answers 500 ("Please provide a valid cache path") because the gitignored `storage/framework/views`, `cache` and `sessions` folders are not created by `git worktree add`; the UI, editor and projects checks then time out waiting for `article.stem`. Creating the three empty folders fixed it (no env change). Worth a line in the worktree setup notes, or `.gitkeep` files.
+
 ## Found in Night 7 (11-17-2026)
 
 - **A landing scene can't carry pattern lanes.** `queue_build` takes a target and a
