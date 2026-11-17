@@ -4,6 +4,7 @@
 //! for what happened on which sample.
 
 use super::*;
+use crate::pattern_tests::{drum, pattern_applies};
 use crate::perform::kind;
 use crate::scene::build::detail;
 use crate::scene_tests::{
@@ -932,4 +933,341 @@ fn value_at_follows_the_rules() {
             "slot {i} at {p}: {got}, want {want}"
         );
     }
+}
+
+/// The ids of the pattern revisions swapped in so far, in order.
+fn lane_ids(e: &Engine) -> Vec<u32> {
+    pattern_applies(e).iter().map(|a| a.0).collect()
+}
+
+/// Lanes staged for a build go with it: nothing changes while it waits or runs, and on
+/// its end onset they swap in on that onset's own sample, after the landing scene and
+/// before that step's notes, whatever the block size and with or without a landing.
+/// They announce nothing of their own until then, as a scene's linked lanes do.
+#[test]
+fn a_builds_lanes_commit_on_its_end_onset_before_the_notes() {
+    for sr in RATES {
+        for block in [128usize, 37] {
+            for land in [scene(0.25), Vec::new()] {
+                let label = format!("{sr} Hz, block {block}, landing {}", !land.is_empty());
+                let mut e = playing(sr);
+                let target = target_from(&e.base());
+                assert_eq!(
+                    e.queue_patterns(20, timing::BAR, 3, &drum(2, &[(48, 0.9)])),
+                    reason::OK
+                );
+                assert_eq!(e.queue_build(3, 2, &target, &land), 0);
+                let mut seen = events(&mut e);
+                assert_eq!(seen, vec![ev(event::BUILD_QUEUED, 3, 2.0, 16.0)], "{label}");
+                let mut landed = None;
+                for _ in 0..(sr as usize * 10 / block) {
+                    render(&mut e, block, block);
+                    seen.extend(events(&mut e));
+                    if let Some(found) = pattern_applies(&e).first() {
+                        landed = Some(*found);
+                        break;
+                    }
+                    assert_eq!(e.track.hat[48], 0.4, "{label}: the lanes landed early");
+                }
+                let (id, sample) = landed.expect("the lanes applied");
+                assert_eq!(id, 20, "{label}");
+                assert_eq!(triggers_at(&e, sample), vec![48], "{label}");
+                let lanes = e
+                    .trace
+                    .iter()
+                    .position(|t| matches!(t, Trace::Patterns(20, _)))
+                    .expect("lanes traced");
+                let notes = e
+                    .trace
+                    .iter()
+                    .position(|t| *t == Trace::Trigger(48, sample))
+                    .expect("step 48 traced");
+                assert!(lanes < notes, "{label}: notes before the lanes");
+                assert!(
+                    !e.trace
+                        .iter()
+                        .any(|t| matches!(t, Trace::Trigger(48, s) if *s < sample)),
+                    "{label}: step 48 fired before the lanes"
+                );
+                if land.is_empty() {
+                    assert!(applies(&e).is_empty(), "{label}");
+                } else {
+                    assert_eq!(applies(&e), vec![(3, sample)], "{label}");
+                    let apply = e
+                        .trace
+                        .iter()
+                        .position(|t| matches!(t, Trace::Apply(3, _)))
+                        .expect("landing traced");
+                    assert!(apply < lanes, "{label}: the lanes before the landing");
+                }
+                assert_eq!((e.track.hat[48], e.track.hat[16]), (0.9, 0.0), "{label}");
+                let ends: Vec<_> = seen
+                    .iter()
+                    .copied()
+                    .filter(|x| {
+                        x[0] == event::PATTERNS_APPLIED as f64
+                            || x[0] == event::BUILD_APPLIED as f64
+                    })
+                    .collect();
+                let landed_flag = if land.is_empty() { 0.0 } else { 1.0 };
+                assert_eq!(
+                    ends,
+                    vec![
+                        ev(event::PATTERNS_APPLIED, 20, 48.0, 0.0),
+                        ev(event::BUILD_APPLIED, 3, 48.0, landed_flag),
+                    ],
+                    "{label}"
+                );
+                assert!(e.build_lanes.is_none() && e.parked.is_none(), "{label}");
+            }
+        }
+    }
+}
+
+/// An edit due on the build's end onset applies first, then the build's lanes, so on
+/// the same lane the build's win: the order a scene and an edit keep (Night 4).
+#[test]
+fn an_edit_due_on_the_end_onset_applies_first_so_the_builds_lanes_win() {
+    let mut e = playing(48_000.0);
+    e.queue_patterns(20, timing::BAR, 1, &drum(2, &[(48, 0.9)]));
+    assert_eq!(e.queue_build(1, 2, &target_from(&e.base()), &[]), 0);
+    walk_to(&mut e, 40);
+    e.queue_patterns(21, timing::BAR, 0, &drum(2, &[(48, 0.2)]));
+    e.trace.clear();
+    walk_to(&mut e, 48);
+    assert_eq!(lane_ids(&e), vec![21, 20]);
+    assert_eq!(e.track.hat[48], 0.9, "the build's lane wins");
+}
+
+/// Cancelled, waiting or running, by the user or by any of the paths that cancel a
+/// build, the build takes its lanes with it (`patterns cancelled`, same reason, right
+/// after `build cancelled`), and they never land. Withdrawn on their own, the build
+/// carries on and lands without them.
+#[test]
+fn a_builds_lanes_are_withdrawn_when_it_is_cancelled() {
+    type Action = fn(&mut Engine);
+    let cases: [(&str, Action, u8); 5] = [
+        (
+            "cancel",
+            |e| {
+                assert!(e.cancel_build(3));
+            },
+            reason::USER,
+        ),
+        ("stop", |e| e.stop(), reason::STOPPED),
+        ("seek", |e| e.jump(0), reason::TRANSPORT),
+        ("load track", |e| e.load_track(groove()), reason::TRACK),
+        ("panic", |e| e.panic(), reason::PANIC),
+    ];
+    for (name, action, why) in cases {
+        for running in [false, true] {
+            let mut e = playing(48_000.0);
+            e.queue_patterns(20, timing::BAR, 3, &drum(2, &[(48, 0.9)]));
+            assert_eq!(e.queue_build(3, 2, &target_from(&e.base()), &scene(0.2)), 0);
+            if running {
+                walk_to(&mut e, 37);
+            }
+            events(&mut e);
+            action(&mut e);
+            assert_eq!(
+                events(&mut e),
+                vec![
+                    ev(event::BUILD_CANCELLED, 3, why as f64, 0.0),
+                    ev(event::PATTERNS_CANCELLED, 20, why as f64, 0.0),
+                ],
+                "{name}, running {running}"
+            );
+            assert!(e.build_lanes.is_none(), "{name}");
+            if !e.is_playing() {
+                e.play();
+            }
+            e.trace.clear();
+            render(&mut e, 48_000 * 10, 128);
+            assert!(pattern_applies(&e).is_empty(), "{name}, running {running}");
+            assert_eq!(e.track.hat[48], 0.4, "{name}, running {running}");
+        }
+    }
+
+    // The lanes alone: the build lands its mix, and the lanes stay out.
+    let mut e = playing(48_000.0);
+    e.queue_patterns(20, timing::BAR, 1, &drum(2, &[(48, 0.9)]));
+    let target = target_from(&e.base());
+    assert_eq!(e.queue_build(1, 2, &target, &[]), 0);
+    events(&mut e);
+    assert!(e.cancel_patterns(20));
+    assert!(!e.cancel_patterns(20), "cancelling twice");
+    assert_eq!(
+        events(&mut e),
+        vec![ev(event::PATTERNS_CANCELLED, 20, reason::USER as f64, 0.0)]
+    );
+    let seen = walk_to(&mut e, 48);
+    assert!(seen.contains(&ev(event::BUILD_APPLIED, 1, 48.0, 0.0)));
+    assert!(pattern_applies(&e).is_empty());
+    assert_eq!((e.base(), e.track.hat[48]), (target, 0.4));
+}
+
+/// Replaced, the build's lanes go too (`patterns cancelled`, reason 10, as a replaced
+/// scene's do). By a newer build, waiting or running: only the newer build's lanes, if
+/// it has any, ever land. By a scene committing on an onset: on the audio path, so the
+/// lanes are parked, not freed, until the next message; the scene's own lanes land.
+#[test]
+fn a_builds_lanes_are_withdrawn_when_it_is_replaced() {
+    for running in [false, true] {
+        for newer_lanes in [false, true] {
+            let label = format!("running {running}, newer lanes {newer_lanes}");
+            let mut e = playing(48_000.0);
+            let base0 = e.base();
+            e.queue_patterns(20, timing::BAR, 1, &drum(2, &[(16, 0.9)]));
+            assert_eq!(e.queue_build(1, 2, &target_from(&base0), &[]), 0);
+            if running {
+                walk_to(&mut e, 37);
+            }
+            events(&mut e);
+            if newer_lanes {
+                assert_eq!(
+                    e.queue_patterns(21, timing::BAR, 2, &drum(2, &[(16, 0.7)])),
+                    reason::OK
+                );
+            }
+            assert_eq!(e.queue_build(2, 2, &base0, &[]), 0);
+            let got = events(&mut e);
+            assert_eq!(
+                got[..2],
+                [
+                    ev(event::BUILD_REPLACED, 1, 2.0, 0.0),
+                    ev(event::PATTERNS_CANCELLED, 20, reason::USER as f64, 0.0),
+                ],
+                "{label}"
+            );
+            assert_eq!(got.len(), 3, "{label}: {got:?}");
+            assert!(e.parked.is_none(), "{label}: freed in the message handler");
+            e.trace.clear();
+            render(&mut e, 48_000 * 12, 128);
+            let want: Vec<u32> = if newer_lanes { vec![21] } else { vec![] };
+            assert_eq!(lane_ids(&e), want, "{label}");
+            let hat = if newer_lanes { 0.7 } else { 0.4 };
+            assert_eq!(e.track.hat[16], hat, "{label}");
+        }
+    }
+
+    // A scene with lanes of its own, committing over a running build with lanes.
+    let mut e = playing(48_000.0);
+    e.queue_patterns(20, timing::BAR, 1, &drum(2, &[(16, 0.9)]));
+    assert_eq!(e.queue_build(1, 4, &target_from(&e.base()), &[]), 0);
+    walk_to(&mut e, 37);
+    e.queue_patterns(22, timing::BAR, 9, &drum(2, &[(16, 0.6)]));
+    assert_eq!(e.queue_scene(9, timing::BAR, &scene(0.4)), 0);
+    assert_eq!(
+        events(&mut e),
+        vec![ev(event::SCENE_QUEUED, 9, 4.0, 48.0)],
+        "the scene's lanes do not touch the build's"
+    );
+    e.trace.clear();
+    let seen = walk_to(&mut e, 48);
+    assert_eq!(
+        seen,
+        vec![
+            ev(event::BUILD_REPLACED, 1, 9.0, 0.0),
+            ev(event::PATTERNS_CANCELLED, 20, reason::USER as f64, 0.0),
+            ev(event::PATTERNS_APPLIED, 22, 48.0, 0.0),
+            ev(event::SCENE_APPLIED, 9, 48.0, 0.0),
+        ]
+    );
+    assert!(
+        e.parked.is_some(),
+        "withdrawn on the audio path: parked, not freed"
+    );
+    walk_to(&mut e, 96);
+    assert_eq!(lane_ids(&e), vec![22], "the build's lanes never landed");
+    assert_eq!(e.track.hat[16], 0.6);
+    e.queue_patterns(23, timing::BAR, 0, &drum(2, &[(16, 0.6)]));
+    assert!(e.parked.is_none(), "freed by the next message");
+}
+
+/// A refused build's lanes are withdrawn with the refusal's reason, and a build already
+/// queued or running keeps its own.
+#[test]
+fn a_refused_builds_lanes_are_withdrawn_and_the_queued_ones_stay() {
+    let mut e = playing(48_000.0);
+    let target = target_from(&e.base());
+    e.queue_patterns(20, timing::BAR, 1, &drum(2, &[(48, 0.9)]));
+    assert_eq!(e.queue_build(1, 2, &target, &[]), 0);
+    events(&mut e);
+    e.queue_patterns(21, timing::BAR, 7, &drum(2, &[(48, 0.1)]));
+    assert_eq!(e.queue_build(7, 3, &target, &[]), reason::INVALID);
+    assert_eq!(
+        events(&mut e),
+        vec![
+            ev(
+                event::BUILD_REJECTED,
+                7,
+                reason::INVALID as f64,
+                detail::BARS as f64
+            ),
+            ev(event::PATTERNS_CANCELLED, 21, reason::INVALID as f64, 0.0),
+        ]
+    );
+    let seen = walk_to(&mut e, 48);
+    assert!(seen.contains(&ev(event::PATTERNS_APPLIED, 20, 48.0, 0.0)));
+    assert_eq!(lane_ids(&e), vec![20]);
+    assert_eq!(e.track.hat[48], 0.9);
+
+    let mut stopped = engine(48_000.0);
+    stopped.queue_patterns(22, timing::BAR, 8, &drum(2, &[]));
+    assert_eq!(stopped.queue_build(8, 2, &target, &[]), reason::NOT_PLAYING);
+    assert_eq!(
+        events(&mut stopped),
+        vec![
+            ev(event::BUILD_REJECTED, 8, reason::NOT_PLAYING as f64, 0.0),
+            ev(
+                event::PATTERNS_CANCELLED,
+                22,
+                reason::NOT_PLAYING as f64,
+                0.0
+            ),
+        ]
+    );
+    assert_eq!(stopped.track.hat[0], 0.4);
+}
+
+/// A build with no lanes is what it was before builds could carry them: no pattern
+/// event of its own and no lane touched on its end; a standalone edit keeps its own
+/// bar line; and a pending scene it replaces still takes its lanes with it.
+#[test]
+fn a_build_without_lanes_touches_no_lanes() {
+    let mut e = playing(48_000.0);
+    let target = target_from(&e.base());
+    e.queue_patterns(30, timing::BAR, 0, &drum(0, &[(16, 1.0)]));
+    e.queue_patterns(31, timing::BAR, 9, &drum(2, &[(16, 0.9)]));
+    assert_eq!(e.queue_scene(9, timing::BAR, &scene(0.4)), 0);
+    events(&mut e);
+    assert_eq!(e.queue_build(1, 2, &target, &scene(0.3)), 0);
+    assert_eq!(
+        events(&mut e),
+        vec![
+            ev(event::SCENE_REPLACED, 9, 1.0, 0.0),
+            ev(event::PATTERNS_CANCELLED, 31, reason::USER as f64, 0.0),
+            ev(event::BUILD_QUEUED, 1, 2.0, 16.0),
+        ]
+    );
+    assert!(e.build_lanes.is_none() && e.linked.is_none());
+    e.trace.clear();
+    let seen = walk_to(&mut e, 48);
+    assert_eq!(lane_ids(&e), vec![30], "only the edit, on its own bar line");
+    let lanes: Vec<_> = seen
+        .iter()
+        .copied()
+        .filter(|x| (31.0..=35.0).contains(&x[0]))
+        .collect();
+    assert_eq!(lanes, vec![ev(event::PATTERNS_APPLIED, 30, 16.0, 0.0)]);
+    assert_eq!(
+        build_events(&seen),
+        vec![
+            ev(event::BUILD_STARTED, 1, 16.0, 2.0),
+            ev(event::BUILD_PROGRESS, 1, 2.0, 2.0),
+            ev(event::BUILD_APPLIED, 1, 48.0, 1.0),
+        ]
+    );
+    assert_eq!((e.track.hat[16], e.track.kick[16]), (0.4, 1.0));
+    assert_eq!(e.base().to_vec(), scene(0.3));
 }

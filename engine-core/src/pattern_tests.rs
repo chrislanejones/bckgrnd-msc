@@ -8,7 +8,7 @@ use crate::scene_tests::{engine, ev, events, groove, render, render_until_fired,
 use crate::scheduler::{event, reason, timing};
 
 /// A payload replacing drum lane `index` with `hits` (step, velocity).
-fn drum(index: usize, hits: &[(usize, f32)]) -> Vec<f32> {
+pub(crate) fn drum(index: usize, hits: &[(usize, f32)]) -> Vec<f32> {
     let mut out = vec![1.0, index as f32, 0.0, STEPS as f32];
     let mut lane = vec![0.0f32; STEPS];
     for (s, v) in hits {
@@ -29,7 +29,7 @@ fn notes(index: usize, notes: &[(usize, f32, f32)]) -> Vec<f32> {
     out
 }
 
-fn pattern_applies(e: &Engine) -> Vec<(u32, u64)> {
+pub(crate) fn pattern_applies(e: &Engine) -> Vec<(u32, u64)> {
     e.trace
         .iter()
         .filter_map(|t| match *t {

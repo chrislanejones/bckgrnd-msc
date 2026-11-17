@@ -9,14 +9,20 @@ and the code disagree, the code is wrong.
 
 ## The request
 
-One request, up to two scene vectors (44 values each, the Night 3 layout):
+One request, up to two scene vectors (44 values each, the Night 3 layout), and
+optionally the pattern lanes the build sets:
 
 - **target**: where the mix rises to, across the bars.
 - **land** (optional): a whole scene committed on the bar line where the build ends,
   such as Drop. It is part of the same request: cancelling the build cancels it.
+- **lanes** (optional): a pattern revision (`docs/NIGHT4_PROTOCOL.md`, the payload)
+  staged just before the build with `queue_patterns(patternsId, 2, link = requestId,
+  data)`, exactly as a scene's linked lanes are. `queue_build` takes them on, and they
+  commit on the build's end onset, after the landing scene.
 
 | Engine (`engine-core/src/build.rs`) | Returns |
 |---|---|
+| `queue_patterns(request_id: u32, timing: u8, link: u32, data: &[f32]) -> u8` with `link` = the build's id, just before `queue_build` | 0 staged, else `patterns rejected` (Night 4) |
 | `queue_build(request_id: u32, bars: u32, target: &[f32], land: &[f32]) -> u8` | 0 accepted, else the reason (also reported as `build rejected`) |
 | `cancel_build(request_id: u32) -> bool` | true if it was queued or running |
 | `pending_build() -> Option<u32>` | the build waiting for its bar line |
@@ -26,6 +32,23 @@ One request, up to two scene vectors (44 values each, the Night 3 layout):
 `land` empty means no landing. `bars` is 2, 4 or 8. Both vectors are validated with the
 scene validator (`scheduler::valid`) before anything changes; a refused request leaves
 whatever was queued or running as it was.
+
+The build's lanes go with it the way a scene's go with the scene (events 31 to 35,
+Night 4). Linked lanes announce nothing of their own while they wait (no `queued`). They
+end in exactly one of:
+
+| The build | Its lanes |
+|---|---|
+| applied | `patterns applied` on the end step, after the landing and before `build applied` |
+| refused (`build rejected`) | `patterns cancelled` with the same reason; a build already queued or running keeps its own |
+| cancelled, by the user or any path below | `patterns cancelled` with the same reason, right after `build cancelled` |
+| replaced, by a scene that commits or a newer build | `patterns cancelled`, reason 10, as a replaced scene's are |
+
+`cancel_patterns(patternsId)` withdraws them on their own; the build carries on and lands
+without them. A build with no lanes changes nothing about lanes: a pending standalone
+edit keeps its own boundary. When a scene commits over a build on an onset, the build's
+lanes are withdrawn on the audio path, so the engine parks them and frees them on the
+next pattern or build message: `process()` still neither allocates nor frees.
 
 ## Timing
 
@@ -39,9 +62,10 @@ whatever was queued or running as it was.
 - The start onset is progress 0. Each onset after it moves the base to progress
   `onsets / (bars * 16)`; the existing smoothing (ADR-013) glides between onsets.
 - On the end onset the order is fixed: pattern edit, then a scene due there (which
-  would replace the build), then **the build writes its target exactly and commits the
-  landing scene whole**, then the fill, then that step's notes. So the landing is
-  sample-accurate, like a scene.
+  would replace the build), then **the build writes its target exactly, commits the
+  landing scene whole and swaps in its lanes**, then the fill, then that step's notes.
+  So the landing and the lanes are sample-accurate, like a scene and its lanes. On a lane
+  both set, the build's win over the edit.
 - Changing the loop while a build waits re-announces it (`build queued` again).
 
 ## What moves, and how
@@ -106,7 +130,7 @@ to 5 mean for a scene.
 | 42 | build applied (finished) | step it ended on | 1 if the landing scene landed, else 0 |
 | 43 | build cancelled | reason | 0 |
 | 44 | build replaced | id of the request that replaced it (0 for `set_scene`) | 0 |
-| 45 | build rejected | reason | for reason 1, the part refused: 1 bars, 2 target, 3 landing |
+| 45 | build rejected | reason | for reason 1, the part refused: 1 bars, 2 target, 3 landing, 4 lanes (from the worklet) |
 | 46 | build started | step | bars |
 | 47 | build progress | bar now playing (2 to bars) | bars |
 
@@ -119,14 +143,15 @@ queued | started → cancelled | replaced
 `started` means "bar 1 of n". Exactly one of `applied`, `cancelled` or `replaced` ends
 every accepted build, and nothing about it is reported after that. Rejections the
 engine makes: 1 invalid (with the part), 7 not playing, 3 transport. The worklet's:
-6 mixing, 9 stale generation, 1 for a vector that is not 44 long, 7 before the engine
-has booted.
+6 mixing, 9 stale generation, 1 for a vector that is not 44 long, 1 with part 4 for
+lanes the engine refused (`patterns rejected` comes first), 7 before the engine has
+booted.
 
 ## Worklet messages
 
 | Host → worklet | Engine call |
 |---|---|
-| `{type: 'build', requestId, generation, bars, target, land?, deck?}` | `queue_build`; bars other than 2, 4 or 8 go in as 0 (refused, part 1) |
+| `{type: 'build', requestId, generation, bars, target, land?, deck?, patterns?, patternsId?}` | `patterns` (if any) staged first with `queue_patterns(patternsId, 2, requestId, patterns)`, as the `scene` message does; then `queue_build`. Bars other than 2, 4 or 8 go in as 0 (refused, part 1) |
 | `{type: 'cancelBuild', requestId}` | `cancel_build`, answered with `{type: 'buildCancelResult', deck, requestId, cancelled}` |
 
 | Worklet → host | When |
@@ -136,7 +161,8 @@ has booted.
 Events come back on `sceneEvents`. When the live deck reports `build applied`, the
 worklet reads the live engine's base (`base_into`) and carries it to its auto-mix
 mirrors and onto the idle deck (`set_scene`), as it does for an applied scene. The
-host API is `EngineHost.queueBuild(requestId, bars, target, generation, land?)` and
+host API is `EngineHost.queueBuild(requestId, bars, target, generation, land?,
+patterns?)`, where `patterns` is `{requestId, data}` as for `queueScene`, and
 `EngineHost.cancelBuild(requestId)` in `frontend/lib/engine.ts`, and
 `EngineHost.onBuildBase(listener)` for the `buildBase` messages.
 
@@ -170,12 +196,12 @@ other pads and Compare A/B treat it like a pending scene.
   does. A snapshot that React has not rendered yet is not mistaken for the user's hand.
 - **Stopped:** a Rise press does nothing but say "Drop can rise only during playback:
   press Play, or switch on Now". The engine would refuse it anyway (reason 7).
-- **Lanes:** a build carries no lanes, so a scene with captured patterns has them sent
-  when the build is applied; they land on the following bar line. The status says so.
+- **Lanes:** a rise carries its scene's captured lanes, compiled when the pad is
+  pressed (`patterns.scenePayload`), so they land on the build's end bar line with the
+  mix, before that step's notes. On applied the working patterns adopt them without
+  sending them again, as a launch does. Cancelled, refused or replaced, the rise takes
+  its lanes with it.
 
 ## Not in Night 7
 
-- Pattern lanes on the landing scene (a scene's `patterns`): the request has no lanes,
-  so a landing Drop uses the current arrangement.
 - Curves other than the straight line, and a build that starts on a beat.
-- A scene's lanes landing on the build's own end bar line (they follow one bar later).
