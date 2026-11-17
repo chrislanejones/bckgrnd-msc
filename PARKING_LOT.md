@@ -352,8 +352,7 @@ not. Things to settle before or while building it:
   1440 × 900 fits. (Lacey)
 - **The Output fold isn't remembered.** It starts folded every session, so Master level is a
   click away after a reload. (Lacey)
-- **`--knob-size` is a new density token** that's missing from the token table in
-  `docs/DESIGN_PHILOSOPHY.md`. (Dara)
+- ~~**`--knob-size` is a new density token**~~ Fixed 11-17-2026 (`8673480`).
 - **At 1366 × 640 the drawer body scrolls 23 px at rest** under its 78dvh cap. The follow-ups
   didn't change this. (Lacey)
 - **Lanes staged for a refused request can strip a pending scene's.** Linked lanes go into
@@ -361,8 +360,7 @@ not. Things to settle before or while building it:
   still-pending scene's lanes (`patterns replaced`). If the engine then refuses the new
   scene or build (bad bars, mid-gesture), the earlier scene stays pending without its
   lanes. This predates Night 7 (scenes do the same); builds inherit it. (Silas)
-- **NIGHT4_PROTOCOL.md's message table lists only `scene` as carrying `patterns?`.** The
-  `build` message carries them too now. One row for Dara. (Silas)
+- ~~**NIGHT4_PROTOCOL.md's message table lists only `scene` as carrying `patterns?`.**~~ Fixed 11-17-2026 (`8673480`).
 - **Bench numbers drift about 4% run to run on this shared machine.** Compare the
   `build` and `lanes` cases against `plain` from the same run, not across runs. (Silas)
 - **Five `react-hooks/exhaustive-deps` warnings:** `instrument.ts` (idleDeck), `projects.ts`
