@@ -172,3 +172,34 @@ testable in Rust before any UI depended on them.
 
 See the Night 4 entries in `PARKING_LOT.md` and "Not done" under Night 4 in
 `docs/ROADMAP.md`.
+
+# Night 7 session log: timed builds (engine + worklet plumbing)
+
+Branch `night7/timed-build`, worktree `~/ai-repo/bckgrnd-night7-build`, from main at
+`16bb059`, 11-17-2026. Protocol: `docs/NIGHT7_PROTOCOL.md`. No UI, PHP or track
+changes; Dara writes the ADR.
+
+## Decisions
+
+| Decision | Why |
+|---|---|
+| `queue_build(id, bars, target, land) -> u8`, `cancel_build(id) -> bool`, `base_into` | One request holds both vectors, so one cancel withdraws both. An empty `land` means no landing, so there's no Option across the wasm ABI. |
+| Always starts on the next bar line, no timing code | A build that starts off the bar ends off the bar, and the landing would miss the downbeat. |
+| Linear per onset, in each control's own space | The filter knob is already exponential in Hz, so a straight line in knob space is an even rise in octaves. ADR-013 glides fill in between onsets. |
+| Unmute at the start (fader from 0), mute at the end (fader to 0), solo and echo time at the end | Every switch happens where the stem is silent, or at the boundary. |
+| A scene that commits over a build replaces it, with no restore | Latest wins. The scene is complete, so nothing half-built remains, and cancelling the scene before it lands leaves the build running. |
+| A build replaces a pending scene and a waiting or running build | Latest wins. A running build hands over where it got to, and a cancel still goes back to before both. |
+| A control moved during a build is taken out of it | Otherwise the next onset fights the user's hand. |
+| The base during a build is the interpolated value | A released gesture lands on what is playing, and capture reads that. |
+
+## Gates
+
+| Gate | Result |
+|---|---|
+| `cargo fmt --check`, `cargo clippy --all-targets -D warnings` | clean |
+| `cargo test --release` | 277 pass (259 before, 18 new in `build_tests.rs`, none changed) |
+| wasm size | 231,072 → 239,321 bytes (+8,249) |
+| render timing, 60 s of Warehouse | 1268–1281 ms before, 1260–1270 ms after |
+| `pnpm run typecheck`, `pnpm run build:netlify` | pass |
+| `verify:desktop` | pass, 9/9 steps (498 ok), including the two new build checks in `verify-audio`. The first run failed one editor check ("velocity: held arrow is one undoable gesture") while another session's heavy job held the machine. It passed 3/3 standalone (73/73), then the full suite passed. Keyboard-repeat timing under load; no editor code changed. |
+| `verify:web` | pass, 7/7 steps (142 ok) |

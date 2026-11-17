@@ -213,6 +213,10 @@ call and posts them to the UI only when there are any, as
 Reasons: 1 invalid, 2 stopped, 3 transport, 4 track, 5 panic, 6 mixing, 7 not
 playing, 8 already playing, 9 stale generation, 10 cancelled by the user.
 
+Kinds 31-35 are pattern revisions (`docs/NIGHT4_PROTOCOL.md`); kinds 41-47 are timed
+builds (`docs/NIGHT7_PROTOCOL.md`), which share this ring, these reasons and the
+cancellation table above.
+
 - The ring holds 64 events. If it fills between two drains (only possible with dozens
   of requests landing between two render calls) the **oldest** event is overwritten
   and counted (`Engine::dropped_events`). The newest events describe the one pending

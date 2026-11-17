@@ -328,3 +328,25 @@ not. Things to settle before or while building it:
 ## Found while adding the hip-hop tracks (11-16-2026)
 
 - **The MCP companion doesn't have Cipher or Boulevard.** `bckgrnd-msc-mcp` vendors its own copy of the library (`vendor/library/`), so `bckgrnd_list_tracks` and project renders won't know the two new tracks until its bundle is refreshed from this repo and republished.
+
+## Found in Night 7 (11-17-2026)
+
+- **A landing scene can't carry pattern lanes.** `queue_build` takes a target and a
+  landing vector only, so a Drop that sets lanes (a scene's `patterns`) lands with
+  the current arrangement. Adding it means a `link` for the build's request id on
+  `queue_patterns`, applied in `build_onset` after the landing commits. Wait until the
+  UI asks for it.
+- **Builds step once per sixteenth.** Each onset sets the next value and the ADR-013
+  glides fill in between. At slow tempos a deep filter build could step audibly (the
+  30 ms filter glide finishes well inside a 214 ms step at 70 BPM). If anyone hears
+  it, move the progress inside the step at control rate (`to_next / step_len`). The
+  end points stay on onsets.
+- **`engine-core` has no `cargo bench` harness.** The rust-wasm-loop skill asks for
+  before/after benches on hot-path changes. Night 7 timed 60 s renders from a scratch
+  crate under `/tmp` instead. A `benches/render.rs` (60 s of a library track, no new
+  dependencies) would make that a single command.
+- **No eslint in this repo.** The global rule pairs `tsc --noEmit` with eslint for
+  TypeScript, but `package.json` has no eslint. Only the typecheck ran.
+- **`ENGINE_EVENT` in `frontend/lib/engine.ts` has no pattern kinds (31-35).** The
+  doc table there skips them too. Night 7 added the build kinds (41-47) but left
+  this gap alone.
