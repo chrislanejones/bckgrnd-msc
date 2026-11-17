@@ -101,6 +101,8 @@ try {
       // Average the spectrum over the settled window, for checks about one band.
       spectrum = false,
     } = {}) {
+      // A window may also ask for its mean power above `hf` Hz (the timed-build checks).
+      const hfWindows = windows.filter((w) => w.hf);
       const ctx = new AudioContext({ latencyHint: 'interactive' });
       await ctx.audioWorklet.addModule('/build/engine-worklet.js');
 
@@ -115,6 +117,9 @@ try {
       // a single sample cannot show that the playhead *advances* or that meters
       // *move*, and it lands wherever the window happened to end.
       const stepLog = [];
+      // Outcome messages from the worklet (scene, build, fill events and cancel
+      // answers), with the time they arrived.
+      const messages = [];
       let t0 = performance.now();
       const seen = { steps: new Set(), maxLevels: new Array(8).fill(0), sawPlaying: false, frames: 0, masterPeak: 0, clipped: 0 };
       node.port.onmessage = (e) => {
@@ -122,7 +127,10 @@ try {
           errors.push(`${e.data.command}: ${e.data.message}`);
           return;
         }
-        if (e.data.type !== 'telemetry') return;
+        if (e.data.type !== 'telemetry') {
+          messages.push({ t: performance.now() - t0, ...e.data });
+          return;
+        }
         const f = e.data.frame;
         seen.frames += 1;
         seen.steps.add(f[8]);
@@ -140,6 +148,8 @@ try {
       const analyserR = ctx.createAnalyser();
       analyserL.fftSize = 2048;
       analyserR.fftSize = 2048;
+      // Per-window band power has to be the window's own, not smeared across the edges.
+      if (hfWindows.length) analyserL.smoothingTimeConstant = 0;
       node.connect(splitter);
       splitter.connect(analyserL, 0);
       splitter.connect(analyserR, 1);
@@ -176,6 +186,8 @@ try {
         setTimeout(() => node.port.postMessage(message), at);
       }
       const windowPeak = Object.fromEntries(windows.map((w) => [w.name, 0]));
+      const windowHf = Object.fromEntries(hfWindows.map((w) => [w.name, { sum: 0, n: 0 }]));
+      const hfBuf = new Float32Array(analyserL.frequencyBinCount);
 
       const bufL = new Float32Array(analyserL.fftSize);
       const bufR = new Float32Array(analyserR.fftSize);
@@ -229,6 +241,17 @@ try {
             windowPeak[w.name] = Math.max(windowPeak[w.name], Math.abs(bufL[i]), Math.abs(bufR[i]));
           }
         }
+        if (hfWindows.some((w) => now >= w.from && now <= w.to)) {
+          analyserL.getFloatFrequencyData(hfBuf);
+          const binHz = ctx.sampleRate / analyserL.fftSize;
+          for (const w of hfWindows) {
+            if (now < w.from || now > w.to) continue;
+            let sum = 0;
+            for (let i = Math.ceil(w.hf / binHz); i < hfBuf.length; i += 1) sum += 10 ** (hfBuf[i] / 10);
+            windowHf[w.name].sum += sum;
+            windowHf[w.name].n += 1;
+          }
+        }
         await new Promise((r) => setTimeout(r, 16));
       }
 
@@ -246,6 +269,11 @@ try {
         binHz: ctx.sampleRate / analyserL.fftSize,
         errors,
         windowPeak,
+        // Mean power above each window's `hf`, and how many frames it averaged.
+        windowHf: Object.fromEntries(
+          Object.entries(windowHf).map(([k, v]) => [k, { power: v.n ? v.sum / v.n : 0, frames: v.n }]),
+        ),
+        messages,
         stepLog,
         sampleRate: ctx.sampleRate,
         elapsedMs: Math.round(performance.now() - t0),
@@ -417,6 +445,50 @@ try {
       windows: [{ name: 'after', from: 500, to: 1450 }],
     });
 
+    // 8. A timed build (Night 7, docs/NIGHT7_PROTOCOL.md): the filter closes across two
+    //    bars, starting on the bar line after the request, and stays closed; the same
+    //    build cancelled partway glides back to the open filter. Measured as the power
+    //    above 3 kHz, which a closing filter takes away. The base is set explicitly
+    //    first, so the target differs from it only in the filter.
+    {
+      const { track } = await (await fetch(`${base}/api/tracks/warehouse`)).json();
+      const bar = 240000 / track.bpm;
+      const stems = ['kick', 'clap', 'hats', 'bass', 'stab', 'lead', 'pad', 'arp'];
+      const setBase = stems.flatMap((id, index) => [
+        { type: 'volume', index, value: track.mix[id] },
+        { type: 'send', index, value: 0.1 },
+      ]);
+      const target = [];
+      stems.forEach((id) => target.push(track.mix[id], 0.1, 0, 0));
+      target.push(0.12, 0.85, 1, 1, 1, 0.75, 0.3, 0.24, 0.07, 0.32, 1, 0.5);
+      const build = { type: 'build', requestId: 71, generation: 0, bars: 2, target };
+      // Bar 0 plays open; the build runs from bar 1's line to bar 3's.
+      out.build = await measure({
+        ms: 4 * bar,
+        commands: setBase,
+        timeline: [{ at: 0.3 * bar, message: build }],
+        windows: [
+          { name: 'before', from: 0.35 * bar, to: 0.95 * bar, hf: 3000 },
+          { name: 'mid', from: 1.9 * bar, to: 2.1 * bar, hf: 3000 },
+          { name: 'after', from: 3.2 * bar, to: 3.9 * bar, hf: 3000 },
+        ],
+      });
+      out.buildCancel = await measure({
+        ms: 4 * bar,
+        commands: setBase,
+        timeline: [
+          { at: 0.3 * bar, message: { ...build, requestId: 72 } },
+          { at: 2.5 * bar, message: { type: 'cancelBuild', requestId: 72 } },
+        ],
+        windows: [
+          { name: 'before', from: 0.35 * bar, to: 0.95 * bar, hf: 3000 },
+          { name: 'dark', from: 2.25 * bar, to: 2.48 * bar, hf: 3000 },
+          { name: 'restored', from: 3.0 * bar, to: 3.9 * bar, hf: 3000 },
+        ],
+      });
+      out.bar = bar;
+    }
+
     return out;
   }, baseUrl);
 
@@ -579,6 +651,51 @@ try {
       'a malformed pattern revision changes nothing',
       bad.windowPeak.after > 0.01 && bad.errors.length === 0,
       `kick peak ${bad.windowPeak.after.toFixed(4)}`,
+    );
+  }
+
+  {
+    // Build events, flattened from the worklet's `sceneEvents` messages (41-47).
+    const buildEvents = (r) =>
+      r.messages
+        .filter((m) => m.type === 'sceneEvents')
+        .flatMap((m) => {
+          const out = [];
+          for (let k = 0; k + 3 < m.events.length; k += 4) {
+            if (m.events[k] >= 41 && m.events[k] <= 47) out.push({ t: m.t, kind: m.events[k], id: m.events[k + 1], a: m.events[k + 2], b: m.events[k + 3] });
+          }
+          return out;
+        });
+    const db = (x, y) => (10 * Math.log10(x / y)).toFixed(1);
+    const r = result.build;
+    const hf = r.windowHf;
+    const kinds = buildEvents(r).map((e) => e.kind);
+    check(
+      'a 2-bar build closes the filter gradually and reports each bar',
+      hf.after.power < hf.before.power * 0.1 &&
+        hf.mid.power < hf.before.power &&
+        hf.mid.power > hf.after.power &&
+        JSON.stringify(kinds) === JSON.stringify([41, 46, 47, 42]) &&
+        r.errors.length === 0 &&
+        r.nonFinite === 0,
+      `above 3 kHz: mid ${db(hf.mid.power, hf.before.power)} dB, after ${db(hf.after.power, hf.before.power)} dB; events ${kinds.join(',')}${r.errors.length ? ` errors: ${r.errors.join('; ')}` : ''}`,
+    );
+    const c = result.buildCancel;
+    const ch = c.windowHf;
+    const cEvents = buildEvents(c);
+    const answer = c.messages.find((m) => m.type === 'buildCancelResult');
+    const cancelledAt = cEvents.find((e) => e.kind === 43);
+    check(
+      'cancelling a build mid-way restores the filter and reports cancelled, then nothing',
+      ch.dark.power < ch.before.power * 0.3 &&
+        ch.restored.power > ch.before.power * 0.5 &&
+        answer?.cancelled === true &&
+        cancelledAt?.a === 10 &&
+        cEvents.filter((e) => e.t > cancelledAt.t).length === 0 &&
+        !cEvents.some((e) => e.kind === 42) &&
+        c.errors.length === 0 &&
+        c.nonFinite === 0,
+      `above 3 kHz: dark ${db(ch.dark.power, ch.before.power)} dB, restored ${db(ch.restored.power, ch.before.power)} dB; events ${cEvents.map((e) => e.kind).join(',')}`,
     );
   }
 

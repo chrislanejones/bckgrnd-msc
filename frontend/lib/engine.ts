@@ -53,7 +53,21 @@ export const ENGINE_EVENT = {
   fillCancelled: 14,
   fillRejected: 15,
   gestureExpired: 21,
+  buildQueued: 41,
+  buildApplied: 42,
+  buildCancelled: 43,
+  buildReplaced: 44,
+  buildRejected: 45,
+  buildStarted: 46,
+  buildProgress: 47,
 } as const;
+
+/** How many bars a timed build may rise over (docs/NIGHT7_PROTOCOL.md). */
+export const BUILD_BARS = [2, 4, 8] as const;
+export type BuildBars = (typeof BUILD_BARS)[number];
+
+/** `b` of a `buildRejected` with reason `invalid`: which part was refused. */
+export const BUILD_REJECTED_PART = { bars: 1, target: 2, land: 3 } as const;
 
 /** Why a request was cancelled or rejected. */
 export const ENGINE_REASON = {
@@ -86,6 +100,13 @@ export type GestureKind = (typeof GESTURE_KIND)[keyof typeof GESTURE_KIND];
  * | fillStarted | step | 0 |
  * | fillEnded | step the track's drums resume on (-1 when cut short) | 0, or the reason it was cut short |
  * | gestureExpired | gesture kind (`GESTURE_KIND`) | 0 |
+ * | buildQueued | predicted bar it starts on (1-based) | predicted step |
+ * | buildStarted | step it started on | bars |
+ * | buildProgress | bar now playing, 2..bars | bars |
+ * | buildApplied | step it ended on | 1 if the landing scene landed, else 0 |
+ * | buildCancelled | reason (`ENGINE_REASON`) | 0 |
+ * | buildReplaced | request id that replaced it (0: the idle deck's follower) | 0 |
+ * | buildRejected | reason (`ENGINE_REASON`) | for `invalid`, the part (`BUILD_REJECTED_PART`) |
  */
 export type EngineEvent = {
   deck: Deck;
@@ -103,6 +124,7 @@ type WorkletMessage =
   | { type: 'sceneCancelResult'; deck: Deck; requestId: number; cancelled: boolean }
   | { type: 'fillCancelResult'; deck: Deck; requestId: number; cancelled: boolean }
   | { type: 'patternsCancelResult'; deck: Deck; requestId: number; cancelled: boolean }
+  | { type: 'buildCancelResult'; deck: Deck; requestId: number; cancelled: boolean }
   | { type: 'gestureBeginResult'; deck: Deck; token: number; accepted: boolean };
 
 type Listener = (telemetry: Telemetry) => void;
@@ -125,6 +147,7 @@ export class EngineHost {
   /** `cancelFill` callers, kept apart: scene and fill ids may coincide. */
   private fillCancelWaiters = new Map<number, Array<(cancelled: boolean) => void>>();
   private patternsCancelWaiters = new Map<number, Array<(cancelled: boolean) => void>>();
+  private buildCancelWaiters = new Map<number, Array<(cancelled: boolean) => void>>();
   /** `gestureBegin` callers waiting to hear whether the engine took it, by token. */
   private gestureWaiters = new Map<number, Array<(accepted: boolean) => void>>();
 
@@ -287,6 +310,10 @@ export class EngineHost {
     }
     if (message.type === 'patternsCancelResult') {
       settle(this.patternsCancelWaiters, message.requestId, message.cancelled);
+      return;
+    }
+    if (message.type === 'buildCancelResult') {
+      settle(this.buildCancelWaiters, message.requestId, message.cancelled);
       return;
     }
     if (message.type === 'gestureBeginResult') {
@@ -467,7 +494,7 @@ export class EngineHost {
   }
 
   async close(): Promise<void> {
-    for (const map of [this.cancelWaiters, this.fillCancelWaiters, this.patternsCancelWaiters, this.gestureWaiters]) {
+    for (const map of [this.cancelWaiters, this.fillCancelWaiters, this.patternsCancelWaiters, this.buildCancelWaiters, this.gestureWaiters]) {
       for (const waiting of map.values()) for (const resolve of waiting) resolve(false);
       map.clear();
     }
@@ -587,6 +614,42 @@ export class EngineHost {
     return this.ask(this.cancelWaiters, requestId, { type: 'cancelScene', requestId });
   }
 
+  // -- Timed builds (docs/NIGHT7_PROTOCOL.md) ------------------------------
+
+  /**
+   * Ask the live deck to rise from its current mix to `target` over `bars` bars,
+   * starting on the next bar line, and optionally commit `land` (a whole scene) on the
+   * bar line where it ends. Both are 44-value scene vectors, copied here. Outcomes
+   * arrive through `onSceneEvents`: `buildQueued`, `buildStarted`, `buildProgress` once
+   * per bar from bar 2, then `buildApplied`; or `buildRejected`, `buildCancelled` or
+   * `buildReplaced`. Only `buildApplied` means the target (and the landing) is the mix.
+   */
+  queueBuild(
+    requestId: number,
+    bars: BuildBars,
+    target: ArrayLike<number>,
+    generation: number,
+    land?: ArrayLike<number>,
+  ): void {
+    this.post({
+      type: 'build',
+      requestId,
+      generation,
+      bars,
+      target: Array.from(target),
+      ...(land ? { land: Array.from(land) } : {}),
+    });
+  }
+
+  /**
+   * Cancel a queued or running build. Resolves true when it was (a `buildCancelled`
+   * follows, and a running build glides back to the mix it started from), false when it
+   * was not: already applied, replaced, or unknown.
+   */
+  cancelBuild(requestId: number): Promise<boolean> {
+    return this.ask(this.buildCancelWaiters, requestId, { type: 'cancelBuild', requestId });
+  }
+
   // -- Fills ----------------------------------------------------------------
 
   /**
@@ -660,7 +723,7 @@ export class EngineHost {
   }
 
   /**
-   * Subscribe to scene, fill and gesture outcomes from the audio thread.
+   * Subscribe to scene, build, fill and gesture outcomes from the audio thread.
    * Each call delivers the events of one render block, oldest first. Returns an
    * unsubscribe function.
    */
