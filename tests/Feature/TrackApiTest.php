@@ -21,7 +21,7 @@ final class TrackApiTest extends TestCase
         $this->assertSame(['1', '2', '3', '4', '5', '6', '7', '8'], array_column($response->json('stems'), 'keys'));
         $this->assertSame(Library::DRUMS, $response->json('drums'));
         $this->assertSame(Library::MUSIC, $response->json('music'));
-        $this->assertCount(18, $response->json('tracks'));
+        $this->assertCount(20, $response->json('tracks'));
         $this->assertSame('warehouse', $response->json('tracks.0.id'));
     }
 
@@ -45,7 +45,7 @@ final class TrackApiTest extends TestCase
 
     public function test_health_reports_the_library(): void
     {
-        $this->getJson('/api/health')->assertOk()->assertJson(['ok' => true, 'tracks' => 18]);
+        $this->getJson('/api/health')->assertOk()->assertJson(['ok' => true, 'tracks' => 20]);
     }
 
     /**

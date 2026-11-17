@@ -61,6 +61,8 @@ fn the_percussion_tracks_play_it_on_the_hats_stem() {
         "tape",
         "nightbus",
         "kettle",
+        "cipher",
+        "boulevard",
     ] {
         let track = library_track(id);
         assert!(

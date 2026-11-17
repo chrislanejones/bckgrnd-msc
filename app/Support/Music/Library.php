@@ -5,7 +5,8 @@ declare(strict_types=1);
 namespace App\Support\Music;
 
 /**
- * The built-in track library: eighteen grooves, six each of EDM, lo-fi and breaks.
+ * The built-in track library: twenty grooves, six EDM, eight lo-fi (two of them
+ * hip-hop) and six breaks.
  *
  * Each track is four bars long; `Arranger` stretches it into the 16-bar form the
  * engine plays. Definitions live here rather than in the browser bundle so the
@@ -119,6 +120,8 @@ final class Library
         ['porch', 'Lofi', 'Chillhop'],
         ['tape', 'Lofi', 'Dusty'],
         ['nightbus', 'Lofi', 'Dusty'],
+        ['cipher', 'Lofi', 'Hip-hop'],
+        ['boulevard', 'Lofi', 'Hip-hop'],
         ['kettle', 'Lofi', 'Jazz'],
         ['southside', 'Breaks', 'Garage'],
         ['pirate', 'Breaks', 'Garage'],
@@ -716,6 +719,102 @@ final class Library
             perc: [
                 'shaker' => Phrase::drums(array_fill(0, 4, '..x...x...x...x.'), 0.2, 0.26),
                 'rim' => Phrase::drums(array_fill(0, 4, '.......x......x.'), 0.3, 0.3),
+            ],
+        );
+
+        // Hip-hop: the lo-fi chassis (dust, tape, swing) with the drums pushed to the
+        // front. The kick and snare carry the track, so they sit well above the lo-fi
+        // mix and the pad drops back. Chord tones stay off the tritone over the bass,
+        // as in Kettle.
+        $hipHopMix = ['kick' => 0.94, 'clap' => 0.62, 'hats' => 0.34, 'bass' => 0.82,
+            'stab' => 0.5, 'lead' => 0.34, 'pad' => 0.3, 'arp' => 0.16];
+
+        // Cipher: boom bap in D minor, i-VI-iv-v (Dm9 Bbmaj7 Gm9 Am7). The bass
+        // doubles the kick, the stab is a chopped chord sample, the lead a flute hook.
+        $dm9Hi = ['F4', 'A4', 'C5', 'E5'];
+        $bbMaj7Hi = ['D4', 'F4', 'A4'];
+        $gm9Mid = ['Bb3', 'D4', 'F4', 'A4'];
+        $am7Mid = ['C4', 'E4', 'G4'];
+
+        $tracks[] = self::lofiTrack(
+            id: 'cipher', name: 'Cipher', detail: '90 boom bap', bpm: 90.0, swing: 0.34,
+            mix: $hipHopMix,
+            kick: Phrase::drums(['x.........x.....', 'x......x..x.....', 'x.x.......x..x..', 'x......x.xx...x.'], 0.92, 1.0),
+            clap: Phrase::drums(['....X.......X...', '....X..x....X...', '....X.......X...', '....X..x....X.x.'], 0.4, 0.96),
+            hat: Phrase::drums(array_fill(0, 4, 'x.X.x.X.x.X.x.X.'), 0.3, 0.46),
+            hatOpen: Phrase::drums([$openLo, '................', $openLo, '......x.......x.'], 0.26, 0.26),
+            bass: Phrase::paint([
+                [0, 0, 'D2', 5, 0.86], [0, 10, 'F2', 4, 0.8], [0, 14, 'A2', 2, 0.7],
+                [1, 0, 'Bb1', 5, 0.86], [1, 7, 'Bb1', 2, 0.72], [1, 10, 'D2', 4, 0.8], [1, 14, 'F2', 2, 0.7],
+                [2, 0, 'G1', 2, 0.86], [2, 2, 'G1', 3, 0.74], [2, 10, 'Bb1', 3, 0.8], [2, 13, 'D2', 3, 0.72],
+                [3, 0, 'A1', 5, 0.86], [3, 7, 'A1', 2, 0.72], [3, 10, 'C2', 3, 0.8], [3, 13, 'E2', 3, 0.74],
+            ]),
+            stab: Phrase::paint([
+                [0, 0, $dm9Hi, 2, 0.5], [0, 6, $dm9Hi, 1, 0.42], [0, 9, $dm9Hi, 2, 0.46],
+                [1, 0, $bbMaj7Hi, 2, 0.5], [1, 6, $bbMaj7Hi, 1, 0.42], [1, 9, $bbMaj7Hi, 2, 0.46],
+                [2, 0, $gm9Mid, 2, 0.5], [2, 6, $gm9Mid, 1, 0.42], [2, 9, $gm9Mid, 2, 0.46],
+                [3, 0, $am7Mid, 2, 0.5], [3, 6, $am7Mid, 1, 0.42], [3, 9, $am7Mid, 2, 0.46], [3, 14, $am7Mid, 1, 0.4],
+            ]),
+            lead: Phrase::paint([
+                [0, 2, 'A4', 2, 0.4], [0, 4, 'C5', 4, 0.42], [0, 10, 'D5', 4, 0.4],
+                [1, 2, 'D5', 2, 0.38], [1, 4, 'A4', 6, 0.4],
+                [2, 2, 'Bb4', 2, 0.4], [2, 4, 'A4', 2, 0.38], [2, 6, 'G4', 6, 0.4],
+                [3, 4, 'E4', 4, 0.38], [3, 10, 'A4', 4, 0.4],
+            ]),
+            pad: Phrase::paint([
+                [0, 0, $dm7, 16, 0.42],
+                [1, 0, $bbMaj7, 16, 0.4],
+                [2, 0, $gm7Lo, 16, 0.42],
+                [3, 0, $am7, 16, 0.4],
+            ]),
+            arp: Phrase::arpCycle([$dm9Hi, $bbMaj7Hi, $gm9Mid, $am7Mid], 4, 0.2),
+            perc: [
+                'rim' => Phrase::drums(array_fill(0, 4, '.......x......x.'), 0.24, 0.3),
+            ],
+        );
+
+        // Boulevard: West Coast funk in C minor, i-VI-iv-V (Cm9 Abmaj9 Fm9 G7). A
+        // rubber bass that hops the octave, a clap on two and four, soft sixteenth
+        // hats, and a high lead that holds over the changes.
+        $cm9Mid = ['Eb3', 'G3', 'Bb3', 'D4'];
+        $abMaj9Mid = ['C3', 'Eb3', 'G3', 'Bb3'];
+        $fm9Mid = ['Ab3', 'C4', 'Eb4', 'G4'];
+        $g7Mid = ['B3', 'D4', 'F4'];
+
+        $tracks[] = self::lofiTrack(
+            id: 'boulevard', name: 'Boulevard', detail: '94 west coast', bpm: 94.0, swing: 0.4,
+            mix: ['hats' => 0.3, 'lead' => 0.38, 'pad' => 0.34] + $hipHopMix,
+            kick: Phrase::drums(['x.....x...x.....', 'x.....x...x..x..', 'x.....x...x.....', 'x.....x.x.x...x.'], 0.92, 1.0),
+            clap: Phrase::drums(['....X.......X...', '....X.......X...', '....X.......X...', '....X.......X..x'], 0.44, 0.94),
+            hat: Phrase::drums(array_fill(0, 4, 'X.xxX.xxX.xxX.xx'), 0.22, 0.38),
+            hatOpen: Phrase::drums(array_fill(0, 4, '......x.........'), 0.22, 0.22),
+            bass: Phrase::paint([
+                [0, 0, 'C2', 3, 0.86], [0, 3, 'C3', 1, 0.7], [0, 6, 'C2', 2, 0.8], [0, 10, 'G2', 3, 0.78], [0, 14, 'Eb2', 2, 0.72],
+                [1, 0, 'Ab1', 3, 0.86], [1, 3, 'Ab2', 1, 0.7], [1, 6, 'Ab1', 2, 0.8], [1, 10, 'Eb2', 3, 0.78], [1, 14, 'C2', 2, 0.72],
+                [2, 0, 'F1', 3, 0.86], [2, 3, 'F2', 1, 0.7], [2, 6, 'F1', 2, 0.8], [2, 10, 'C2', 3, 0.78], [2, 14, 'Ab1', 2, 0.72],
+                [3, 0, 'G1', 3, 0.86], [3, 3, 'G2', 1, 0.7], [3, 6, 'G1', 2, 0.8], [3, 8, 'D2', 2, 0.78], [3, 10, 'G2', 2, 0.76], [3, 14, 'B1', 2, 0.74],
+            ]),
+            stab: Phrase::paint([
+                [0, 4, $cm9Mid, 1, 0.42], [0, 12, $cm9Mid, 1, 0.4],
+                [1, 4, $abMaj9Mid, 1, 0.42], [1, 12, $abMaj9Mid, 1, 0.4],
+                [2, 4, $fm9Mid, 1, 0.42], [2, 12, $fm9Mid, 1, 0.4],
+                [3, 4, $g7Mid, 1, 0.42], [3, 12, $g7Mid, 1, 0.42],
+            ]),
+            lead: Phrase::paint([
+                [0, 0, 'G5', 6, 0.38], [0, 8, 'Eb5', 2, 0.34], [0, 10, 'D5', 4, 0.36],
+                [1, 0, 'C5', 8, 0.38], [1, 10, 'Eb5', 4, 0.34],
+                [2, 0, 'C5', 4, 0.36], [2, 4, 'Ab4', 4, 0.34], [2, 10, 'G4', 4, 0.36],
+                [3, 0, 'D5', 6, 0.38], [3, 8, 'B4', 6, 0.36],
+            ]),
+            pad: Phrase::paint([
+                [0, 0, $cm9Mid, 16, 0.44],
+                [1, 0, $abMaj9Mid, 16, 0.42],
+                [2, 0, $fm9Mid, 16, 0.44],
+                [3, 0, $g7Mid, 16, 0.42],
+            ]),
+            arp: Phrase::arpCycle([$cm9Mid, $abMaj9Mid, $fm9Mid, $g7Mid], 4, 0.18),
+            perc: [
+                'shaker' => Phrase::drums(array_fill(0, 4, '..x...x...x...x.'), 0.16, 0.22),
             ],
         );
 

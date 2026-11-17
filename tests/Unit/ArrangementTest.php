@@ -31,17 +31,17 @@ final class ArrangementTest extends TestCase
         }
     }
 
-    public function test_the_library_has_eighteen_tracks_in_three_sections(): void
+    public function test_the_library_has_twenty_tracks_in_three_sections(): void
     {
         $tracks = Library::all();
-        $this->assertCount(18, $tracks);
+        $this->assertCount(20, $tracks);
         $this->assertSame(array_keys($tracks), array_values(array_map(fn (Track $t) => $t->id, $tracks)));
 
         $sections = [];
         foreach ($tracks as $track) {
             $sections[$track->section] = ($sections[$track->section] ?? 0) + 1;
         }
-        $this->assertSame(['EDM' => 6, 'Lofi' => 6, 'Breaks' => 6], $sections);
+        $this->assertSame(['EDM' => 6, 'Lofi' => 8, 'Breaks' => 6], $sections);
     }
 
     #[DataProvider('tracks')]

@@ -50,8 +50,8 @@ for (const f of [
 ]) check(`dist/${f} exists`, files.includes(f));
 const tracks = files.filter((f) => /^library\/[^/]+\.json$/.test(f));
 const catalog = files.filter((f) => f.startsWith('library/variations/'));
-check('track library exported', tracks.length >= 18, `${tracks.length} files`);
-check('variation catalog exported', catalog.length >= 18, `${catalog.length} files`);
+check('track library exported', tracks.length >= 20, `${tracks.length} files`);
+check('variation catalog exported', catalog.length >= 20, `${catalog.length} files`);
 
 // 2. Nothing a static host must not hand out.
 const forbidden = files.filter((f) => /\.php$|(^|\/)\.env|^vendor\/|^nativephp\/|^storage\/|\.map$/.test(f));

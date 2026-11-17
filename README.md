@@ -105,6 +105,7 @@ Three sections, each split into styles. Every track badge shows its bpm.
 | EDM | Acid | Acid Line | 134 bpm |
 | Lofi | Chillhop | Rain, Study, Porch | 76–92 bpm |
 | Lofi | Dusty | Tape, Nightbus | 80–88 bpm |
+| Lofi | Hip-hop | Cipher, Boulevard | 90–94 bpm |
 | Lofi | Jazz | Kettle | 78 bpm |
 | Breaks | Garage | Southside, Pirate | 132–134 bpm |
 | Breaks | Breakbeat | Bricks, Rave Tape | 130–136 bpm |
