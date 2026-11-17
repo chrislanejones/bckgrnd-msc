@@ -804,10 +804,9 @@ export function useInstrument() {
     } else if (next.status === 'applied') {
       // The knobs already stand where the build left them (its final base arrives
       // first). The scene's own mix is what Active compares against, so a control the
-      // user moved during the build reads as Modified.
+      // user moved during the build reads as Modified. Its lanes landed with it.
       landed(next);
-      const lanes = next.lanes && Object.keys(next.lanes).length > 0;
-      setSceneStatus(lanes ? `${name} active; its patterns follow on the next bar` : `${name} active`);
+      setSceneStatus(`${name} active`);
     } else if (next.status === 'cancelled') {
       const why = next.reason === undefined || next.reason === 10 ? '' : `: ${REASON[next.reason] ?? ''}`;
       setSceneStatus(`${name} rise cancelled${why}`);
@@ -821,9 +820,9 @@ export function useInstrument() {
   /** What an applied launch means for the active scene and the comparison. */
   function landed(request: SceneRequest) {
     const t = request.target;
-    // A build carries no lanes to the engine (docs/NIGHT7_PROTOCOL.md), so its scene's
-    // lanes are sent now and land on the next bar line.
-    if (request.lanes) patternsRef.current.adoptScene(sceneName(t), request.lanes, !engine.booted || Boolean(request.build));
+    // A launch or a build carried its lanes to the engine and they landed with it
+    // (docs/NIGHT7_PROTOCOL.md): adopt them without sending them again.
+    if (request.lanes) patternsRef.current.adoptScene(sceneName(t), request.lanes, !engine.booted);
     if (isSceneSlot(t)) {
       for (const lane of Object.keys(request.lanes ?? {}) as LaneId[]) beforeScenes.current?.changedLanes.add(lane);
       setActiveScene({ slot: t, mix: request.mix });
@@ -985,7 +984,17 @@ export function useInstrument() {
     buildShown.current = { requestId, last: null, touched: new Set(), shownAt: 0 };
     sceneRequestRef.current = request;
     setSceneRequest(request);
-    engine.queueBuild(requestId, bars, sceneVector(request.mix), request.generation);
+    // Compiled now, as for a launch, so the lanes that land are the ones risen into even
+    // if the slot is captured again while the build runs. They commit on its end bar.
+    const data = sets ? patterns.scenePayload(sets) : undefined;
+    engine.queueBuild(
+      requestId,
+      bars,
+      sceneVector(request.mix),
+      request.generation,
+      undefined,
+      data ? { requestId: nextRequestId.current++, data } : undefined,
+    );
   }
 
   /** Clear a queued or active scene, restoring the mix from before scene choices. */

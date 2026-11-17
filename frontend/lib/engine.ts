@@ -631,6 +631,10 @@ export class EngineHost {
    * arrive through `onSceneEvents`: `buildQueued`, `buildStarted`, `buildProgress` once
    * per bar from bar 2, then `buildApplied`; or `buildRejected`, `buildCancelled` or
    * `buildReplaced`. Only `buildApplied` means the target (and the landing) is the mix.
+   *
+   * `patterns` are the lanes the build sets, compiled, as for `queueScene`: they commit
+   * on the build's end onset, after the landing and before that step's notes, and are
+   * withdrawn (kinds 31-35) if the build is cancelled, rejected or replaced.
    */
   queueBuild(
     requestId: number,
@@ -638,6 +642,7 @@ export class EngineHost {
     target: ArrayLike<number>,
     generation: number,
     land?: ArrayLike<number>,
+    patterns?: { requestId: number; data: Float32Array },
   ): void {
     this.post({
       type: 'build',
@@ -646,6 +651,7 @@ export class EngineHost {
       bars,
       target: Array.from(target),
       ...(land ? { land: Array.from(land) } : {}),
+      ...(patterns ? { patterns: patterns.data, patternsId: patterns.requestId } : {}),
     });
   }
 

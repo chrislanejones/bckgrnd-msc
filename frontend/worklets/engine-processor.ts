@@ -86,6 +86,10 @@ type Inbound =
       /** A scene committed whole on the bar line where the build ends. */
       land?: ArrayLike<number> | null;
       deck?: DeckId;
+      /** The lanes this build sets, compiled (NIGHT4_PROTOCOL.md); applied on its end. */
+      patterns?: Float32Array;
+      /** The request id those lanes carry in events. */
+      patternsId?: number;
     }
   | { type: 'cancelBuild'; requestId: number }
   | {
@@ -149,6 +153,8 @@ const EVENT_BUILD_APPLIED = 42;
 const EVENT_BUILD_CANCELLED = 43;
 const EVENT_BUILD_REPLACED = 44;
 const EVENT_BUILD_REJECTED = 45;
+/** `b` of `build rejected` with reason 1: the lanes were refused (`detail::LANES`). */
+const BUILD_PART_LANES = 4;
 const REASON_INVALID = 1;
 const REASON_TRACK = 4;
 const REASON_MIXING = 6;
@@ -586,8 +592,9 @@ class EngineProcessor extends AudioWorkletProcessor {
   /**
    * Hand a timed build to the live engine, or refuse it here in the engine's own
    * `build rejected` shape: a target or landing that is not 44 long (`invalid`), an
-   * auto-mix in progress (`mixing`), a stale deck or generation, or no engine yet (`not
-   * playing`). The engine validates the bars and the values and reports its own outcome.
+   * auto-mix in progress (`mixing`), a stale deck or generation, no engine yet (`not
+   * playing`), or lanes the engine refused (`invalid`, part 4). The engine validates the
+   * bars and the values and reports its own outcome.
    */
   private queueBuild(message: Extract<Inbound, { type: 'build' }>): void {
     const requestId = message.requestId >>> 0;
@@ -606,6 +613,17 @@ class EngineProcessor extends AudioWorkletProcessor {
     if (refusal !== 0 || !engine) {
       this.postSceneEvents(this.live, [EVENT_BUILD_REJECTED, requestId, refusal, 0]);
       return;
+    }
+    // The lanes the build sets go in first, linked to it, exactly as a scene's do: the
+    // engine takes them on with the build and swaps them in on its end onset. Refused
+    // lanes refuse the build too (part 4, lanes): a rise that lands half a scene would
+    // play something nobody captured.
+    if (message.patterns && message.patterns.length > 0) {
+      const linkId = (message.patternsId ?? 0) >>> 0;
+      if (engine.queue_patterns(linkId, 2, requestId, message.patterns) !== 0) {
+        this.postSceneEvents(this.live, [EVENT_BUILD_REJECTED, requestId, REASON_INVALID, BUILD_PART_LANES]);
+        return;
+      }
     }
     for (let i = 0; i < SCENE_LEN; i += 1) this.buildTarget[i] = Number(target[i]);
     if (land != null) for (let i = 0; i < SCENE_LEN; i += 1) this.buildLand[i] = Number(land[i]);

@@ -350,6 +350,36 @@ try {
   await openEditor();
   check('scene: Cancel restores the pattern from before the scene', (await pressed('hat', target)) === had);
   check('scene: Cancel clears every active pad', (await page.locator('.scene-pad[aria-pressed="true"]').count()) === 0);
+
+  // A rise into Drop (docs/NIGHT7_PROTOCOL.md) carries the captured lanes with the build:
+  // on applied they are adopted as one undo step and not sent again, and the status no
+  // longer promises them a bar later. That the engine lands them on the build's end bar
+  // line is verify-audio's check.
+  {
+    const RT = { timeout: 20000 };
+    const lastPatterns = () => page.evaluate(() => window.__BCKGRND_SENT__().patterns?.requestId ?? null);
+    await page.keyboard.press('Escape');
+    await page.getByRole('button', { name: 'Rise into the scene over several bars' }).click();
+    await page.getByRole('button', { name: 'Rise over 2 bars' }).click();
+    const sentBefore = await lastPatterns();
+    await page.locator('.scene-slot').nth(3).locator('.scene-pad').click();
+    await page.waitForFunction(() => document.querySelectorAll('.scene-slot')[3]?.getAttribute('data-state') === 'active', null, RT);
+    const riseStatus = await page.locator('.scene-status').textContent();
+    // A re-send would go out on the next frame; give it a few.
+    await page.waitForTimeout(300);
+    const sentAfter = await lastPatterns();
+    await openEditor();
+    check('rise: rising into Drop brings its captured lanes back, as one undo step',
+      (await pressed('hat', target)) !== had && (await undoLabel()) === 'Undo Launch Drop', await undoLabel());
+    check('rise: the lanes went with the build, so nothing is sent after it lands',
+      sentAfter === sentBefore && riseStatus === 'Drop active', `patterns request ${sentBefore} -> ${sentAfter}; status "${riseStatus}"`);
+    await page.keyboard.press('Escape');
+    await page.getByRole('button', { name: 'Launch on the next bar' }).click();
+    await page.getByRole('button', { name: 'Cancel scene', exact: true }).click();
+    await page.waitForFunction(() => document.querySelector('.scene-status')?.textContent === 'Scene cleared; previous mix restored', null, T);
+    await openEditor();
+    check('rise: Cancel restores the pattern from before the rise', (await pressed('hat', target)) === had);
+  }
   await page.keyboard.press('Escape');
   await page.locator('.scene-slot').nth(3).locator('.scene-pad').click();
   await page.waitForFunction(() => document.querySelectorAll('.scene-slot')[3]?.getAttribute('data-state') === 'active', null, T);
