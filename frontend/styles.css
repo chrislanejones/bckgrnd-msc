@@ -68,6 +68,7 @@
   --stems-toolbar-h: var(--toolbar-h);
   --library-row-h: var(--control-sm);
   --library-row-gap: 0.3rem;
+  --knob-size: 3.5rem;
 }
 
 /*
@@ -100,6 +101,7 @@
     --channel-action-h: var(--button-sm-h);
     --library-row-h: 1.5rem;
     --library-row-gap: 0.125rem;
+    --knob-size: 3rem; /* 48px: the docked rack fits a 1440 x 900 screen */
   }
 }
 
@@ -2007,6 +2009,104 @@ body {
   gap: var(--space-2);
 }
 
+/* A folded group: the heading is the toggle, and while folded it carries the
+   group's values, so nothing is out of sight but the knobs themselves. */
+.inspector-fold-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-height: 1.5rem;
+  margin-inline-start: calc(-1 * var(--space-1));
+  padding: 0 var(--space-1);
+  border: 0;
+  border-radius: 0.4rem;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+}
+
+.inspector-fold-toggle:hover {
+  background: color-mix(in srgb, var(--color-fg) 6%, transparent);
+}
+
+.inspector-fold-chevron {
+  flex: none;
+  color: var(--color-muted);
+  transition: transform 120ms ease-out;
+}
+
+.inspector-fold-toggle[aria-expanded="true"] .inspector-fold-chevron {
+  transform: rotate(90deg);
+}
+
+.inspector-fold-values {
+  margin-inline-start: var(--space-1);
+  color: var(--color-muted);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.inspector-fold .knob-row[hidden] {
+  display: none;
+}
+
+/* A finger gets the full 44px on the heading, on touch screens and the phone sheet. */
+@media (pointer: coarse), (max-width: 899.98px) {
+  .inspector-fold-toggle {
+    min-height: var(--control-md);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .inspector-fold-chevron {
+    transition: none;
+  }
+}
+
+/* Echo, with a mouse: the six divisions stand in the rack's third column, beside
+   Feedback and Return, so Echo is one row like every other group. Touch keeps them
+   over the knobs, where each is a full 44px. */
+@media (pointer: fine) and (min-width: 900px) {
+  .inspector-echo {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    column-gap: var(--space-2);
+  }
+
+  .inspector-echo > .segmented-block {
+    grid-column: 3;
+    grid-row: 1;
+    align-content: start;
+    gap: 0.15rem;
+  }
+
+  .inspector-echo > .segmented-block > .control-label {
+    text-align: center;
+  }
+
+  .inspector-echo > .knob-row {
+    grid-column: 1 / 3;
+    grid-row: 1;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    margin-top: 0;
+  }
+
+  .inspector-echo .segmented-knob-columns {
+    grid-template-columns: minmax(0, 1fr);
+    row-gap: 3px;
+  }
+
+  /* 24px, the compact floor, so three rows of two stand no taller than a knob. */
+  .inspector-echo .segment {
+    min-height: 1.5rem;
+    padding-block: 0;
+    padding-inline: 0.2rem;
+  }
+}
+
 /* ------------------------------------------------------------------------ */
 /* Pattern drawer                                                           */
 /* ------------------------------------------------------------------------ */
@@ -3255,7 +3355,7 @@ html[data-control-drag="yes"] * {
    Every part has a fixed height, and the column packs to the top rather than stretching,
    so dials in the same row always share a line. */
 .knob {
-  --knob: 3.5rem;
+  --knob: var(--knob-size);
   user-select: none;
   -webkit-user-select: none;
   display: grid;
