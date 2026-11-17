@@ -22,8 +22,6 @@
  * which matters because track JSON is the payload being marshalled.
  */
 
-/* eslint-disable no-restricted-globals */
-
 (function installWorkletGlobals(scope) {
   if (typeof scope.TextEncoder === 'undefined') {
     /** UTF-8 encode a JS string, handling surrogate pairs. */

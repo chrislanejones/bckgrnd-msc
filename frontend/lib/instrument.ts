@@ -1306,7 +1306,7 @@ export function useInstrument() {
           if (e.kind < EVENT.fillQueued || e.kind > EVENT.fillRejected) continue;
           const f = fillRef.current;
           if (e.requestId !== f.id) continue;
-          let next = f;
+          let next: typeof f;
           if (e.kind === EVENT.fillQueued) next = { ...f, status: 'queued', bar: e.a };
           else if (e.kind === EVENT.fillStarted) next = { ...f, status: 'playing' };
           else next = { status: 'idle', id: f.id };

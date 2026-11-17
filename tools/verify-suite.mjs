@@ -4,7 +4,7 @@
  *   pnpm run verify:web       # the Netlify build in dist/: no PHP at runtime, no Laravel
  *   pnpm run verify:desktop   # Laravel + the NativePHP-facing code paths
  *
- * Both start from shared gates (contracts, scenes, editing, types), then exercise
+ * Both start from shared gates (contracts, scenes, editing, types, lint), then exercise
  * their own distribution. The web suite serves dist/ with a plain static server, so
  * an accidental API dependency fails the same way it would on Netlify. The desktop
  * suite runs PHPUnit and the browser checks against `php artisan serve`; the
@@ -48,6 +48,7 @@ step('contract', 'node', ['tools/check-contract.mjs']);
 step('scenes', 'node', ['tools/check-scenes.mjs']);
 step('editing', 'node', ['tools/check-editing.mjs']);
 step('typecheck', process.execPath, ['node_modules/typescript/bin/tsc', '--noEmit']);
+step('lint', process.execPath, ['node_modules/eslint/bin/eslint.js', '.']);
 
 if (target === 'web') {
   step('dist audit', 'node', ['tools/check-dist.mjs']);

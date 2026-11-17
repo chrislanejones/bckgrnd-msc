@@ -43,7 +43,7 @@ function findChromium() {
     return process.env.PLAYWRIGHT_CHROMIUM;
   }
   const cache = join(homedir(), '.cache', 'ms-playwright');
-  let entries = [];
+  let entries;
   try {
     entries = readdirSync(cache);
   } catch {
