@@ -38,8 +38,9 @@ Rules:
   them to 0.96.
 - Engaged surfaces are filled acid. There is no third "half-engaged" look. A state
   that needs one gets a status indicator instead.
-- Touch targets are at least 44 px (`--control-md`). The only smaller targets are
-  secondary badges inside a larger hit area.
+- Touch targets are at least 44 px (`--control-md`) on a touch screen and on the
+  phone tier. With a mouse on a desktop-sized window, the compact density below may
+  take toolbar buttons to 32 px; nothing a mouse presses goes under 24 px.
 
 ### 3. Restrained color
 
@@ -106,6 +107,47 @@ them, not ad-hoc values.
 | Radii | `--radius-control` 0.875rem (pads, panels) · pills use `999px` |
 | Type | `--text-label` 0.6875rem uppercase, tracked 0.1em, for control labels · `--text-value` 0.8125rem tabular for readouts · body 0.875rem |
 | Focus | 2 px acid outline at 2 px offset, `:focus-visible` only. Never removed, never recolored. |
+| Density | `--panel-pad-y` · `--section-gap` · `--heading-gap` · `--card-pad-y` · `--toolbar-h` · `--button-sm-h` · `--group-gap` (see Density, below) |
+
+## Density
+
+**Every pixel of vertical space must earn its place.** bckgrnd-msc is a professional
+hardware groovebox, not a dashboard of oversized cards. Adopted in Night 7
+(11-16-2026).
+
+- **Compact by default** for a mouse on a desktop-sized window
+  (`(pointer: fine) and (min-width: 900px)`).
+- **Comfortable when touch requires it.** A coarse pointer and the phone tier keep
+  44 px targets. Text sizes never shrink for density; 11 px (`--text-label`) is the
+  floor everywhere.
+- **Details on demand.** Secondary information lives in a tooltip, a menu or the
+  inspector, not in a permanent row.
+- **No repeated explanatory text.** One short hint per area at most, and it says the
+  next step. No introductory paragraph per section.
+- **No unnecessary nested containers.** A card never sits inside another card. A
+  group inside a panel is separated by a gap or a single rule, not a second border.
+- **No scrolling to reach a control that could fit.** Related actions share one row;
+  a status line goes in the header beside the title rather than in a row of its own.
+- **Stable under performance.** A row whose words change while playing (a stem's
+  status, a scene's state) keeps a fixed height, so nothing moves under the hand.
+
+Panels and toolbars use the shared tokens in [`frontend/styles.css`](../frontend/styles.css)
+instead of their own fixed padding:
+
+| Token | Compact (desktop, mouse) | Comfortable (touch, phone) | Used for |
+|---|---|---|---|
+| `--panel-pad-y` | 8 px | 12 px | A panel's top and bottom padding |
+| `--section-gap` | 8 px | 12 px | Between groups inside one panel |
+| `--heading-gap` | 6 px | 12 px | From a panel or group heading to its content |
+| `--card-pad-y` | 6 px | 10 px | Scene cards, mixer channels |
+| `--toolbar-h` | 34 px | 44 px | One row of related actions |
+| `--button-sm-h` | 32 px | 44 px | Text buttons and segments inside a toolbar |
+| `--group-gap` | 6 px | 8 px | Between controls in one group |
+
+**Review rule.** Before approving a redesign, count the interactive controls fully
+visible in a fixed 1440 × 900 desktop viewport, before and after, without scrolling.
+A redesign that shows fewer usable controls in that first screen needs a reason
+written in its review.
 
 ## Layout
 
@@ -126,12 +168,15 @@ surface and wrap into rows on narrower screens instead of hiding sounds behind
 horizontal scrolling. Keep supporting explanations brief, muted, and at
 `--text-label` (11 px); avoid introductory paragraphs and repeated tips.
 
-Scenes and comparison follow in a separate panel. Scene buttons lead with their
-name, a short sound cue, and a miniature preview of their eight stored levels.
-Preview bars respect cuts and solos; custom captures never keep a misleading
-factory description. Switch on timing and Drum fill sit below the scene buttons.
-A/B has its own divided row: dashed capture buttons become listening buttons with
-headphone icons. A single small hint gives the next comparison step. Current,
+Scenes and comparison follow in a separate panel. The four scene cards share one row
+on desktop and lead with their name, then a short sound cue, then a miniature preview
+of their eight stored levels beside the card's state. Preview bars respect cuts and
+solos; custom captures never keep a misleading factory description. The panel
+header holds the scene status line and a small Shift 1–4 tag. Under the cards, one
+toolbar row holds Switch on (Now, Next beat, Next bar as one segmented control),
+Drum fill and Cancel, and Compare A/B joins that row when it fits. Compare A/B is
+one strip set off by a rule: dashed capture buttons become listening buttons with
+headphone icons, and a single short hint gives the next comparison step. Current,
 modified, and queued states use both text and visual treatment.
 Cancel clears the selected scene and returns to the mix from before scene choices.
 It stays available for an active scene even when nothing is queued.
@@ -231,4 +276,6 @@ second is the worklet's telemetry frame. Nothing from telemetry is ever saved.
 - [ ] Can it be reached and operated with the keyboard, with a visible focus ring?
 - [ ] Does it work at 375 px wide without horizontal scroll?
 - [ ] Does it respect `prefers-reduced-motion`?
+- [ ] Does it use the density tokens, and does it show at least as many usable
+      controls in a 1440 × 900 viewport without scrolling as before?
 - [ ] Does React still hold no audio state and no musical clock?
