@@ -53,6 +53,11 @@ export const ENGINE_EVENT = {
   fillCancelled: 14,
   fillRejected: 15,
   gestureExpired: 21,
+  patternsQueued: 31,
+  patternsApplied: 32,
+  patternsCancelled: 33,
+  patternsReplaced: 34,
+  patternsRejected: 35,
   buildQueued: 41,
   buildApplied: 42,
   buildCancelled: 43,
@@ -100,6 +105,10 @@ export type GestureKind = (typeof GESTURE_KIND)[keyof typeof GESTURE_KIND];
  * | fillStarted | step | 0 |
  * | fillEnded | step the track's drums resume on (-1 when cut short) | 0, or the reason it was cut short |
  * | gestureExpired | gesture kind (`GESTURE_KIND`) | 0 |
+ * | patternsQueued | predicted bar (1-based) | predicted step |
+ * | patternsApplied | step it landed on (-1 off the grid: stopped, stop, panic, a jump) | 0 |
+ * | patternsCancelled, patternsRejected | reason (`ENGINE_REASON`) | 0 |
+ * | patternsReplaced | request id that replaced it | 0 |
  * | buildQueued | predicted bar it starts on (1-based) | predicted step |
  * | buildStarted | step it started on | bars |
  * | buildProgress | bar now playing, 2..bars | bars |
