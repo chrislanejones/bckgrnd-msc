@@ -480,7 +480,9 @@ files on disk ([ADR-002](docs/adr/002-laravel-runs-stateless.md)).
 | `cargo fmt --check --manifest-path engine-core/Cargo.toml` | Formatting. |
 | `cargo clippy --all-targets --manifest-path engine-core/Cargo.toml -- -D warnings` | Must be clean. |
 | `cargo test --release --manifest-path engine-core/Cargo.toml` | The engine. |
+| `cargo bench --bench render --manifest-path engine-core/Cargo.toml` | 60 s of Warehouse, plain, under back-to-back builds, and with build lanes. Best of 7, in ms. Compare cases from the same run. |
 | `pnpm run typecheck` | `tsc --noEmit`. |
+| `pnpm run lint` | ESLint over the front end and the tools. Errors fail; hook-dependency warnings don't. |
 | `composer test:php` | PHPUnit: the song form for every track, the API, the static export matching the API, presets, and the project contract. |
 | `pnpm run check:contract` | The UI's project reader against the same fixtures as PHP's, scenes included. |
 | `pnpm run check:scenes` | The scene logic: the vector order, captures copied and not shared, revisions, and a settled request staying settled. |
@@ -491,7 +493,7 @@ files on disk ([ADR-002](docs/adr/002-laravel-runs-stateless.md)).
 | `pnpm run verify:static` | The same, against the static build, plus no API calls and the variation catalog. |
 | `pnpm run verify:projects` | Save/reopen/export, Cancel restoration, failure, recovery, migrations and preview exclusion. |
 | `pnpm run check:dist` | Audits `dist/` without a browser: required assets, nothing PHP/env/vendor, manifest hashes, and the same engine/worklet/contracts/renderer/library as the desktop build. |
-| `pnpm run verify:web` | The Netlify distribution end to end: shared gates, `check:dist`, then `verify:static` and `verify:projects` against `dist/` on a plain static server. Build with `build:netlify` first. |
+| `pnpm run verify:web` | The Netlify distribution end to end: shared gates (lint included), `check:dist`, then `verify:static` and `verify:projects` against `dist/` on a plain static server. Build with `build:netlify` first. |
 | `pnpm run verify:desktop` | The desktop distribution: shared gates, PHPUnit, then the UI/editor/audio/project checks against `artisan serve`; `VERIFY_NATIVE=1` adds the installed-app check. |
 | `node tools/verify-transitions.mjs` | Actual forward playback across Break and Drop, with bounded event conditions. |
 | `node tools/verify-resume.mjs` | Simulated audio interruption and failed/successful resume. |
