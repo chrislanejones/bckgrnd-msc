@@ -1,6 +1,8 @@
 /**
- * The scene strip: four scene pads after the stem mixer, one shared timing selector,
- * the one-bar Fill, and Cancel to restore the mix from before scene choices.
+ * The scene strip: four scene pads after the stem mixer, then one toolbar row with the
+ * shared timing selector, the one-bar Fill, Cancel (restores the mix from before scene
+ * choices) and Compare A/B. The status line and the Shift+1–4 hint sit in the panel
+ * header (`SceneHeader`), so they cost no rows of their own.
  *
  * A pad press only ever *launches*. Saving, renaming, duplicating and resetting live
  * in each pad's own menu, so a performance click can never overwrite a scene.
@@ -33,8 +35,6 @@ type Props = {
   timing: Timing;
   /** Why launching is unavailable right now (a mix is running), or null. */
   unavailable: string | null;
-  /** A short line about the last outcome, e.g. "Drop already applied". */
-  status: string;
   /** The one-bar fill; left out until the engine has one. */
   fill?: FillState;
   fillBar?: number;
@@ -49,12 +49,12 @@ type Props = {
   onRename: (slot: SceneSlotId, name: string) => boolean;
   onDuplicate: (from: SceneSlotId, to: SceneSlotId) => void;
   onReset: (slot: SceneSlotId) => void;
-  /** Rendered under the pads (Compare A/B). */
+  /** Rendered at the end of the toolbar row (Compare A/B). */
   children?: ReactNode;
 };
 
 export function SceneStrip(props: Props) {
-  const { scenes, active, modified, request, timing, unavailable, status } = props;
+  const { scenes, active, modified, request, timing, unavailable } = props;
   const pending = isPending(request) && isSceneSlot(request.target) ? request : null;
   const [menuFor, setMenuFor] = useState<SceneSlotId | null>(null);
 
@@ -99,27 +99,26 @@ export function SceneStrip(props: Props) {
                 aria-pressed={isActive}
                 aria-keyshortcuts={`Shift+${i + 1}`}
                 aria-describedby={`scene-summary-${slot} scene-line-${slot}`}
-                title={preview.description}
+                title={`${preview.description} · Shift+${i + 1}`}
                 onClick={() => props.onLaunch(slot)}
               >
-                <span className="scene-pad-heading">
-                  <span className="scene-shortcut" aria-hidden="true">⇧{i + 1}</span>
-                  <span className="scene-name">{scene.name}</span>
-                </span>
+                <span className="scene-name">{scene.name}</span>
                 <span id={`scene-summary-${slot}`} className="scene-summary">{preview.summary}</span>
-                <span className="scene-mix-preview" aria-hidden="true">
-                  {sceneLevels(scene).map((level, index) => (
-                    <span
-                      key={STEM_ORDER[index]}
-                      className="scene-mix-track"
-                      title={`${STEM_NAMES[STEM_ORDER[index]!]}: ${level > 0 ? `${Math.round(level * 100)}%` : 'off'}`}
-                    >
-                      <span className="scene-mix-level" style={{ transform: `scaleY(${level})` }} />
-                    </span>
-                  ))}
-                </span>
-                <span id={`scene-line-${slot}`} className="scene-line">
-                  {line || ' '}
+                <span className="scene-pad-foot">
+                  <span className="scene-mix-preview" aria-hidden="true">
+                    {sceneLevels(scene).map((level, index) => (
+                      <span
+                        key={STEM_ORDER[index]}
+                        className="scene-mix-track"
+                        title={`${STEM_NAMES[STEM_ORDER[index]!]}: ${level > 0 ? `${Math.round(level * 100)}%` : 'off'}`}
+                      >
+                        <span className="scene-mix-level" style={{ transform: `scaleY(${level})` }} />
+                      </span>
+                    ))}
+                  </span>
+                  <span id={`scene-line-${slot}`} className="scene-line">
+                    {line || ' '}
+                  </span>
                 </span>
               </button>
               <button
@@ -157,7 +156,7 @@ export function SceneStrip(props: Props) {
           );
         })}
       </div>
-      <div className="scene-strip-head">
+      <div className="scene-toolbar">
         <Segmented<Timing>
           label="Switch on"
           value={timing}
@@ -181,13 +180,28 @@ export function SceneStrip(props: Props) {
             <X size={12} aria-hidden="true" /> Cancel
           </button>
         </div>
+        {props.children}
       </div>
+    </section>
+  );
+}
+
+/**
+ * The scene panel's header extras: the last outcome as a status line and the
+ * Shift+1–4 hint as a small tag. Rendered as the panel's header actions, so the
+ * status needs no row of its own.
+ */
+export function SceneHeader({ status }: { status: string }) {
+  return (
+    <>
       {/* Discrete changes only ("Drop queued", "Drop active"), never every beat. */}
-      <p className="scene-status" role="status" aria-live="polite">
+      <p className="scene-status" role="status" aria-live="polite" title={status || undefined}>
         {status}
       </p>
-      {props.children}
-    </section>
+      <span className="scene-keys" title="Shift+1 to Shift+4 launch the four scenes">
+        <kbd>Shift</kbd> <kbd>1–4</kbd>
+      </span>
+    </>
   );
 }
 

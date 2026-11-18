@@ -23,7 +23,7 @@ import { JogWheel } from './ui/JogWheel';
 import { LibraryPanel } from './ui/Library';
 import { PatternDrawer } from './ui/PatternDrawer';
 import { MixerChannel } from './ui/MixerChannel';
-import { SceneStrip } from './ui/SceneStrip';
+import { SceneHeader, SceneStrip } from './ui/SceneStrip';
 import { CompareBar } from './ui/CompareBar';
 import { SCENE_SLOTS } from './lib/contract';
 import { PanicButton, TransportBar } from './ui/Transport';
@@ -346,6 +346,11 @@ export function App() {
                   { value: 'nodrums', label: 'Music only', short: 'Music' },
                 ]}
               />
+              <dl className="stems-guide" id="stems-guide">
+                <div><dt>Level</dt><dd>Volume</dd></div>
+                <div><dt>Solo</dt><dd>Hear alone</dd></div>
+                <div><dt>Cut</dt><dd>Mute</dd></div>
+              </dl>
               <button
                 type="button"
                 className="text-button"
@@ -356,11 +361,6 @@ export function App() {
                 {drawerOpen ? 'Close patterns' : 'Edit patterns'}
               </button>
             </div>
-            <dl className="stems-guide" id="stems-guide">
-              <div><dt>Level</dt><dd>Volume</dd></div>
-              <div><dt>Solo</dt><dd>Hear alone</dd></div>
-              <div><dt>Cut</dt><dd>Mute</dd></div>
-            </dl>
             <div className="stems mixer-bank" role="group" aria-label="Mixer" aria-describedby="stems-guide">
               {library.stems.map((meta, index) => {
                 const state = stateOf(meta.id);
@@ -390,7 +390,12 @@ export function App() {
           </InstrumentPanel>
 
           {inst.scenes ? (
-            <InstrumentPanel title="Scenes & comparison" views={['perform', 'mix']} className="scenes-panel">
+            <InstrumentPanel
+              title="Scenes & comparison"
+              views={['perform', 'mix']}
+              className="scenes-panel"
+              actions={<SceneHeader status={inst.sceneStatus} />}
+            >
               <SceneStrip
                 scenes={inst.scenes.slots}
                 track={track}
@@ -399,7 +404,6 @@ export function App() {
                 request={inst.sceneRequest}
                 timing={inst.sceneTiming}
                 unavailable={inst.mixing ? 'Available after mix' : inst.sceneRestoring ? 'Restoring previous mix' : null}
-                status={inst.sceneStatus}
                 onTiming={inst.setSceneTiming}
                 onLaunch={inst.launchScene}
                 onCancel={inst.cancelScene}
@@ -471,26 +475,29 @@ export function App() {
                 <PerformancePad label="Backspin" ariaLabel="Backspin the platter" onPress={inst.backspin} />
               </div>
             </div>
-            {/* Three different exits, kept apart: Cancel scene (in the scene strip)
-                restores the previous mix, Release FX (here, beside the held pads) lets
-                go of held effects, and Panic (in the bar, or the phone's bottom dock, so
-                it never scrolls away) stops everything and clears the tails. */}
-            <div className="deck-safety">
-              <button
-                type="button"
-                className="text-button"
-                disabled={!inst.echo && !inst.filterHeld}
-                onClick={inst.releaseAllEffects}
-              >
-                Release FX
-              </button>
+            <div className="deck-foot">
+              <Segmented<number>
+                label={inst.loopBars ? `Loop · ${inst.loopBars} bar${inst.loopBars === 1 ? '' : 's'}` : 'Loop · off'}
+                value={inst.loopBars}
+                onPick={inst.pickLoop}
+                options={LOOP_OPTIONS}
+              />
+              {/* Three different exits, kept apart: Cancel scene (in the scene strip)
+                  restores the previous mix, Release FX (here, at the end of the deck's
+                  bottom row, apart from the held pads) lets go of held effects, and
+                  Panic (in the bar, or the phone's bottom dock, so it never scrolls
+                  away) stops everything and clears the tails. */}
+              <div className="deck-safety">
+                <button
+                  type="button"
+                  className="text-button"
+                  disabled={!inst.echo && !inst.filterHeld}
+                  onClick={inst.releaseAllEffects}
+                >
+                  Release FX
+                </button>
+              </div>
             </div>
-            <Segmented<number>
-              label={inst.loopBars ? `Loop · ${inst.loopBars} bar${inst.loopBars === 1 ? '' : 's'}` : 'Loop · off'}
-              value={inst.loopBars}
-              onPick={inst.pickLoop}
-              options={LOOP_OPTIONS}
-            />
           </InstrumentPanel>
 
           <InstrumentPanel title="Mix to the next track" views={['perform']} className="next-panel">
