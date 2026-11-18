@@ -5,8 +5,8 @@ declare(strict_types=1);
 namespace App\Support\Music;
 
 /**
- * The built-in track library: twenty grooves, six EDM, eight lo-fi (two of them
- * hip-hop) and six breaks.
+ * The built-in track library: twenty grooves, six EDM, two hip-hop, six lo-fi and
+ * six breaks.
  *
  * Each track is four bars long; `Arranger` stretches it into the 16-bar form the
  * engine plays. Definitions live here rather than in the browser bundle so the
@@ -115,13 +115,13 @@ final class Library
         ['drive', 'EDM', 'Deep'],
         ['glass', 'EDM', 'Deep'],
         ['acid', 'EDM', 'Acid'],
+        ['cipher', 'Hip-hop', 'Boom Bap'],
+        ['boulevard', 'Hip-hop', 'West Coast'],
         ['rain', 'Lofi', 'Chillhop'],
         ['study', 'Lofi', 'Chillhop'],
         ['porch', 'Lofi', 'Chillhop'],
         ['tape', 'Lofi', 'Dusty'],
         ['nightbus', 'Lofi', 'Dusty'],
-        ['cipher', 'Lofi', 'Hip-hop'],
-        ['boulevard', 'Lofi', 'Hip-hop'],
         ['kettle', 'Lofi', 'Jazz'],
         ['southside', 'Breaks', 'Garage'],
         ['pirate', 'Breaks', 'Garage'],
@@ -722,12 +722,12 @@ final class Library
             ],
         );
 
-        // Hip-hop: the lo-fi chassis (dust, tape, swing) with the drums pushed to the
-        // front. The kick and snare carry the track, so they sit well above the lo-fi
-        // mix and the pad drops back. Chord tones stay off the tritone over the bass,
-        // as in Kettle.
-        $hipHopMix = ['kick' => 0.94, 'clap' => 0.62, 'hats' => 0.34, 'bass' => 0.82,
-            'stab' => 0.5, 'lead' => 0.34, 'pad' => 0.3, 'arp' => 0.16];
+        // Hip-hop: its own section, on the deep voicing rather than lo-fi, so the
+        // drums are bright and the bass is a clean sine with a saw under it, with no
+        // tape softening. Uptempo, with a tight swing. The kick and snare carry the
+        // track and the pad sits back. Chord tones stay off the tritone over the bass.
+        $hipHopMix = ['kick' => 0.94, 'clap' => 0.64, 'hats' => 0.38, 'bass' => 0.8,
+            'stab' => 0.46, 'lead' => 0.36, 'pad' => 0.24, 'arp' => 0.16];
 
         // Cipher: boom bap in D minor, i-VI-iv-v (Dm9 Bbmaj7 Gm9 Am7). The bass
         // doubles the kick, the stab is a chopped chord sample, the lead a flute hook.
@@ -736,8 +736,8 @@ final class Library
         $gm9Mid = ['Bb3', 'D4', 'F4', 'A4'];
         $am7Mid = ['C4', 'E4', 'G4'];
 
-        $tracks[] = self::lofiTrack(
-            id: 'cipher', name: 'Cipher', detail: '90 boom bap', bpm: 90.0, swing: 0.34,
+        $tracks[] = new Track(
+            id: 'cipher', name: 'Cipher', detail: '100 boom bap', kind: 'deep', bpm: 100.0, swing: 0.22,
             mix: $hipHopMix,
             kick: Phrase::drums(['x.........x.....', 'x......x..x.....', 'x.x.......x..x..', 'x......x.xx...x.'], 0.92, 1.0),
             clap: Phrase::drums(['....X.......X...', '....X..x....X...', '....X.......X...', '....X..x....X.x.'], 0.4, 0.96),
@@ -781,9 +781,9 @@ final class Library
         $fm9Mid = ['Ab3', 'C4', 'Eb4', 'G4'];
         $g7Mid = ['B3', 'D4', 'F4'];
 
-        $tracks[] = self::lofiTrack(
-            id: 'boulevard', name: 'Boulevard', detail: '94 west coast', bpm: 94.0, swing: 0.4,
-            mix: ['hats' => 0.3, 'lead' => 0.38, 'pad' => 0.34] + $hipHopMix,
+        $tracks[] = new Track(
+            id: 'boulevard', name: 'Boulevard', detail: '105 west coast', kind: 'deep', bpm: 105.0, swing: 0.26,
+            mix: ['hats' => 0.34, 'lead' => 0.4, 'pad' => 0.28] + $hipHopMix,
             kick: Phrase::drums(['x.....x...x.....', 'x.....x...x..x..', 'x.....x...x.....', 'x.....x.x.x...x.'], 0.92, 1.0),
             clap: Phrase::drums(['....X.......X...', '....X.......X...', '....X.......X...', '....X.......X..x'], 0.44, 0.94),
             hat: Phrase::drums(array_fill(0, 4, 'X.xxX.xxX.xxX.xx'), 0.22, 0.38),

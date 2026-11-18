@@ -31,7 +31,7 @@ final class ArrangementTest extends TestCase
         }
     }
 
-    public function test_the_library_has_twenty_tracks_in_three_sections(): void
+    public function test_the_library_has_twenty_tracks_in_four_sections(): void
     {
         $tracks = Library::all();
         $this->assertCount(20, $tracks);
@@ -41,7 +41,7 @@ final class ArrangementTest extends TestCase
         foreach ($tracks as $track) {
             $sections[$track->section] = ($sections[$track->section] ?? 0) + 1;
         }
-        $this->assertSame(['EDM' => 6, 'Lofi' => 8, 'Breaks' => 6], $sections);
+        $this->assertSame(['EDM' => 6, 'Hip-hop' => 2, 'Lofi' => 6, 'Breaks' => 6], $sections);
     }
 
     #[DataProvider('tracks')]
