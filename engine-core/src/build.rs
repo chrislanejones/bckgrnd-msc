@@ -216,15 +216,14 @@ impl Engine {
                 verdict as f64,
                 part as f64,
             );
-            // A refused build's lanes are withdrawn; anything else stays as it was.
-            if self.linked.as_ref().is_some_and(|l| l.link == request_id) {
-                self.cancel_linked(verdict);
-            }
+            // A refused build's lanes are withdrawn where they were staged; anything
+            // else stays as it was, the lanes of a scene still pending included.
+            self.cancel_staged_for(request_id, verdict);
             return verdict;
         }
 
         // The lanes this build sets, staged just before it, are the build's from here.
-        let lanes = self.linked.take_if(|l| l.link == request_id);
+        let lanes = self.staged.take_if(|l| l.link == request_id);
         // Latest wins over a pending scene, and the lanes that scene carried go with it.
         if self.scheduler.replace_pending(request_id) {
             self.cancel_linked(reason::USER);

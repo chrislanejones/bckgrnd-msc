@@ -372,3 +372,175 @@ fn an_edit_and_a_scene_on_one_boundary_apply_edit_first_so_the_scene_wins() {
     );
     assert_eq!(e.track.hat[16], 0.8, "the scene's lane wins");
 }
+
+/// Lanes are staged before their scene, so a scene that is then refused must not
+/// have cost the scene still pending its own lanes (the Night 7B staging race). The
+/// refusal withdraws the staged lanes only; the pending scene lands with everything
+/// it was queued with.
+#[test]
+fn a_refused_scene_leaves_the_pending_scenes_lanes_alone() {
+    // (timing code, the kick fader) of the refused request: a bad timing, a bad vector.
+    for (timing_code, kick, label) in [
+        (9u8, 0.4f32, "bad timing"),
+        (timing::BAR, 7.0, "bad vector"),
+    ] {
+        let mut e = engine(48_000.0);
+        e.play();
+        render_until_fired(&mut e, 3);
+        e.queue_patterns(20, timing::BAR, 10, &drum(2, &[(16, 0.9)]));
+        assert_eq!(e.queue_scene(10, timing::BAR, &scene(0.5)), reason::OK);
+        events(&mut e);
+
+        assert_eq!(
+            e.queue_patterns(21, timing::BAR, 11, &drum(2, &[(16, 0.1)])),
+            reason::OK
+        );
+        assert!(
+            events(&mut e).is_empty(),
+            "{label}: staging announces nothing and replaces nothing"
+        );
+        assert_eq!(
+            e.queue_scene(11, timing_code, &scene(kick)),
+            reason::INVALID,
+            "{label}"
+        );
+        assert_eq!(
+            events(&mut e),
+            vec![
+                ev(event::SCENE_REJECTED, 11, reason::INVALID as f64, 0.0),
+                ev(event::PATTERNS_CANCELLED, 21, reason::INVALID as f64, 0.0),
+            ],
+            "{label}: only the refused scene's lanes are withdrawn"
+        );
+        assert!(e.staged.is_none(), "{label}");
+
+        e.trace.clear();
+        render_until_fired(&mut e, 16);
+        let scene_at = e
+            .trace
+            .iter()
+            .find_map(|t| match *t {
+                Trace::Apply(10, at) => Some(at),
+                _ => None,
+            })
+            .expect("the pending scene still lands");
+        assert_eq!(pattern_applies(&e), vec![(20, scene_at)], "{label}");
+        assert_eq!(
+            e.track.hat[16], 0.9,
+            "{label}: its own lanes, not the refused ones"
+        );
+        assert_eq!(
+            events(&mut e),
+            vec![
+                ev(event::PATTERNS_APPLIED, 20, 16.0, 0.0),
+                ev(event::SCENE_APPLIED, 10, 16.0, 0.0),
+            ],
+            "{label}"
+        );
+    }
+}
+
+/// A payload the engine refuses is never staged, so it cannot replace anything either.
+#[test]
+fn refused_lanes_replace_nothing_staged_or_pending() {
+    let mut e = engine(48_000.0);
+    e.play();
+    render_until_fired(&mut e, 3);
+    e.queue_patterns(20, timing::BAR, 10, &drum(2, &[(16, 0.9)]));
+    assert_eq!(e.queue_scene(10, timing::BAR, &scene(0.5)), reason::OK);
+    // Staged for a scene that has not arrived yet.
+    e.queue_patterns(21, timing::BAR, 11, &drum(2, &[(16, 0.3)]));
+    events(&mut e);
+    let mut bad = drum(2, &[(16, 0.1)]);
+    bad[4] = 3.0;
+    assert_eq!(e.queue_patterns(22, timing::BAR, 12, &bad), reason::INVALID);
+    assert_eq!(
+        events(&mut e),
+        vec![ev(
+            event::PATTERNS_REJECTED,
+            22,
+            reason::INVALID as f64,
+            0.0
+        )]
+    );
+    assert_eq!(e.staged.as_ref().map(|s| s.request_id), Some(21));
+    assert_eq!(e.linked.as_ref().map(|s| s.request_id), Some(20));
+}
+
+/// An accepted scene takes over: the pending scene and the lanes it carried are
+/// replaced together, on the request that got in, and only the newer lanes land.
+#[test]
+fn an_accepted_scene_replaces_the_pending_scenes_lanes_when_it_gets_in() {
+    let mut e = engine(48_000.0);
+    e.play();
+    render_until_fired(&mut e, 3);
+    e.queue_patterns(20, timing::BAR, 10, &drum(2, &[(16, 0.9)]));
+    assert_eq!(e.queue_scene(10, timing::BAR, &scene(0.5)), reason::OK);
+    events(&mut e);
+    e.queue_patterns(21, timing::BAR, 11, &drum(2, &[(16, 0.1)]));
+    assert!(
+        events(&mut e).is_empty(),
+        "nothing is replaced by staging alone"
+    );
+    assert_eq!(e.queue_scene(11, timing::BAR, &scene(0.4)), reason::OK);
+    assert_eq!(
+        events(&mut e),
+        vec![
+            ev(event::PATTERNS_REPLACED, 20, 21.0, 0.0),
+            ev(event::SCENE_REPLACED, 10, 11.0, 0.0),
+            ev(event::SCENE_QUEUED, 11, 2.0, 16.0),
+        ]
+    );
+    e.trace.clear();
+    render_until_fired(&mut e, 16);
+    assert_eq!(
+        pattern_applies(&e).iter().map(|a| a.0).collect::<Vec<_>>(),
+        vec![21]
+    );
+    assert_eq!(e.track.hat[16], 0.1);
+}
+
+/// Staged lanes that never get a request of their own do not linger: a newer staging
+/// replaces them, the host can withdraw them by id, and Stop cancels them with the
+/// rest. None of that touches the pending scene's lanes.
+#[test]
+fn staged_lanes_without_a_request_are_replaced_cancelled_or_stopped() {
+    let mut e = engine(48_000.0);
+    e.play();
+    render_until_fired(&mut e, 3);
+    e.queue_patterns(20, timing::BAR, 10, &drum(2, &[(16, 0.9)]));
+    assert_eq!(e.queue_scene(10, timing::BAR, &scene(0.5)), reason::OK);
+    e.queue_patterns(30, timing::BAR, 77, &drum(2, &[(16, 0.2)]));
+    events(&mut e);
+
+    e.queue_patterns(31, timing::BAR, 78, &drum(2, &[(16, 0.3)]));
+    assert_eq!(
+        events(&mut e),
+        vec![ev(event::PATTERNS_REPLACED, 30, 31.0, 0.0)]
+    );
+    assert!(e.cancel_patterns(31));
+    assert_eq!(
+        events(&mut e),
+        vec![ev(event::PATTERNS_CANCELLED, 31, reason::USER as f64, 0.0)]
+    );
+    assert!(!e.cancel_patterns(31), "already withdrawn");
+    assert_eq!(e.linked.as_ref().map(|s| s.request_id), Some(20));
+
+    e.queue_patterns(32, timing::BAR, 79, &drum(2, &[(16, 0.3)]));
+    events(&mut e);
+    e.stop();
+    let got = events(&mut e);
+    for id in [20, 32] {
+        assert!(
+            got.contains(&ev(
+                event::PATTERNS_CANCELLED,
+                id,
+                reason::STOPPED as f64,
+                0.0
+            )),
+            "{id}: {got:?}"
+        );
+    }
+    assert!(e.staged.is_none() && e.linked.is_none());
+    assert_eq!(e.track.hat[16], 0.4, "nothing withdrawn was applied");
+}

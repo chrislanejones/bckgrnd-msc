@@ -40,7 +40,7 @@ end in exactly one of:
 | The build | Its lanes |
 |---|---|
 | applied | `patterns applied` on the end step, after the landing and before `build applied` |
-| refused (`build rejected`) | `patterns cancelled` with the same reason; a build already queued or running keeps its own |
+| refused (`build rejected`) | `patterns cancelled` with the same reason; a build already queued or running keeps its own, and so does a scene still pending (staged lanes replace nothing until their request is accepted, `docs/NIGHT4_PROTOCOL.md`) |
 | cancelled, by the user or any path below | `patterns cancelled` with the same reason, right after `build cancelled` |
 | replaced, by a scene that commits or a newer build | `patterns cancelled`, reason 10, as a replaced scene's are |
 

@@ -1271,3 +1271,145 @@ fn a_build_without_lanes_touches_no_lanes() {
     assert_eq!((e.track.hat[16], e.track.kick[16]), (0.4, 1.0));
     assert_eq!(e.base().to_vec(), scene(0.3));
 }
+
+/// The Night 7B staging race, from the build side: lanes are staged before their
+/// build, so a build that is then refused must not have cost a scene still pending
+/// its own lanes. Refused for its bars, its target and its landing alike.
+#[test]
+fn a_refused_build_leaves_the_pending_scenes_lanes_alone() {
+    let good = scene(0.3);
+    let mut bad = scene(0.3);
+    bad[0] = 7.0;
+    /// (bars, target, landing, the part refused, a label)
+    type Refusal<'a> = (u32, &'a [f32], &'a [f32], u8, &'a str);
+    let cases: [Refusal; 3] = [
+        (3, &good, &[], detail::BARS, "bars"),
+        (2, &bad, &[], detail::TARGET, "target"),
+        (2, &good, &bad, detail::LAND, "landing"),
+    ];
+    for (bars, target, land, part, label) in cases {
+        let mut e = playing(48_000.0);
+        e.queue_patterns(20, timing::BAR, 9, &drum(2, &[(16, 0.9)]));
+        assert_eq!(e.queue_scene(9, timing::BAR, &scene(0.4)), 0);
+        events(&mut e);
+
+        assert_eq!(
+            e.queue_patterns(21, timing::BAR, 7, &drum(2, &[(16, 0.1)])),
+            reason::OK
+        );
+        assert!(
+            events(&mut e).is_empty(),
+            "{label}: staging replaces nothing"
+        );
+        assert_eq!(
+            e.queue_build(7, bars, target, land),
+            reason::INVALID,
+            "{label}"
+        );
+        assert_eq!(
+            events(&mut e),
+            vec![
+                ev(
+                    event::BUILD_REJECTED,
+                    7,
+                    reason::INVALID as f64,
+                    part as f64
+                ),
+                ev(event::PATTERNS_CANCELLED, 21, reason::INVALID as f64, 0.0),
+            ],
+            "{label}"
+        );
+        assert!(e.staged.is_none() && e.build_lanes.is_none(), "{label}");
+
+        e.trace.clear();
+        let seen = walk_to(&mut e, 16);
+        assert_eq!(
+            seen,
+            vec![
+                ev(event::PATTERNS_APPLIED, 20, 16.0, 0.0),
+                ev(event::SCENE_APPLIED, 9, 16.0, 0.0),
+            ],
+            "{label}: the pending scene lands with its own lanes"
+        );
+        assert_eq!(lane_ids(&e), vec![20], "{label}");
+        assert_eq!(e.track.hat[16], 0.9, "{label}");
+    }
+}
+
+/// And the other way round: a scene refused while a build waits or runs with lanes
+/// of its own costs the build nothing (its lanes were never in the staging slot).
+#[test]
+fn a_refused_scene_leaves_the_builds_lanes_alone() {
+    for running in [false, true] {
+        let label = format!("running {running}");
+        let mut e = playing(48_000.0);
+        let target = target_from(&e.base());
+        e.queue_patterns(20, timing::BAR, 1, &drum(2, &[(48, 0.9)]));
+        assert_eq!(e.queue_build(1, 2, &target, &[]), 0);
+        if running {
+            walk_to(&mut e, 20);
+        }
+        events(&mut e);
+        e.queue_patterns(21, timing::BAR, 9, &drum(2, &[(48, 0.1)]));
+        assert_eq!(e.queue_scene(9, 9, &scene(0.4)), reason::INVALID, "{label}");
+        assert_eq!(
+            events(&mut e),
+            vec![
+                ev(event::SCENE_REJECTED, 9, reason::INVALID as f64, 0.0),
+                ev(event::PATTERNS_CANCELLED, 21, reason::INVALID as f64, 0.0),
+            ],
+            "{label}"
+        );
+        e.trace.clear();
+        let seen = walk_to(&mut e, 48);
+        assert!(
+            seen.contains(&ev(event::PATTERNS_APPLIED, 20, 48.0, 0.0)),
+            "{label}: {seen:?}"
+        );
+        assert!(
+            seen.contains(&ev(event::BUILD_APPLIED, 1, 48.0, 0.0)),
+            "{label}"
+        );
+        assert_eq!(lane_ids(&e), vec![20], "{label}");
+        assert_eq!(e.track.hat[48], 0.9, "{label}");
+    }
+}
+
+/// An accepted build still wins over a pending scene, and takes that scene's lanes
+/// with it; its own staged lanes become the build's. Cancelling the build then
+/// withdraws exactly those.
+#[test]
+fn an_accepted_build_takes_its_staged_lanes_and_replaces_the_pending_scenes() {
+    let mut e = playing(48_000.0);
+    let target = target_from(&e.base());
+    e.queue_patterns(20, timing::BAR, 9, &drum(2, &[(16, 0.9)]));
+    assert_eq!(e.queue_scene(9, timing::BAR, &scene(0.4)), 0);
+    e.queue_patterns(21, timing::BAR, 1, &drum(2, &[(48, 0.7)]));
+    events(&mut e);
+    assert_eq!(e.queue_build(1, 2, &target, &[]), 0);
+    assert_eq!(
+        events(&mut e),
+        vec![
+            ev(event::SCENE_REPLACED, 9, 1.0, 0.0),
+            ev(event::PATTERNS_CANCELLED, 20, reason::USER as f64, 0.0),
+            ev(event::BUILD_QUEUED, 1, 2.0, 16.0),
+        ]
+    );
+    assert!(e.staged.is_none() && e.linked.is_none());
+    assert_eq!(e.build_lanes.as_ref().map(|l| l.request_id), Some(21));
+
+    walk_to(&mut e, 30);
+    events(&mut e);
+    assert!(e.cancel_build(1));
+    assert_eq!(
+        events(&mut e),
+        vec![
+            ev(event::BUILD_CANCELLED, 1, reason::USER as f64, 0.0),
+            ev(event::PATTERNS_CANCELLED, 21, reason::USER as f64, 0.0),
+        ]
+    );
+    e.trace.clear();
+    walk_to(&mut e, 64);
+    assert!(lane_ids(&e).is_empty(), "no withdrawn lanes ever land");
+    assert_eq!((e.track.hat[16], e.track.hat[48]), (0.4, 0.4));
+}

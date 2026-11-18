@@ -65,6 +65,18 @@ The worklet refuses a revision itself (event 35) for a malformed message, during
 auto-mix (`mixing`), for a stale deck or generation (a revision made for the
 previous track), or before boot.
 
+**Linked lanes are staged, then adopted.** A scene's or a build's lanes arrive in the
+message before their request, so until that request is accepted they belong to nobody:
+the engine holds them in a staging slot of their own. The scene still pending keeps the
+lanes it was queued with. When the new request is accepted it adopts its staged lanes,
+and only then are the pending scene's replaced (event 34, on the request that got in,
+not when the lanes were staged). When it is refused, only the staged lanes are withdrawn
+(event 33 with the refusal's reason) and the pending scene lands with everything it had.
+Lanes staged for a request that never arrives are replaced by the next staging,
+withdrawn by `cancelPatterns`, or cancelled with everything else on Stop, a jump, a
+track load or Panic. Before 11-18-2026 staging replaced the pending scene's lanes at
+once, so a refused request could leave that scene pending without them.
+
 **Boot order.** Messages sent before the first Play are held and replayed after
 `init` and the track loads, and only then the coalesced parameters. `init` goes out
 through `send`, not `post`, because `post` flushes the coalesced parameters first.
