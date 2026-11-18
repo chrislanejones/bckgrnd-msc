@@ -755,6 +755,82 @@ try {
         padCancelled && (await stateOf(1)) === 'active' && (await stateOf(0)) === 'available',
         `${await statusText()}; Full ${await stateOf(0)}, Sparse ${await stateOf(1)}`);
 
+      // Rise (Night 7, docs/NIGHT7_PROTOCOL.md): a pad press rises into its scene over
+      // 2, 4 or 8 bars. The pad reads Rise · Bar N, Rising · k of n, then Active, and the
+      // knobs move with the engine's base the whole way.
+      {
+        const RT = { timeout: 20000 };
+        const filterNow = () => page.evaluate(() => window.__BCKGRND_PROJECT__().params['fx.filter']);
+        const rise = page.getByRole('button', { name: 'Rise into the scene over several bars' });
+        const barsPicked = () => page.locator('.scene-build-bars .segment[aria-pressed="true"]').textContent();
+        check('rise: the bar picker is hidden until Rise is chosen', (await page.locator('.scene-build-bars').count()) === 0);
+        await rise.click();
+        check('rise: choosing Rise shows 2 · 4 · 8 bars, 4 picked',
+          (await page.locator('.scene-build-bars .segment').count()) === 3 && (await barsPicked())?.trim() === '4', await barsPicked());
+        await page.getByRole('button', { name: 'Rise over 2 bars' }).click();
+        check('rise: Rise stays on with 2 picked', (await rise.getAttribute('aria-pressed')) === 'true' && (await barsPicked())?.trim() === '2');
+
+        // Two bars into Drop from a closed filter: the cutoff opens gradually.
+        await page.getByRole('slider', { name: 'Cutoff' }).fill('500');
+        const start = await filterNow();
+        await resetHistory();
+        await nextBar();
+        await pad(3).click();
+        await waitLine(3, /^Rise · Bar \d+$/);
+        const riseLine = await lineOf(3);
+        const riseStatus = await statusText();
+        await page.waitForFunction((src) => new RegExp(src).test(document.querySelectorAll('.scene-slot')[3]?.querySelector('.scene-line')?.textContent?.trim() ?? ''), /^Rising · 1 of 2$/.source, RT);
+        await page.waitForTimeout(600);
+        const mid = await filterNow();
+        await page.waitForFunction(() => document.querySelectorAll('.scene-slot')[3]?.getAttribute('data-state') === 'active', null, RT);
+        const end = await filterNow();
+        const riseSeen = await history(3);
+        check('rise: the pad says Rise · Bar N first', /^Rise · Bar \d+$/.test(riseLine), riseLine);
+        check('rise: the status names the bars and the start bar', /^Drop rises over 2 bars from bar \d+$/.test(riseStatus ?? ''), riseStatus);
+        check('rise: then Rising · 1 of 2, Rising · 2 of 2, then Active',
+          ['building|Rising · 1 of 2', 'building|Rising · 2 of 2', 'active|Active'].every((t, k, all) => riseSeen.indexOf(t) >= 0 && (k === 0 || riseSeen.indexOf(t) > riseSeen.indexOf(all[k - 1]))),
+          riseSeen.join(' > '));
+        check('rise: the cutoff knob moves while it rises (store follows the engine base)', mid > start + 0.02 && mid < end - 0.02,
+          `${start.toFixed(3)} -> ${mid.toFixed(3)} -> ${end.toFixed(3)}`);
+        check("rise: it ends on Drop's open filter", (await shown('Cutoff')) === 'Open' && (await statusText()) === 'Drop active', `${await shown('Cutoff')}; ${await statusText()}`);
+
+        // Pressing a rising pad again cancels it, and the knobs glide back.
+        await page.getByRole('button', { name: 'Rise over 4 bars' }).click();
+        await page.getByRole('slider', { name: 'Cutoff' }).fill('500');
+        const before = await filterNow();
+        await nextBar();
+        await pad(3).click();
+        await page.waitForFunction((src) => new RegExp(src).test(document.querySelectorAll('.scene-slot')[3]?.querySelector('.scene-line')?.textContent?.trim() ?? ''), /^Rising · 2 of 4$/.source, RT);
+        const moved = await filterNow();
+        await pad(3).click();
+        const cancelled = await waitStatus(/^Drop rise cancelled$/).then(() => true, () => false);
+        await page.waitForTimeout(300);
+        const back = await filterNow();
+        check('rise: pressing the rising pad cancels it', cancelled, await statusText());
+        check('rise: a cancelled rise brings the knobs back to where it started',
+          moved > before + 0.02 && Math.abs(back - before) < 1e-4, `${before.toFixed(3)} -> ${moved.toFixed(3)} -> ${back.toFixed(3)}`);
+        check('rise: the pad drops its line once cancelled', (await lineOf(3)) !== '' ? (await stateOf(3)) !== 'building' : true, `${await stateOf(3)} "${await lineOf(3)}"`);
+
+        // A knob moved during a rise is the user's: the rise stops driving it.
+        await page.getByRole('button', { name: 'Rise over 2 bars' }).click();
+        await nextBar();
+        await pad(3).click();
+        await page.waitForFunction((src) => new RegExp(src).test(document.querySelectorAll('.scene-slot')[3]?.querySelector('.scene-line')?.textContent?.trim() ?? ''), /^Rising · 1 of 2$/.source, RT);
+        await page.getByRole('slider', { name: 'Cutoff' }).fill('800');
+        const mine = await filterNow();
+        await page.waitForFunction(() => ['active', 'modified'].includes(document.querySelectorAll('.scene-slot')[3]?.getAttribute('data-state')), null, RT);
+        await page.waitForTimeout(300);
+        check('rise: a knob turned during the rise stays where the user put it',
+          Math.abs((await filterNow()) - mine) < 1e-4, `${mine.toFixed(3)} vs ${(await filterNow()).toFixed(3)}`);
+        check('rise: and the scene reads Active · Modified', (await lineOf(3)) === 'Active · Modified', await lineOf(3));
+
+        // Back to Next bar: the bar picker goes away and pads switch on one bar again.
+        await page.getByRole('button', { name: 'Launch on the next bar' }).click();
+        check('rise: leaving Rise hides the bar picker', (await page.locator('.scene-build-bars').count()) === 0);
+        await cancelScene.click();
+        await waitStatus(/^Scene cleared; previous mix restored$/);
+      }
+
       // Shift+1..4 launch by physical key. Each replaces the one before; then cancel.
       await page.locator('body').click({ position: { x: 5, y: 600 } });
       await resetHistory();

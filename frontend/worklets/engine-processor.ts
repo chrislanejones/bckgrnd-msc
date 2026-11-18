@@ -76,6 +76,19 @@ type Inbound =
     }
   | { type: 'cancelScene'; requestId: number }
   | {
+      /** A timed build (docs/NIGHT7_PROTOCOL.md): rise to `target` over `bars` bars. */
+      type: 'build';
+      requestId: number;
+      generation: number;
+      /** 2, 4 or 8. */
+      bars: number;
+      target: ArrayLike<number>;
+      /** A scene committed whole on the bar line where the build ends. */
+      land?: ArrayLike<number> | null;
+      deck?: DeckId;
+    }
+  | { type: 'cancelBuild'; requestId: number }
+  | {
       type: 'patterns';
       requestId: number;
       generation: number;
@@ -132,6 +145,10 @@ const EVENT_SCENE_CANCELLED = 3;
 const EVENT_SCENE_REJECTED = 5;
 const EVENT_FILL_REJECTED = 15;
 const EVENT_PATTERNS_REJECTED = 35;
+const EVENT_BUILD_APPLIED = 42;
+const EVENT_BUILD_CANCELLED = 43;
+const EVENT_BUILD_REPLACED = 44;
+const EVENT_BUILD_REJECTED = 45;
 const REASON_INVALID = 1;
 const REASON_TRACK = 4;
 const REASON_MIXING = 6;
@@ -197,6 +214,25 @@ class EngineProcessor extends AudioWorkletProcessor {
   private scenePendingId = -1;
   /** Drained engine events, reused every block. */
   private eventBuf = new Float64Array(EVENT_CAPACITY * EVENT_WIDTH);
+  /** Where an inbound build's target and landing scene are copied for the engine. */
+  private buildTarget = new Float32Array(SCENE_LEN);
+  private buildLand = new Float32Array(SCENE_LEN);
+  private static readonly NO_LAND = new Float32Array(0);
+  /**
+   * The build the live engine has accepted and not yet finished (-1 for none). When it
+   * reports `build applied`, the live engine's base (the target or the landing, plus
+   * whatever the user moved during it) is carried to the mirrors and the idle deck,
+   * as for a scene.
+   */
+  private buildPendingId = -1;
+  /** The live engine's base, read back for that. */
+  private baseBuf = new Float32Array(SCENE_LEN);
+  /**
+   * The build whose base the host's knobs follow, until its last event is drained.
+   * Kept apart from `buildPendingId`, which stop, panic, track load and a host cancel
+   * clear before their `build cancelled` is drained; the knobs must still glide back.
+   */
+  private buildShownId = -1;
 
   /** Accumulated sample clock, used to schedule the auto-mix handover. */
   private frames = 0;
@@ -249,7 +285,10 @@ class EngineProcessor extends AudioWorkletProcessor {
         // Loading cancels that deck's pending scene and fill, ends an active fill and
         // releases its held gestures, all inside the engine (`track`).
         if (engine) engine.load_track_wasm(message.json);
-        if (message.deck === this.live) this.scenePendingId = -1;
+        if (message.deck === this.live) {
+          this.scenePendingId = -1;
+          this.buildPendingId = -1;
+        }
         return;
       }
 
@@ -462,6 +501,24 @@ class EngineProcessor extends AudioWorkletProcessor {
         this.panic();
         return;
 
+      case 'build':
+        this.queueBuild(message);
+        // A refusal from the engine is in its ring; say so now, not a block later.
+        this.drainEvents(this.live, this.engines[this.live]);
+        return;
+
+      case 'cancelBuild': {
+        const engine = this.engines[this.live];
+        const id = message.requestId >>> 0;
+        const cancelled = engine ? engine.cancel_build(id) : false;
+        if (cancelled && id === this.buildPendingId) this.buildPendingId = -1;
+        // As for scenes: a miss (already applied, replaced, never queued) is only
+        // visible here; a hit also produces `build cancelled` (reason 10).
+        this.port.postMessage({ type: 'buildCancelResult', deck: this.live, requestId: id, cancelled });
+        this.drainEvents(this.live, engine);
+        return;
+      }
+
       case 'cancelScene': {
         const engine = this.engines[this.live];
         const id = message.requestId >>> 0;
@@ -523,6 +580,50 @@ class EngineProcessor extends AudioWorkletProcessor {
     if (verdict === 0) {
       this.scenePending.set(this.sceneIn);
       this.scenePendingId = requestId;
+    }
+  }
+
+  /**
+   * Hand a timed build to the live engine, or refuse it here in the engine's own
+   * `build rejected` shape: a target or landing that is not 44 long (`invalid`), an
+   * auto-mix in progress (`mixing`), a stale deck or generation, or no engine yet (`not
+   * playing`). The engine validates the bars and the values and reports its own outcome.
+   */
+  private queueBuild(message: Extract<Inbound, { type: 'build' }>): void {
+    const requestId = message.requestId >>> 0;
+    const { target, land } = message;
+    let refusal = 0;
+    if (target == null || target.length !== SCENE_LEN) refusal = REASON_INVALID;
+    else if (land != null && land.length !== SCENE_LEN) refusal = REASON_INVALID;
+    else if (this.mix) refusal = REASON_MIXING;
+    else if (
+      (message.deck !== undefined && message.deck !== this.live) ||
+      message.generation !== this.generation[this.live]
+    )
+      refusal = REASON_STALE;
+    const engine = this.engines[this.live];
+    if (refusal === 0 && !engine) refusal = REASON_NOT_PLAYING;
+    if (refusal !== 0 || !engine) {
+      this.postSceneEvents(this.live, [EVENT_BUILD_REJECTED, requestId, refusal, 0]);
+      return;
+    }
+    for (let i = 0; i < SCENE_LEN; i += 1) this.buildTarget[i] = Number(target[i]);
+    if (land != null) for (let i = 0; i < SCENE_LEN; i += 1) this.buildLand[i] = Number(land[i]);
+    // Anything but 2, 4 or 8 goes in as 0, which the engine refuses (`invalid`), rather
+    // than wrapping into a valid length on the way to a u32.
+    const b = message.bars;
+    const bars = b === 2 || b === 4 || b === 8 ? b : 0;
+    const verdict = engine.queue_build(
+      requestId,
+      bars,
+      this.buildTarget,
+      land != null ? this.buildLand : EngineProcessor.NO_LAND,
+    );
+    if (verdict === 0) {
+      this.buildPendingId = requestId;
+      this.buildShownId = requestId;
+      // A build replaces a pending scene (`scene replaced`), so its mix will never land.
+      this.scenePendingId = -1;
     }
   }
 
@@ -591,6 +692,7 @@ class EngineProcessor extends AudioWorkletProcessor {
       this.engines[this.live === 'a' ? 'b' : 'a']?.set_output_gain(0);
     }
     this.scenePendingId = -1;
+    this.buildPendingId = -1;
     for (const engine of this.liveEngines()) engine.panic();
     this.drainEvents('a', this.engines.a);
     this.drainEvents('b', this.engines.b);
@@ -611,20 +713,57 @@ class EngineProcessor extends AudioWorkletProcessor {
     const n = engine.take_events_into(this.eventBuf);
     if (n === 0) return;
     const buf = this.eventBuf;
+    // The build whose base to send ahead of its events (applied or cancelled), so the
+    // host's knobs already stand where the build left them when it reads the outcome.
+    let baseFor = -1;
     if (deck === this.live) {
       for (let k = 0; k < n; k += 1) {
         const kind = buf[k * EVENT_WIDTH];
         const id = buf[k * EVENT_WIDTH + 1];
-        if (id !== this.scenePendingId) continue;
-        if (kind === EVENT_SCENE_APPLIED) {
-          this.followScene(this.scenePending);
-          this.scenePendingId = -1;
-        } else if (kind === EVENT_SCENE_CANCELLED) {
-          this.scenePendingId = -1;
+        if (id === this.scenePendingId) {
+          if (kind === EVENT_SCENE_APPLIED) {
+            this.followScene(this.scenePending);
+            this.scenePendingId = -1;
+          } else if (kind === EVENT_SCENE_CANCELLED) {
+            this.scenePendingId = -1;
+          }
+        }
+        if (id === this.buildPendingId) {
+          if (kind === EVENT_BUILD_APPLIED) {
+            // Read once the block is done, so it is the base the build left.
+            if (engine.base_into(this.baseBuf)) this.followScene(this.baseBuf);
+            this.buildPendingId = -1;
+          } else if (
+            kind === EVENT_BUILD_CANCELLED ||
+            kind === EVENT_BUILD_REPLACED ||
+            kind === EVENT_BUILD_REJECTED
+          ) {
+            this.buildPendingId = -1;
+          }
+        }
+        if (id === this.buildShownId) {
+          // Applied, or cancelled and gliding back to where it started: the knobs follow.
+          if (kind === EVENT_BUILD_APPLIED || kind === EVENT_BUILD_CANCELLED) {
+            if (engine.base_into(this.baseBuf)) baseFor = id;
+            this.buildShownId = -1;
+          } else if (kind === EVENT_BUILD_REPLACED || kind === EVENT_BUILD_REJECTED) {
+            this.buildShownId = -1;
+          }
         }
       }
     }
+    if (baseFor >= 0) this.postBuildBase(deck, baseFor);
     this.postSceneEvents(deck, Array.from(buf.subarray(0, n * EVENT_WIDTH)));
+  }
+
+  /**
+   * The base a build has moved the live deck to, read into `baseBuf` just before, for
+   * the host's knobs (docs/NIGHT7_PROTOCOL.md, Worklet messages). Sent ~30 times a
+   * second while a build runs and once more when it ends, so the message is the only
+   * allocation.
+   */
+  private postBuildBase(deck: DeckId, requestId: number): void {
+    this.port.postMessage({ type: 'buildBase', deck, requestId, values: Array.from(this.baseBuf) });
   }
 
   /**
@@ -681,6 +820,7 @@ class EngineProcessor extends AudioWorkletProcessor {
     from.cancel_pending(REASON_TRACK);
     from.release_gestures();
     this.scenePendingId = -1;
+    this.buildPendingId = -1;
 
     if (!from.is_playing()) {
       from.play();
@@ -739,6 +879,7 @@ class EngineProcessor extends AudioWorkletProcessor {
       this.engines[this.live]?.cancel_pending(REASON_TRACK);
       this.engines[this.live]?.release_gestures();
       this.scenePendingId = -1;
+      this.buildPendingId = -1;
     }
     this.live = deck;
   }
@@ -943,6 +1084,15 @@ class EngineProcessor extends AudioWorkletProcessor {
       this.peakL = 0;
       this.peakR = 0;
       this.port.postMessage({ type: 'telemetry', frame: this.telemetry.slice() });
+      // A running build moves the base on every sixteenth; the host shows it moving.
+      if (
+        live &&
+        this.buildPendingId >= 0 &&
+        live.active_build() === this.buildPendingId &&
+        live.base_into(this.baseBuf)
+      ) {
+        this.postBuildBase(this.live, this.buildPendingId);
+      }
     }
   }
 }

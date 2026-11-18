@@ -336,3 +336,34 @@ not. Things to settle before or while building it:
 - **The stems toolbar `title` now covers the Level / Solo / Cut legend.** The tooltip "Sound selection applies immediately; scenes use the timing selector." was written for the selection pills; since the legend joined that row it also shows over the legend. Move the `title` onto the selection's group. One-line markup change.
 - **The Switch on toolbar sits just under the fold at 1440 × 900.** The four scene cards are now in the first screen; the timing row starts about 900 px down. Getting it in would mean a shorter fader travel (11rem today) or folding the stems footer line. Left for Chris to weigh, because both touch performance controls.
 - **`verify:desktop` fails in a fresh worktree until Laravel's runtime folders exist.** `php artisan serve` answers 500 ("Please provide a valid cache path") because the gitignored `storage/framework/views`, `cache` and `sessions` folders are not created by `git worktree add`; the UI, editor and projects checks then time out waiting for `article.stem`. Creating the three empty folders fixed it (no env change). Worth a line in the worktree setup notes, or `.gitkeep` files.
+
+## Found in Night 7 (11-17-2026)
+
+- **A landing scene can't carry pattern lanes.** `queue_build` takes a target and a
+  landing vector only, so a Drop that sets lanes (a scene's `patterns`) lands with
+  the current arrangement. Adding it means a `link` for the build's request id on
+  `queue_patterns`, applied in `build_onset` after the landing commits. Wait until the
+  UI asks for it.
+- **Builds step once per sixteenth.** Each onset sets the next value and the ADR-013
+  glides fill in between. At slow tempos a deep filter build could step audibly (the
+  30 ms filter glide finishes well inside a 214 ms step at 70 BPM). If anyone hears
+  it, move the progress inside the step at control rate (`to_next / step_len`). The
+  end points stay on onsets.
+- **`engine-core` has no `cargo bench` harness.** The rust-wasm-loop skill asks for
+  before/after benches on hot-path changes. Night 7 timed 60 s renders from a scratch
+  crate under `/tmp` instead. A `benches/render.rs` (60 s of a library track, no new
+  dependencies) would make that a single command.
+- **No eslint in this repo.** The global rule pairs `tsc --noEmit` with eslint for
+  TypeScript, but `package.json` has no eslint. Only the typecheck ran.
+- **`ENGINE_EVENT` in `frontend/lib/engine.ts` has no pattern kinds (31-35).** The
+  doc table there skips them too. Night 7 added the build kinds (41-47) but left
+  this gap alone.
+- **Rise wraps the scene toolbar under 1440px.** At 1280 × 800 the 2 · 4 · 8 picker
+  pushes Drum fill and Cancel onto their own row while Rise is on (toolbar 74 → 112 px).
+  1440 × 900 is unchanged. Shorter Switch on labels (Beat / Bar) at that width, or
+  folding the bar count into the Rise pill, would keep it on one row. Design follow-up
+  (Lacey).
+- **A rise into a scene with captured patterns lands its lanes a bar late.** The build
+  request carries no lanes, so they are staged when it is applied and land on the next
+  bar line. The fix is the engine `link` noted above (lanes on a landing scene), driven
+  by the build's request id.

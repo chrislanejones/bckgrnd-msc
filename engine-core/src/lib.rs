@@ -61,6 +61,7 @@
 //! From JavaScript, [`Engine`] is a `wasm_bindgen` class and the crate is built by
 //! `wasm-pack`; the audio worklet calls [`Engine::process`] with 128-frame blocks.
 
+mod build;
 mod drums;
 mod dsp;
 mod gesture;
@@ -105,6 +106,12 @@ pub mod scene {
         event, reason, slot_kind, timing, valid, SlotKind, Timing, ECHO_TIME_OPTIONS,
         EVENT_CAPACITY, EVENT_WIDTH, FX_BASE, FX_KINDS, SCENE_LEN, SCENE_PARAMS, STEM_FIELDS,
     };
+
+    /// Timed builds (`docs/NIGHT7_PROTOCOL.md`): the lengths allowed, the codes for
+    /// which part of a request was refused, and the interpolation rule.
+    pub mod build {
+        pub use crate::build::{detail, value_at, BUILD_BARS};
+    }
 }
 use scheduler::{reason, SCENE_LEN};
 pub use transport::Transport;
@@ -508,6 +515,13 @@ pub struct Engine {
     /// Lanes swapped out at a boundary, kept until the next pattern message so nothing
     /// is freed on the audio path. Capacity for two full revisions is reserved.
     retired: Vec<patterns::LaneData>,
+    /// The effects half of the base, in `SCENE_PARAMS` order, as the setters and
+    /// scenes last wrote it (clamped as the master clamps). The master keeps these in
+    /// its own units (decibels, beats, comb feedback); a build and capture need them
+    /// back in the scene vector's.
+    fx_base: [f32; SCENE_LEN - scheduler::FX_BASE],
+    /// The timed build, waiting for its bar line or running (`docs/NIGHT7_PROTOCOL.md`).
+    build: Option<build::Build>,
     /// Samples rendered, and what happened on which of them, for the scheduling tests.
     #[cfg(test)]
     clock: u64,
@@ -527,6 +541,8 @@ enum Trace {
     Drum(usize, usize, f32),
     /// A pattern revision was swapped in: request id, sample.
     Patterns(u32, u64),
+    /// A timed build began moving the mix: request id, sample.
+    BuildStart(u32, u64),
 }
 
 /// How long a fader, a cut, a solo or a send takes to glide, in seconds. The browser
@@ -578,6 +594,8 @@ impl Engine {
             edit: None,
             linked: None,
             retired: Vec::with_capacity(2 * patterns::LANES),
+            fx_base: build::FX_DEFAULTS,
+            build: None,
             #[cfg(test)]
             clock: 0,
             #[cfg(test)]
@@ -653,6 +671,7 @@ impl Engine {
         self.transport.set_loop(bars);
         self.scheduler.announce(&self.transport);
         self.scheduler.announce_fill(&self.transport);
+        self.announce_build();
     }
 
     /// Cue or seek. Cancels a pending scene and fill and ends an active fill
@@ -930,7 +949,8 @@ impl Engine {
 
     /// Filter position, 0 (dark) to 1 (open).
     pub fn set_filter(&mut self, open: f32) {
-        self.master.set_filter(open);
+        self.touch_fx(0);
+        self.put_fx(0, open);
     }
 
     /// The latched echo throw (the older UI toggle). Kept alongside the Echo Throw
@@ -946,8 +966,8 @@ impl Engine {
     /// quarter, and so on; 0 turns the stems' echo off. Kept across track loads and
     /// retimed with the tempo.
     pub fn set_echo_time(&mut self, beats: f32) {
-        self.master
-            .set_delay_beats(beats, self.transport.bpm, self.transport.rate);
+        self.touch_fx(5);
+        self.put_fx(5, beats);
     }
 
     /// Whether the latched throw is on. Says nothing about held gestures: nothing
@@ -958,8 +978,10 @@ impl Engine {
 
     /// Three-band isolator, given as 0..1 amounts per band.
     pub fn set_bands(&mut self, low: f32, mid: f32, high: f32) {
-        self.master
-            .set_eq(band_db(low), band_db(mid), band_db(high));
+        self.touch_fx(2);
+        self.touch_fx(3);
+        self.touch_fx(4);
+        self.put_bands(low, mid, high);
     }
 
     /// The old three-way switch, kept for callers that still send it: 0, 1 and 2 map
@@ -968,7 +990,7 @@ impl Engine {
     /// mono; mono is `set_width(0.0)`.
     pub fn set_stereo_mode(&mut self, mode: u8) {
         // The three switch positions are the ends and the center of the balance.
-        self.master.set_balance(match mode.min(2) {
+        self.set_stereo_balance(match mode.min(2) {
             0 => 0.0,
             2 => 1.0,
             _ => 0.5,
@@ -979,37 +1001,44 @@ impl Engine {
     /// lower fades the right channel, higher fades the left, and each end silences
     /// the opposite side. The continuous form of [`Engine::set_stereo_mode`].
     pub fn set_stereo_balance(&mut self, balance: f32) {
-        self.master.set_balance(balance);
+        self.touch_fx(11);
+        self.put_fx(11, balance);
     }
 
     /// Stereo width: 0 mono, 1 as mixed (the default), up to 1.5 wider.
     pub fn set_width(&mut self, width: f32) {
-        self.master.set_width(width);
+        self.touch_fx(10);
+        self.put_fx(10, width);
     }
 
     /// The filter's resonance as it closes, a Q from 0.5 to 6 (default 0.85).
     pub fn set_filter_q(&mut self, q: f32) {
-        self.master.set_filter_q(q);
+        self.touch_fx(1);
+        self.put_fx(1, q);
     }
 
     /// The echo's feedback, 0 to 0.9 (default 0.3). The echo throw lifts it while held.
     pub fn set_echo_feedback(&mut self, amount: f32) {
-        self.master.set_echo_feedback(amount);
+        self.touch_fx(6);
+        self.put_fx(6, amount);
     }
 
     /// How loud the echo returns, 0 to 1 (default 0.24). The throw overrides it while held.
     pub fn set_echo_return(&mut self, amount: f32) {
-        self.master.set_echo_return(amount);
+        self.touch_fx(7);
+        self.put_fx(7, amount);
     }
 
     /// How much room is mixed in, 0 to 0.5 (default 0.07).
     pub fn set_reverb_mix(&mut self, amount: f32) {
-        self.master.set_reverb_mix(amount);
+        self.touch_fx(8);
+        self.put_fx(8, amount);
     }
 
     /// The room's decay, 0.2 to 2.5 s (default 0.32 s).
     pub fn set_reverb_decay(&mut self, seconds: f32) {
-        self.master.set_reverb_decay(seconds);
+        self.touch_fx(9);
+        self.put_fx(9, seconds);
     }
 
     /// Queue a scene (`docs/NIGHT3_PROTOCOL.md`). Returns 0 when accepted, otherwise
@@ -1215,6 +1244,7 @@ impl Engine {
         }
         let mut copy = [0.0f32; SCENE_LEN];
         copy.copy_from_slice(&values[..SCENE_LEN]);
+        self.replace_build(0);
         self.commit_targets(&copy);
         true
     }
@@ -1396,6 +1426,12 @@ impl Engine {
                 if let Some(p) = due {
                     self.commit_scene(p.request_id, &p.values, step as i32);
                 }
+                //    Then move a timed build on (or start it, or end it and commit its
+                //    landing scene), after a scene that would have replaced it.
+                //    NIGHT7_PROTOCOL.md.
+                if self.build.is_some() {
+                    self.build_onset(step);
+                }
                 // 2. End a fill that has played its bar, and start one due here, after
                 //    the scene and before the notes, so the fill's first step plays.
                 self.scheduler.fill_onset(step);
@@ -1446,6 +1482,9 @@ impl Engine {
     fn interrupt(&mut self, why: u8) -> bool {
         let scene = self.scheduler.cancel_pending(why);
         let fill = self.scheduler.end_fills(why);
+        // A timed build is musical timing too: it is cancelled for the same reasons and
+        // glides back to the base it started from.
+        let build = self.cancel_build_for(why);
         // A scene's lanes go with the scene. A standalone edit is the user's
         // composition: a stop, a seek or a panic applies it at once rather than lose
         // it. Only a new track (or the deck handing over) withdraws it, because it was
@@ -1463,7 +1502,7 @@ impl Engine {
                 self.apply_patterns(edit, -1);
             }
         }
-        scene || fill
+        scene || fill || build
     }
 
     /// Cancel the scene-linked lanes, reporting `why`.
@@ -1701,6 +1740,9 @@ impl Engine {
     /// (-1 for Now or stopped). Gains, sends and effects glide to the new targets with
     /// their usual smoothing (ADR-013); nothing here jumps the audio. No allocation.
     fn commit_scene(&mut self, request_id: u32, values: &[f32; SCENE_LEN], step: i32) {
+        // A scene that lands over a timed build replaces it: the scene is complete, so
+        // nothing is restored and nothing is left half-built.
+        self.replace_build(request_id);
         self.commit_targets(values);
         if self.linked.as_ref().is_some_and(|l| l.link == request_id) {
             if let Some(l) = self.linked.take() {
@@ -1726,17 +1768,15 @@ impl Engine {
             c.muted = v[2] == 1.0;
             c.solo = v[3] == 1.0;
         }
+        // Through the base writers rather than the public setters, so committing a
+        // scene (or a build's landing) never counts as the user touching a slot.
         let fx = &values[scheduler::FX_BASE..];
-        self.set_filter(fx[0]);
-        self.set_filter_q(fx[1]);
-        self.set_bands(fx[2], fx[3], fx[4]);
-        self.set_echo_time(fx[5]);
-        self.set_echo_feedback(fx[6]);
-        self.set_echo_return(fx[7]);
-        self.set_reverb_mix(fx[8]);
-        self.set_reverb_decay(fx[9]);
-        self.set_width(fx[10]);
-        self.set_stereo_balance(fx[11]);
+        self.put_fx(0, fx[0]);
+        self.put_fx(1, fx[1]);
+        self.put_bands(fx[2], fx[3], fx[4]);
+        for (j, &v) in fx.iter().enumerate().skip(5) {
+            self.put_fx(j, v);
+        }
     }
 
     /// Schedule every hit on `step` into the voice pool.
@@ -1916,18 +1956,21 @@ impl Engine {
     }
 
     pub fn set_muted(&mut self, stem: Stem, muted: bool) {
+        self.touch_stem(stem.index(), 2);
         if let Some(c) = self.channels.get_mut(stem.index()) {
             c.muted = muted;
         }
     }
 
     pub fn set_solo(&mut self, stem: Stem, solo: bool) {
+        self.touch_stem(stem.index(), 3);
         if let Some(c) = self.channels.get_mut(stem.index()) {
             c.solo = solo;
         }
     }
 
     pub fn set_volume(&mut self, stem: Stem, vol: f32) {
+        self.touch_stem(stem.index(), 0);
         if let Some(c) = self.channels.get_mut(stem.index()) {
             if vol.is_finite() {
                 c.vol = vol.clamp(0.0, 1.0);
@@ -1938,6 +1981,7 @@ impl Engine {
     /// A stem's echo send, 0 to 1. Each stem starts at its own amount
     /// ([`Stem::send`]), and loading a track puts it back there.
     pub fn set_send(&mut self, stem: Stem, amount: f32) {
+        self.touch_stem(stem.index(), 1);
         if let Some(c) = self.channels.get_mut(stem.index()) {
             if amount.is_finite() {
                 c.send = amount.clamp(0.0, 1.0);
@@ -2044,6 +2088,9 @@ fn stem_from_index(index: usize) -> Option<Stem> {
 
 #[cfg(test)]
 mod scene_tests;
+
+#[cfg(test)]
+mod build_tests;
 
 #[cfg(test)]
 mod perform_tests;

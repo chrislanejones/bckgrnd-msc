@@ -211,7 +211,18 @@ export type Compare = {
   beforeActive: { slot: SceneSlotId; mix: SceneMix } | null;
 };
 
-export type RequestStatus = 'sending' | 'queued' | 'applied' | 'cancelled' | 'replaced' | 'rejected';
+export type RequestStatus =
+  | 'sending'
+  | 'queued'
+  | 'building'
+  | 'applied'
+  | 'cancelled'
+  | 'replaced'
+  | 'rejected';
+
+/** How many bars a timed build rises over (docs/NIGHT7_PROTOCOL.md). */
+export type BuildBars = 2 | 4 | 8;
+export const BUILD_BAR_CHOICES: readonly BuildBars[] = [2, 4, 8];
 
 export type SceneRequest = {
   requestId: number;
@@ -228,6 +239,12 @@ export type SceneRequest = {
   mix: SceneMix;
   /** The lanes the launch sets (Night 4), adopted as the working patterns on `applied`. */
   lanes?: ScenePatterns;
+  /**
+   * Set when the launch is a timed build (Night 7): the mix rises to the scene over
+   * `bars` bars instead of switching on one onset. `bar` is the bar of the build now
+   * playing (1 to `bars`) once it has started.
+   */
+  build?: { bars: BuildBars; bar?: number };
 };
 
 /** Engine event kinds (docs/NIGHT3_PROTOCOL.md). */
@@ -243,6 +260,13 @@ export const EVENT = {
   fillCancelled: 14,
   fillRejected: 15,
   gestureExpired: 21,
+  buildQueued: 41,
+  buildApplied: 42,
+  buildCancelled: 43,
+  buildReplaced: 44,
+  buildRejected: 45,
+  buildStarted: 46,
+  buildProgress: 47,
 } as const;
 
 /** Why something was refused or cancelled, in words for the status line. */
@@ -257,6 +281,15 @@ export const REASON: Record<number, string> = {
   8: 'already playing',
   9: 'the track changed',
   10: 'cancelled',
+};
+
+/**
+ * Why a build was not started, where a scene's wording would mislead: a build is
+ * refused (not cancelled) during a scratch, brake or backspin, and needs playback.
+ */
+export const BUILD_REFUSAL: Record<number, string> = {
+  3: 'not while the deck is scratched or braking',
+  7: 'press Play first',
 };
 
 export type EngineEvent = { kind: number; id: number; a: number; b: number };
@@ -278,7 +311,8 @@ export function readEvents(flat: ArrayLike<number>): EngineEvent[] {
  */
 export function foldSceneEvent(request: SceneRequest, event: EngineEvent): SceneRequest {
   if (event.id !== request.requestId) return request;
-  if (request.status !== 'sending' && request.status !== 'queued') return request;
+  if (!isPending(request)) return request;
+  if (request.build) return foldBuildEvent(request, request.build, event);
   switch (event.kind) {
     case EVENT.sceneQueued:
       return { ...request, status: 'queued', bar: event.a };
@@ -295,6 +329,58 @@ export function foldSceneEvent(request: SceneRequest, event: EngineEvent): Scene
   }
 }
 
+/**
+ * The same fold for a timed build (kinds 41-47, docs/NIGHT7_PROTOCOL.md). `started`
+ * is bar 1 of n and `progress` carries the bar now playing; neither settles it.
+ */
+function foldBuildEvent(
+  request: SceneRequest,
+  build: NonNullable<SceneRequest['build']>,
+  event: EngineEvent,
+): SceneRequest {
+  switch (event.kind) {
+    case EVENT.buildQueued:
+      return request.status === 'sending' ? { ...request, status: 'queued', bar: event.a } : request;
+    case EVENT.buildStarted:
+      return { ...request, status: 'building', build: { ...build, bar: 1 } };
+    case EVENT.buildProgress:
+      return { ...request, status: 'building', build: { ...build, bar: event.a } };
+    case EVENT.buildApplied:
+      return { ...request, status: 'applied', build: { ...build, bar: build.bars } };
+    case EVENT.buildCancelled:
+      return { ...request, status: 'cancelled', reason: event.a };
+    case EVENT.buildReplaced:
+      return { ...request, status: 'replaced' };
+    case EVENT.buildRejected:
+      return { ...request, status: 'rejected', reason: event.a };
+    default:
+      return request;
+  }
+}
+
+/** Whether an engine event kind belongs to a scene launch or a timed build. */
+export const isLaunchEvent = (kind: number): boolean =>
+  (kind >= EVENT.sceneQueued && kind <= EVENT.sceneRejected) ||
+  (kind >= EVENT.buildQueued && kind <= EVENT.buildProgress);
+
 /** A pending request is one the engine may still apply. */
 export const isPending = (r: SceneRequest | null): r is SceneRequest =>
-  r !== null && (r.status === 'sending' || r.status === 'queued');
+  r !== null && (r.status === 'sending' || r.status === 'queued' || r.status === 'building');
+
+/** The inverse of `sceneVector`: the mix a 44-value engine vector describes. */
+export function mixFromVector(values: ArrayLike<number>): SceneMix {
+  const stems = {} as Record<StemId, StemSettings>;
+  STEMS.forEach((id, i) => {
+    stems[id] = {
+      volume: Number(values[4 * i]),
+      send: Number(values[4 * i + 1]),
+      muted: Number(values[4 * i + 2]) > 0.5,
+      solo: Number(values[4 * i + 3]) > 0.5,
+    };
+  });
+  const params = {} as Record<ParamId, number>;
+  SCENE_PARAMS.forEach((id, j) => {
+    params[id] = Number(values[STEMS.length * 4 + j]);
+  });
+  return { params, stems };
+}

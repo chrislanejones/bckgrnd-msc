@@ -403,6 +403,8 @@ export function App() {
                 modified={inst.sceneModified}
                 request={inst.sceneRequest}
                 timing={inst.sceneTiming}
+                buildBars={inst.buildBars}
+                onBuildBars={inst.setBuildBars}
                 unavailable={inst.mixing ? 'Available after mix' : inst.sceneRestoring ? 'Restoring previous mix' : null}
                 onTiming={inst.setSceneTiming}
                 onLaunch={inst.launchScene}

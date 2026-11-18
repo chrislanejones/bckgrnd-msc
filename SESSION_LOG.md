@@ -172,3 +172,65 @@ testable in Rust before any UI depended on them.
 
 See the Night 4 entries in `PARKING_LOT.md` and "Not done" under Night 4 in
 `docs/ROADMAP.md`.
+
+# Night 7 session log: timed builds (engine + worklet plumbing)
+
+Branch `night7/timed-build`, worktree `~/ai-repo/bckgrnd-night7-build`, from main at
+`16bb059`, 11-17-2026. Protocol: `docs/NIGHT7_PROTOCOL.md`. No UI, PHP or track
+changes; Dara writes the ADR.
+
+## Decisions
+
+| Decision | Why |
+|---|---|
+| `queue_build(id, bars, target, land) -> u8`, `cancel_build(id) -> bool`, `base_into` | One request holds both vectors, so one cancel withdraws both. An empty `land` means no landing, so there's no Option across the wasm ABI. |
+| Always starts on the next bar line, no timing code | A build that starts off the bar ends off the bar, and the landing would miss the downbeat. |
+| Linear per onset, in each control's own space | The filter knob is already exponential in Hz, so a straight line in knob space is an even rise in octaves. ADR-013 glides fill in between onsets. |
+| Unmute at the start (fader from 0), mute at the end (fader to 0), solo and echo time at the end | Every switch happens where the stem is silent, or at the boundary. |
+| A scene that commits over a build replaces it, with no restore | Latest wins. The scene is complete, so nothing half-built remains, and cancelling the scene before it lands leaves the build running. |
+| A build replaces a pending scene and a waiting or running build | Latest wins. A running build hands over where it got to, and a cancel still goes back to before both. |
+| A control moved during a build is taken out of it | Otherwise the next onset fights the user's hand. |
+| The base during a build is the interpolated value | A released gesture lands on what is playing, and capture reads that. |
+
+## Gates
+
+| Gate | Result |
+|---|---|
+| `cargo fmt --check`, `cargo clippy --all-targets -D warnings` | clean |
+| `cargo test --release` | 277 pass (259 before, 18 new in `build_tests.rs`, none changed) |
+| wasm size | 231,072 → 239,321 bytes (+8,249) |
+| render timing, 60 s of Warehouse | 1268–1281 ms before, 1260–1270 ms after |
+| `pnpm run typecheck`, `pnpm run build:netlify` | pass |
+| `verify:desktop` | pass, 9/9 steps (498 ok), including the two new build checks in `verify-audio`. The first run failed one editor check ("velocity: held arrow is one undoable gesture") while another session's heavy job held the machine. It passed 3/3 standalone (73/73), then the full suite passed. Keyboard-repeat timing under load; no editor code changed. |
+| `verify:web` | pass, 7/7 steps (142 ok) |
+
+# Night 7 session log: the Rise button (timed builds in the UI)
+
+Branch `night7/build-ui`, worktree `~/ai-repo/bckgrnd-night7-buildui`, from
+`night7/timed-build` (`2028030`) with `night7/density` merged in (parking-lot sections
+both kept), 11-17-2026. Protocol: `docs/NIGHT7_PROTOCOL.md`, "The UI: Rise".
+
+## Decisions
+
+| Decision | Why |
+|---|---|
+| A fourth **Switch on** choice, Rise, plus 2 · 4 · 8 bars, instead of a separate Build pad | You pick the scene to rise into with the pad you'd press anyway, and Shift+1–4 work unchanged. |
+| Called Rise in the UI, build in code and protocol | One factory scene is already called Build. |
+| A build is a `SceneRequest` with `build: {bars, bar}` | Cancel, the other pads, Compare A/B and the status line already handle a pending request. |
+| The worklet streams `buildBase` (~30 Hz, plus a final one before applied or cancelled) | The knobs move with the rise, and capture, Compare and Save read the moving mix. |
+| A control the user moves during a rise is theirs, on screen as in the engine | The host sees a value it didn't show and stops moving it. A snapshot React hasn't rendered yet doesn't count. |
+| `buildShownId` kept apart from `buildPendingId` in the worklet | Stop, panic and the host cancel clear the pending id before `build cancelled` is drained, so the knobs didn't glide back (caught by verify-ui). |
+| Stopped: a Rise press only says to press Play | The engine refuses it (reason 7) anyway. |
+
+## Gates
+
+| Gate | Result |
+|---|---|
+| `check-scenes` | pass, 12 new build checks |
+| `pnpm run typecheck` | pass |
+| `pnpm run build:netlify` | pass (engine unchanged) |
+| `verify:web` | pass, 7/7 steps (153 ok) |
+| `verify:desktop` | pass, 9/9 steps (523 ok), with 14 new Rise checks in `verify-ui` |
+| 1440 × 900 scene toolbar | 74 px with Rise off and with Rise on (no growth) |
+| 1280 × 800 | +38 px while Rise is on (parked) |
+| 390 phone | Switch on uses Beat / Bar short labels; the bars row adds 56 px while Rise is on |

@@ -3678,6 +3678,27 @@ html[data-control-drag="yes"] * {
   }
 }
 
+/* Building: a solid acid border and a rule along the foot that fills bar by bar
+   (--build-progress, 1/n to n/n). The words carry it too, so reduced motion and
+   forced colors lose nothing. */
+.scene-slot[data-state="building"] .scene-pad {
+  border-color: var(--color-acid);
+  background:
+    linear-gradient(var(--color-acid), var(--color-acid)) left bottom / calc(var(--build-progress, 0) * 100%) 3px no-repeat,
+    color-mix(in srgb, var(--color-acid) 4%, var(--color-surface));
+  transition: background-size 240ms ease-out;
+}
+
+.scene-slot[data-state="building"] .scene-line {
+  color: var(--color-acid);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .scene-slot[data-state="building"] .scene-pad {
+    transition: none;
+  }
+}
+
 .scene-slot[data-state="unavailable"] .scene-pad {
   opacity: 0.5;
   cursor: not-allowed;
@@ -3808,6 +3829,24 @@ html[data-control-drag="yes"] * {
 
 .scene-rename-input[aria-invalid="true"] {
   border-color: var(--color-danger);
+}
+
+/* Rise's bar count: a short joined 2 · 4 · 8 beside Switch on, with "bars" after it.
+   Its label ("Rise over") is for assistive technology; the row reads without it. */
+.scene-build-bars {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.scene-build-bars > .segmented-block {
+  grid-template-columns: auto;
+  align-items: center;
+}
+
+.scene-build-unit {
+  color: var(--color-muted);
+  font-size: var(--text-label);
 }
 
 /* The toolbar: Switch on, Drum fill and Cancel, then Compare A/B. Compare shares the

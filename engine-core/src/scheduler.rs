@@ -189,6 +189,15 @@ pub mod event {
     pub const PATTERNS_CANCELLED: u8 = 33;
     pub const PATTERNS_REPLACED: u8 = 34;
     pub const PATTERNS_REJECTED: u8 = 35;
+    /// Timed builds (`docs/NIGHT7_PROTOCOL.md`). 41-45 mean what 1-5 mean for a
+    /// scene; 46 and 47 are the build's own.
+    pub const BUILD_QUEUED: u8 = 41;
+    pub const BUILD_APPLIED: u8 = 42;
+    pub const BUILD_CANCELLED: u8 = 43;
+    pub const BUILD_REPLACED: u8 = 44;
+    pub const BUILD_REJECTED: u8 = 45;
+    pub const BUILD_STARTED: u8 = 46;
+    pub const BUILD_PROGRESS: u8 = 47;
 }
 
 /// Reason codes, carried by `cancelled` and `rejected` events and returned by
@@ -528,6 +537,19 @@ impl Scheduler {
             self.cancel_pending(reason::USER)
         } else {
             false
+        }
+    }
+
+    /// Drop the pending scene because request `by` (a timed build) superseded it,
+    /// reporting `replaced`. False if none was pending.
+    pub fn replace_pending(&mut self, by: u32) -> bool {
+        match self.scene.take() {
+            Some(p) => {
+                self.events
+                    .push(event::SCENE_REPLACED, p.request_id, by as f64, 0.0);
+                true
+            }
+            None => false,
         }
     }
 
