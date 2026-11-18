@@ -107,7 +107,7 @@ them, not ad-hoc values.
 | Radii | `--radius-control` 0.875rem (pads, panels) · pills use `999px` |
 | Type | `--text-label` 0.6875rem uppercase, tracked 0.1em, for control labels · `--text-value` 0.8125rem tabular for readouts · body 0.875rem |
 | Focus | 2 px acid outline at 2 px offset, `:focus-visible` only. Never removed, never recolored. |
-| Density | `--panel-pad-y` · `--section-gap` · `--heading-gap` · `--card-pad-y` · `--toolbar-h` · `--button-sm-h` · `--group-gap` (see Density, below) |
+| Density | `--panel-pad-y` · `--section-gap` · `--heading-gap` · `--card-pad-y` · `--toolbar-h` · `--button-sm-h` · `--group-gap` · `--knob-size` (see Density, below) |
 
 ## Density
 
@@ -143,6 +143,7 @@ instead of their own fixed padding:
 | `--toolbar-h` | 34 px | 44 px | One row of related actions |
 | `--button-sm-h` | 32 px | 44 px | Text buttons and segments inside a toolbar |
 | `--group-gap` | 6 px | 8 px | Between controls in one group |
+| `--knob-size` | 48 px | 56 px | A knob's dial, so the docked inspector fits 1440 × 900 |
 
 **Review rule.** Before approving a redesign, count the interactive controls fully
 visible in a fixed 1440 × 900 desktop viewport, before and after, without scrolling.
@@ -173,11 +174,15 @@ on desktop and lead with their name, then a short sound cue, then a miniature pr
 of their eight stored levels beside the card's state. Preview bars respect cuts and
 solos; custom captures never keep a misleading factory description. The panel
 header holds the scene status line and a small Shift 1–4 tag. Under the cards, one
-toolbar row holds Switch on (Now, Next beat, Next bar as one segmented control),
-Drum fill and Cancel, and Compare A/B joins that row when it fits. Compare A/B is
-one strip set off by a rule: dashed capture buttons become listening buttons with
-headphone icons, and a single short hint gives the next comparison step. Current,
-modified, and queued states use both text and visual treatment.
+toolbar row holds Switch on (Now, Next beat, Next bar, Rise as one segmented control,
+with a 2 · 4 · 8 bars picker beside it while Rise is on), Drum fill and Cancel, and
+Compare A/B joins that row when it fits. Compare A/B is one strip set off by a rule:
+dashed capture buttons become listening buttons with headphone icons, and a single
+short hint gives the next comparison step. Current, modified, and queued states use
+both text and visual treatment.
+Once the scenes panel is 45rem or narrower, Switch on uses its short names (Now, Beat,
+Bar, Rise), as the phone does, so Rise never wraps the row; the full names stay the
+accessible names.
 Cancel clears the selected scene and returns to the mix from before scene choices.
 It stays available for an active scene even when nothing is queued.
 

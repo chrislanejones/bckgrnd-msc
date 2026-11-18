@@ -18,7 +18,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { applyChange, inverseOf, type LaneChange } from './editing';
-import { engine } from './engine';
+import { engine, ENGINE_EVENT } from './engine';
 import type { Deck } from './engine';
 import {
   LANE_IDS,
@@ -38,7 +38,13 @@ import {
 import type { TrackArrangement } from './types';
 
 /** Engine event kinds for pattern revisions (NIGHT4_PROTOCOL.md). */
-export const PATTERN_EVENT = { queued: 31, applied: 32, cancelled: 33, replaced: 34, rejected: 35 } as const;
+export const PATTERN_EVENT = {
+  queued: ENGINE_EVENT.patternsQueued,
+  applied: ENGINE_EVENT.patternsApplied,
+  cancelled: ENGINE_EVENT.patternsCancelled,
+  replaced: ENGINE_EVENT.patternsReplaced,
+  rejected: ENGINE_EVENT.patternsRejected,
+} as const;
 
 export type ChangeState = 'none' | 'sending' | 'queued' | 'audible' | 'cancelled' | 'rejected';
 

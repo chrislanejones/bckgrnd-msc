@@ -43,7 +43,7 @@ function findChromium() {
     return process.env.PLAYWRIGHT_CHROMIUM;
   }
   const cache = join(homedir(), '.cache', 'ms-playwright');
-  let entries = [];
+  let entries;
   try {
     entries = readdirSync(cache);
   } catch {
@@ -486,6 +486,32 @@ try {
           { name: 'restored', from: 3.0 * bar, to: 3.9 * bar, hf: 3000 },
         ],
       });
+      // A rise into a scene whose captured lanes differ: the kick alone and dry (no echo
+      // or room tail to wait out), and a 2-bar build that changes nothing audible but
+      // carries a lane revision emptying the kick lane. The kick plays through the build
+      // and is gone from its end bar line (bar 3's): the lanes land with the build, not a
+      // bar later.
+      const kickOnly = [];
+      stems.forEach((id, i) => kickOnly.push(track.mix[id], i === 0 ? 0 : 0.1, 0, i === 0 ? 1 : 0));
+      kickOnly.push(1, 0.85, 1, 1, 1, 0.75, 0.3, 0.24, 0.07, 0.32, 1, 0.5);
+      const noKick = new Float32Array(1 + 3 + 256);
+      noKick.set([1, 0, 0, 256]);
+      out.buildLanes = await measure({
+        ms: 4 * bar,
+        commands: [
+          { type: 'volume', index: 0, value: track.mix.kick },
+          { type: 'send', index: 0, value: 0 },
+          { type: 'solo', index: 0, value: true },
+        ],
+        timeline: [{
+          at: 0.3 * bar,
+          message: { type: 'build', requestId: 73, generation: 0, bars: 2, target: kickOnly, patterns: noKick, patternsId: 74 },
+        }],
+        windows: [
+          { name: 'rising', from: 2.2 * bar, to: 2.95 * bar },
+          { name: 'landed', from: 3.35 * bar, to: 3.95 * bar },
+        ],
+      });
       out.bar = bar;
     }
 
@@ -696,6 +722,31 @@ try {
         c.errors.length === 0 &&
         c.nonFinite === 0,
       `above 3 kHz: dark ${db(ch.dark.power, ch.before.power)} dB, restored ${db(ch.restored.power, ch.before.power)} dB; events ${cEvents.map((e) => e.kind).join(',')}`,
+    );
+  }
+
+  {
+    // A rise's lanes land on its end bar line: `patterns applied` on the same step as
+    // `build applied`, ahead of it in the same batch, and the kick is gone after it.
+    const r = result.buildLanes;
+    const batches = r.messages
+      .filter((m) => m.type === 'sceneEvents')
+      .map((m) => {
+        const out = [];
+        for (let k = 0; k + 3 < m.events.length; k += 4) out.push({ kind: m.events[k], id: m.events[k + 1], a: m.events[k + 2] });
+        return out;
+      });
+    const end = batches.find((b) => b.some((e) => e.kind === 42 && e.id === 73)) ?? [];
+    const lanes = end.findIndex((e) => e.kind === 32 && e.id === 74);
+    const built = end.findIndex((e) => e.kind === 42 && e.id === 73);
+    const withdrawn = batches.flat().some((e) => e.kind === 33 && e.id === 74);
+    check(
+      "a rise's captured lanes land on its end bar line, with the build",
+      lanes >= 0 && lanes < built && end[lanes].a === end[built].a && end[built].a % 16 === 0 &&
+        !withdrawn &&
+        r.windowPeak.rising > 0.01 && r.windowPeak.landed < 1e-3 &&
+        r.errors.length === 0 && r.nonFinite === 0,
+      `lanes on step ${end[lanes]?.a}, build on step ${end[built]?.a}; kick peak rising ${r.windowPeak.rising.toFixed(4)}, landed ${r.windowPeak.landed.toExponential(2)}${r.errors.length ? ` errors: ${r.errors.join('; ')}` : ''}`,
     );
   }
 

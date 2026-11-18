@@ -53,6 +53,11 @@ export const ENGINE_EVENT = {
   fillCancelled: 14,
   fillRejected: 15,
   gestureExpired: 21,
+  patternsQueued: 31,
+  patternsApplied: 32,
+  patternsCancelled: 33,
+  patternsReplaced: 34,
+  patternsRejected: 35,
   buildQueued: 41,
   buildApplied: 42,
   buildCancelled: 43,
@@ -100,6 +105,10 @@ export type GestureKind = (typeof GESTURE_KIND)[keyof typeof GESTURE_KIND];
  * | fillStarted | step | 0 |
  * | fillEnded | step the track's drums resume on (-1 when cut short) | 0, or the reason it was cut short |
  * | gestureExpired | gesture kind (`GESTURE_KIND`) | 0 |
+ * | patternsQueued | predicted bar (1-based) | predicted step |
+ * | patternsApplied | step it landed on (-1 off the grid: stopped, stop, panic, a jump) | 0 |
+ * | patternsCancelled, patternsRejected | reason (`ENGINE_REASON`) | 0 |
+ * | patternsReplaced | request id that replaced it | 0 |
  * | buildQueued | predicted bar it starts on (1-based) | predicted step |
  * | buildStarted | step it started on | bars |
  * | buildProgress | bar now playing, 2..bars | bars |
@@ -631,6 +640,10 @@ export class EngineHost {
    * arrive through `onSceneEvents`: `buildQueued`, `buildStarted`, `buildProgress` once
    * per bar from bar 2, then `buildApplied`; or `buildRejected`, `buildCancelled` or
    * `buildReplaced`. Only `buildApplied` means the target (and the landing) is the mix.
+   *
+   * `patterns` are the lanes the build sets, compiled, as for `queueScene`: they commit
+   * on the build's end onset, after the landing and before that step's notes, and are
+   * withdrawn (kinds 31-35) if the build is cancelled, rejected or replaced.
    */
   queueBuild(
     requestId: number,
@@ -638,6 +651,7 @@ export class EngineHost {
     target: ArrayLike<number>,
     generation: number,
     land?: ArrayLike<number>,
+    patterns?: { requestId: number; data: Float32Array },
   ): void {
     this.post({
       type: 'build',
@@ -646,6 +660,7 @@ export class EngineHost {
       bars,
       target: Array.from(target),
       ...(land ? { land: Array.from(land) } : {}),
+      ...(patterns ? { patterns: patterns.data, patternsId: patterns.requestId } : {}),
     });
   }
 

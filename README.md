@@ -85,9 +85,9 @@ read `netlify.toml`.
 
 | Area | What's there |
 |---|---|
-| Transport (top, always visible) | Play/stop, the track, the song part and bar, the tempo, the master meter with a clip light, and whether the mix differs from the track as written. Projects shows the saved revision or unsaved changes and opens saving, recovery and export. |
+| Transport (top, always visible) | Play/stop, Panic, the track, the song part and bar, the tempo, the master meter with a clip light, and whether the mix differs from the track as written. Projects shows the saved revision or unsaved changes and opens saving, recovery and export. |
 | Library (left) | Tracks by section and style, with a star to keep favorites (stored in this browser only). On narrower screens it opens from the button in the transport. |
-| Performance area (middle) | The two decks, the scene strip, the stems, the jog wheel and pads, loop, Release FX and Panic, and mixing to the next track. |
+| Performance area (middle) | The two decks, the scene strip, the stems, the jog wheel and pads, loop, Release FX, and mixing to the next track. |
 | Inspector (right) | **Master**: the effects rack, all knobs except the echo's note divisions. Select a stem's name to see that stem instead: its fader, its echo send, Solo and Cut. |
 | Pattern editor (bottom) | Opened with **Edit patterns** beside the sound controls. Edit the drums, bass and lead one bar at a time while the track plays; see [Editing patterns](#editing-patterns). Escape closes it. |
 
@@ -205,6 +205,25 @@ hand.
 | Available after mix | Scenes wait while Auto mix is running. |
 
 While stopped, a scene applies at once and playback stays stopped.
+
+**Rise** is the fourth Switch on choice. Pick 2, 4 or 8 bars beside it, then press a
+pad: instead of switching on one step, the mix climbs into that scene over that many
+bars, starting on the next bar line and ending exactly on a bar line. Every level and
+knob moves in a straight line, one step at a time, and you can watch the knobs turn.
+Sounds the scene brings in fade up from silent; sounds it cuts fade out and switch off
+at the end. Pattern lanes the scene changes land on the bar where the rise ends.
+
+| What the pad says | Meaning |
+|---|---|
+| Rise · Bar 5 | It starts climbing at bar 5. Press the pad again to cancel. |
+| Rising · 2 of 4 | Bar 2 of 4. The line along the bottom of the pad fills bar by bar. |
+| Active | It got there. |
+
+Press a rising pad again and the mix glides back to where it started. A knob or fader
+you move during a rise is yours from then on: the rise stops driving it, a cancel
+leaves it alone, and the scene reads Active · Modified when it lands. A rise needs
+playback, and Stop, a seek, a scratch, a brake, a track change or Panic cancel it.
+Press another pad and that one takes over from wherever the mix got to.
 
 **Cancel** clears the active scene and any queued launch, then immediately restores
 the mix from before you started choosing scenes. It also restores any pattern lanes
@@ -363,7 +382,7 @@ Three ways out, kept apart on purpose:
 |---|---|
 | Cancel (scene strip) | Clears the scene selection and queued launch, restoring the mix from before scene choices. |
 | Release FX (under the pads) | Lets go of a held Echo or Filter. The mix stays exactly as it is. |
-| Panic (under the pads) | Stops both decks, cancels the queued scene and fill, lets go of every held effect, clears the echo and room tails, and abandons a running Auto mix. |
+| Panic (in the transport; in the bottom dock on phones) | Stops both decks, cancels the queued scene and fill, lets go of every held effect, clears the echo and room tails, and abandons a running Auto mix. |
 
 ## Controls
 
@@ -396,7 +415,7 @@ The continuous controls in the inspector are knobs. Each one:
 | Echo send (per stem) | How much of the stem feeds the echo. Each stem starts at its own amount and goes back there with a new track. |
 | Master meter | Left and right peak of what leaves the engine, in the transport. Turns amber near the limiter. The **Clip** light holds for two seconds after any sample goes past full scale, which can only happen while a crossfade adds two decks together. |
 | Space | Play / stop. |
-| Shift+1–4 | Launch Full, Sparse, Build or Drop, on the Switch on timing. Not while typing or with a knob focused. |
+| Shift+1–4 | Launch Full, Sparse, Build or Drop, on the Switch on timing (or rise into it, with Rise on). Not while typing or with a knob focused. |
 
 Nothing moves the sound in a step. Every fader, cut, solo, send and knob glides
 over 12–30 ms in the engine, so cutting a stem mid-note, slamming a fader or
@@ -462,7 +481,9 @@ files on disk ([ADR-002](docs/adr/002-laravel-runs-stateless.md)).
 | `cargo fmt --check --manifest-path engine-core/Cargo.toml` | Formatting. |
 | `cargo clippy --all-targets --manifest-path engine-core/Cargo.toml -- -D warnings` | Must be clean. |
 | `cargo test --release --manifest-path engine-core/Cargo.toml` | The engine. |
+| `cargo bench --bench render --manifest-path engine-core/Cargo.toml` | 60 s of Warehouse, plain, under back-to-back builds, and with build lanes. Best of 7, in ms. Compare cases from the same run. |
 | `pnpm run typecheck` | `tsc --noEmit`. |
+| `pnpm run lint` | ESLint over the front end and the tools. Errors fail; hook-dependency warnings don't. |
 | `composer test:php` | PHPUnit: the song form for every track, the API, the static export matching the API, presets, and the project contract. |
 | `pnpm run check:contract` | The UI's project reader against the same fixtures as PHP's, scenes included. |
 | `pnpm run check:scenes` | The scene logic: the vector order, captures copied and not shared, revisions, and a settled request staying settled. |
@@ -473,7 +494,7 @@ files on disk ([ADR-002](docs/adr/002-laravel-runs-stateless.md)).
 | `pnpm run verify:static` | The same, against the static build, plus no API calls and the variation catalog. |
 | `pnpm run verify:projects` | Save/reopen/export, Cancel restoration, failure, recovery, migrations and preview exclusion. |
 | `pnpm run check:dist` | Audits `dist/` without a browser: required assets, nothing PHP/env/vendor, manifest hashes, and the same engine/worklet/contracts/renderer/library as the desktop build. |
-| `pnpm run verify:web` | The Netlify distribution end to end: shared gates, `check:dist`, then `verify:static` and `verify:projects` against `dist/` on a plain static server. Build with `build:netlify` first. |
+| `pnpm run verify:web` | The Netlify distribution end to end: shared gates (lint included), `check:dist`, then `verify:static` and `verify:projects` against `dist/` on a plain static server. Build with `build:netlify` first. |
 | `pnpm run verify:desktop` | The desktop distribution: shared gates, PHPUnit, then the UI/editor/audio/project checks against `artisan serve`; `VERIFY_NATIVE=1` adds the installed-app check. |
 | `node tools/verify-transitions.mjs` | Actual forward playback across Break and Drop, with bounded event conditions. |
 | `node tools/verify-resume.mjs` | Simulated audio interruption and failed/successful resume. |

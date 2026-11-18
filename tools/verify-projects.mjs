@@ -160,6 +160,11 @@ try {
     await page.waitForTimeout(100);
   }
   await page.reload(); await page.waitForFunction(() => !!window.__BCKGRND_PROJECT__?.()); await menu();
+  // Each row says when it was last written, MM-DD-YYYY, newest first.
+  const rowText = await page.locator('li', { hasText: 'Preview accepted' }).first().textContent();
+  assert.match(rowText, /· r\d+ · \d{2}-\d{2}-\d{4} \d{1,2}:\d{2} (AM|PM)/, rowText);
+  const stamps = await page.locator('dialog li time').evaluateAll((els) => els.map((el) => Date.parse(el.getAttribute('datetime'))));
+  assert.ok(stamps.every((t, i) => i === 0 || stamps[i - 1] >= t), `rows newest first: ${stamps.join(', ')}`);
   await page.locator('li', { hasText: 'Preview accepted' }).getByRole('button', { name: /^Recover r/ }).last().click();
   await page.waitForFunction(() => document.querySelector('[data-testid="project-status"]')?.textContent?.includes('Opened Recovery café'));
   assert.equal(await page.locator('.app').getAttribute('data-playing'), 'no');

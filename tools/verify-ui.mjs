@@ -372,6 +372,13 @@ try {
     const cdp = await page.context().newCDPSession(page);
     const touch = async (type, x, y) =>
       cdp.send('Input.dispatchTouchEvent', { type, touchPoints: type === 'touchEnd' || type === 'touchCancel' ? [] : [{ x, y }] });
+    // Output folds by default; its heading opens it, and says it is open.
+    const outputToggle = page.locator('.inspector-fold-toggle');
+    check('Output starts folded, with its values on the heading',
+      (await outputToggle.getAttribute('aria-expanded')) === 'false' && !(await knob('Width').isVisible()),
+      (await outputToggle.textContent())?.trim());
+    await outputToggle.click();
+    check('its heading opens Output', (await outputToggle.getAttribute('aria-expanded')) === 'true' && (await knob('Width').isVisible()));
     const w = await dialCenter('Width');
     const w0 = await norm('Width');
     before = await edits();

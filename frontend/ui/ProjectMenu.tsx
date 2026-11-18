@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { FolderOpen } from 'lucide-react';
 import type { useProjects } from '../lib/projects';
+import type { ProjectRecord } from '../lib/project-store';
 import { StatusIndicator } from './controls';
 
 export function ProjectMenu({ projects: p }: { projects: ReturnType<typeof useProjects> }) {
@@ -58,20 +59,33 @@ export function ProjectMenu({ projects: p }: { projects: ReturnType<typeof usePr
       <p className="text-xs text-muted">Saved on this device. Download a project file to move it to the desktop or MCP. A/B captures stay in this session; Keep current or capture a scene to preserve a comparison.</p>
       <p className="text-xs text-muted">Build <code title={__BUILD_ID__}>{__BUILD_ID__.slice(0, 12)}</code> · project v3 · snapshot v1</p>
       {p.records.length === 0 && <p className="empty-note" data-testid="projects-empty">No saved projects yet. Save project keeps this one on this device.</p>}
-      <ul>{p.records.map((r) => {
+      <ul>{[...p.records].sort((x, y) => lastTouched(y) - lastTouched(x)).map((r) => {
         const s = r.current ?? r.recovery!;
+        const when = new Date(lastTouched(r));
         return <li key={s.id}>
-          <span>{s.project.name} · r{s.revision}</span>
+          <span>{s.project.name} · r{s.revision} · <time dateTime={when.toISOString()}>{shortDate(when)}</time></span>
           {r.current && <button disabled={!!p.blocked} onClick={() => {
             // Editing the older copy eventually replaces the newer unsaved one.
             const newer = r.recovery && r.recovery.revision > r.current!.revision;
             if (!newer || window.confirm(`${s.project.name} has unsaved work at r${r.recovery!.revision}. Open the older saved r${r.current!.revision} anyway? Editing it will replace that work. Choose Cancel, then Recover, to keep it.`)) void p.open(r.current);
           }}>Open</button>}
-          {r.recovery && <button disabled={!!p.blocked} onClick={() => void p.open(r.recovery)}>Recover r{r.recovery.revision}</button>}
+          {r.recovery && <button disabled={!!p.blocked} title={`Unsaved work from ${shortDate(new Date(r.recovery.savedAt))}`} onClick={() => void p.open(r.recovery)}>Recover r{r.recovery.revision}</button>}
           {r.previous && <button disabled={!!p.blocked} onClick={() => void p.open(r.previous)}>Previous r{r.previous.revision}</button>}
           <button onClick={() => { if (window.confirm(`Delete saved copies of ${s.project.name}?`)) void p.remove(s.id); }}>Delete</button>
         </li>;
       })}</ul>
     </dialog>
   </>;
+}
+
+/** The newest time anything in a row was written (a save or a recovery copy), in ms. */
+function lastTouched(r: ProjectRecord): number {
+  return Math.max(...[r.current, r.recovery].map((s) => (s ? Date.parse(s.savedAt) || 0 : 0)));
+}
+
+/** MM-DD-YYYY h:mm AM, the house format for a date a person reads. */
+function shortDate(d: Date): string {
+  const p2 = (n: number) => String(n).padStart(2, '0');
+  const h = d.getHours() % 12 || 12;
+  return `${p2(d.getMonth() + 1)}-${p2(d.getDate())}-${d.getFullYear()} ${h}:${p2(d.getMinutes())} ${d.getHours() < 12 ? 'AM' : 'PM'}`;
 }

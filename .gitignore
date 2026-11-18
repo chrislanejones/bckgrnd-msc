@@ -31,11 +31,16 @@
 .idea
 .vscode
 *.swp
-# Laravel runtime caches and logs, all regenerated.
-/storage/framework/cache
-/storage/framework/sessions
+# Laravel runtime caches and logs, all regenerated. The folders themselves are kept
+# (a .gitkeep each): `php artisan serve` answers 500 ("Please provide a valid cache
+# path") in a fresh clone or worktree without them.
+/storage/framework/cache/*
+/storage/framework/sessions/*
+/storage/framework/views/*
+!/storage/framework/cache/.gitkeep
+!/storage/framework/sessions/.gitkeep
+!/storage/framework/views/.gitkeep
 /storage/framework/testing
-/storage/framework/views
 /storage/logs
 /dist
 .netlify

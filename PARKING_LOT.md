@@ -269,9 +269,9 @@ not. Things to settle before or while building it:
 - **The wasm here is a `--no-opt` build (270,638 bytes)** because wasm-opt can't be
   downloaded in this environment. It isn't comparable to Night 3's 222,709-byte
   optimized size. Measure the optimized build before release.
-- **Project menu leftovers from the 11-06-2026 audit.** Recovery rows have no date and
-  no order. Exported files are written at mode 0600. An aborted open can show a blank
-  "Open failed:". A queued scene blocks Save if audio dies, because the confirmation
+- **Project menu leftovers from the 11-06-2026 audit.** ~~Recovery rows have no date and
+  no order.~~ ~~Exported files are written at mode 0600.~~ ~~An aborted open can show a blank
+  "Open failed:".~~ (Dates, order and the blank message fixed 11-17-2026, `7c78240`; 0600 in rc.3.) A queued scene blocks Save if audio dies, because the confirmation
   never arrives. Nothing yet proves the web and desktop builds hash a track the same
   way, so a project may open with the library-changed warning when it moves between
   them, and the MCP would refuse it.
@@ -291,21 +291,13 @@ not. Things to settle before or while building it:
   predates the 11-11 compact pass (old 8px chips overflowed by 68px at 320, now 50px), and
   verify-ui's bar-overlap check compares element boxes, so it doesn't see text spilling out.
   The fix is a content decision: drop the readout below 380px, or move the meter. (Lacey, 11-11-2026)
-- **README still puts Panic "under the pads"** (README.md lines 90 and 364). Since the
-  11-11 compact pass it lives in the transport bar, and in the bottom dock on phones.
-  Docs pass for Dara. (Lacey, 11-11-2026)
+- ~~**README still puts Panic "under the pads"**~~ Fixed 11-17-2026 (`2157559`).
 
 ## Found in the rc.2 acceptance run (11-13-2026)
 
-- **The MCP's shared renderer is one change behind the app.** MCP `0.4.0-rc.1` vendors
-  `shared/runtime.js` and `snapshot.d.ts` from RC1. The app's copies now carry ADR-018's
-  optional `onSourceChanged` callback (`ecb3d41`). The MCP never passes it, so it still
-  refuses a changed library exactly as before, and engine, contracts, library and
-  fixtures all match byte for byte (55 of 57 vendored files). Resyncing means an MCP
-  `0.4.0-rc.2`; Chris decides whether that's needed for this release.
-- **`bckgrnd_render_project` gives a raw `ENOENT … mkdtemp` when the output folder
-  doesn't exist.** It should create the folder or say "the folder … doesn't exist".
-  (MCP repo.)
+- ~~**The MCP's shared renderer is one change behind the app.**~~ Resynced 11-17-2026 in bckgrnd-msc-mcp PR #1. It's still versioned `0.4.0-rc.1`; rc.2 is Chris's call.
+- ~~**`bckgrnd_render_project` gives a raw `ENOENT … mkdtemp` when the output folder
+  doesn't exist.**~~ Fixed 11-17-2026 in bckgrnd-msc-mcp PR #1: "The folder … doesn't exist."
 - **Narration under a hot voice peaks at -0.4 dBTP** when `final_lufs` isn't set (voice
   raised +5 dB to -16 LUFS). Fine for MP3 at that level, but close to the line; a
   default ceiling of about -1 dBTP would be safer. (MCP repo.)
@@ -327,43 +319,52 @@ not. Things to settle before or while building it:
 
 ## Found while adding the hip-hop tracks (11-16-2026)
 
-- **The MCP companion doesn't have Cipher or Boulevard.** `bckgrnd-msc-mcp` vendors its own copy of the library (`vendor/library/`), so `bckgrnd_list_tracks` and project renders won't know the two new tracks until its bundle is refreshed from this repo and republished.
+- ~~**The MCP companion doesn't have Cipher or Boulevard.**~~ In review 11-17-2026: bckgrnd-msc-mcp PR #1 syncs the library from `59995c1` (20 tracks, a Hip-hop section). Merge it after this repo's PR #5.
 
 ## Found in Night 7 (11-16-2026)
 
-- **The pattern drawer leaves room unused under its toolbar.** At 1440 × 900 the drum lanes fill about 500 of the drawer's fixed 608 px. The height is fixed on purpose (lane tabs stay put when switching lanes), so the fix is to size the drawer to its tallest lane, not to let it follow content. Design follow-up (Lacey).
-- **The docked inspector still scrolls at 1440 × 900.** After the density pass its content is 1007 px against an 824 px box, so the Output group needs a scroll. A four-across knob rack, or folding Output into a disclosure, would fit it. Design follow-up.
-- **The stems toolbar `title` now covers the Level / Solo / Cut legend.** The tooltip "Sound selection applies immediately; scenes use the timing selector." was written for the selection pills; since the legend joined that row it also shows over the legend. Move the `title` onto the selection's group. One-line markup change.
+- ~~**The pattern drawer leaves room unused under its toolbar.**~~ Fixed 11-17-2026 (`5d85754`): the body is fixed to the tallest lane; 608 → 523 px at 1440 × 900, and the tabs still don't move.
+- ~~**The docked inspector still scrolls at 1440 × 900.**~~ Fixed 11-17-2026 (`5fdecaf`): Output folds, Echo's divisions share its knob row, and dials are 48 px with a mouse. Content 1007 → 811 px in an 813 px box.
+- ~~**The stems toolbar `title` now covers the Level / Solo / Cut legend.**~~ Fixed 11-17-2026 (`0a63bc2`).
 - **The Switch on toolbar sits just under the fold at 1440 × 900.** The four scene cards are now in the first screen; the timing row starts about 900 px down. Getting it in would mean a shorter fader travel (11rem today) or folding the stems footer line. Left for Chris to weigh, because both touch performance controls.
-- **`verify:desktop` fails in a fresh worktree until Laravel's runtime folders exist.** `php artisan serve` answers 500 ("Please provide a valid cache path") because the gitignored `storage/framework/views`, `cache` and `sessions` folders are not created by `git worktree add`; the UI, editor and projects checks then time out waiting for `article.stem`. Creating the three empty folders fixed it (no env change). Worth a line in the worktree setup notes, or `.gitkeep` files.
+- ~~**`verify:desktop` fails in a fresh worktree until Laravel's runtime folders exist.**~~ Fixed 11-17-2026 (`a503b5a`): the three folders carry a `.gitkeep`.
 
 ## Found in Night 7 (11-17-2026)
 
-- **A landing scene can't carry pattern lanes.** `queue_build` takes a target and a
-  landing vector only, so a Drop that sets lanes (a scene's `patterns`) lands with
-  the current arrangement. Adding it means a `link` for the build's request id on
-  `queue_patterns`, applied in `build_onset` after the landing commits. Wait until the
-  UI asks for it.
+- ~~**A landing scene can't carry pattern lanes.**~~ Fixed 11-17-2026 (`21973fd`): a build takes linked lanes that commit on its end onset, after the landing.
 - **Builds step once per sixteenth.** Each onset sets the next value and the ADR-013
   glides fill in between. At slow tempos a deep filter build could step audibly (the
   30 ms filter glide finishes well inside a 214 ms step at 70 BPM). If anyone hears
   it, move the progress inside the step at control rate (`to_next / step_len`). The
   end points stay on onsets.
-- **`engine-core` has no `cargo bench` harness.** The rust-wasm-loop skill asks for
-  before/after benches on hot-path changes. Night 7 timed 60 s renders from a scratch
-  crate under `/tmp` instead. A `benches/render.rs` (60 s of a library track, no new
-  dependencies) would make that a single command.
-- **No eslint in this repo.** The global rule pairs `tsc --noEmit` with eslint for
-  TypeScript, but `package.json` has no eslint. Only the typecheck ran.
-- **`ENGINE_EVENT` in `frontend/lib/engine.ts` has no pattern kinds (31-35).** The
-  doc table there skips them too. Night 7 added the build kinds (41-47) but left
-  this gap alone.
-- **Rise wraps the scene toolbar under 1440px.** At 1280 × 800 the 2 · 4 · 8 picker
-  pushes Drum fill and Cancel onto their own row while Rise is on (toolbar 74 → 112 px).
-  1440 × 900 is unchanged. Shorter Switch on labels (Beat / Bar) at that width, or
-  folding the bar count into the Rise pill, would keep it on one row. Design follow-up
-  (Lacey).
-- **A rise into a scene with captured patterns lands its lanes a bar late.** The build
-  request carries no lanes, so they are staged when it is applied and land on the next
-  bar line. The fix is the engine `link` noted above (lanes on a landing scene), driven
-  by the build's request id.
+- ~~**`engine-core` has no `cargo bench` harness.**~~ Fixed 11-17-2026 (`0a2c60a`): `cargo bench --bench render`, with no new dependencies.
+- ~~**No eslint in this repo.**~~ Fixed 11-17-2026 (`bd91868`): `pnpm run lint`, also a step in both verify suites. 0 errors; 5 warnings are parked below.
+- ~~**`ENGINE_EVENT` in `frontend/lib/engine.ts` has no pattern kinds (31-35).**~~ Fixed 11-17-2026 (`9988dfa`).
+- ~~**Rise wraps the scene toolbar under 1440px.**~~ Fixed 11-17-2026 (`f842533`): short Switch on names whenever the scenes panel is 45rem or narrower; 1280 × 800 stays at 74 px.
+- ~~**A rise into a scene with captured patterns lands its lanes a bar late.**~~ Fixed 11-17-2026 (`897223d`): they land on the end bar line with the build.
+
+## Found in the Night 7 follow-ups (11-17-2026)
+
+- **Around 1180px the scenes panel stacks, and Rise still adds a row there** (150 → 194 px).
+  The 45rem short-label rule covers 1280 and 1024; the stacked tier between them wasn't in
+  the brief. (Lacey)
+- **The inspector still scrolls at 1280 × 800 (724 px box, 811 content) and at 1024 × 768.**
+  1440 × 900 fits. (Lacey)
+- **The Output fold isn't remembered.** It starts folded every session, so Master level is a
+  click away after a reload. (Lacey)
+- ~~**`--knob-size` is a new density token**~~ Fixed 11-17-2026 (`8673480`).
+- **At 1366 × 640 the drawer body scrolls 23 px at rest** under its 78dvh cap. The follow-ups
+  didn't change this. (Lacey)
+- **Lanes staged for a refused request can strip a pending scene's.** Linked lanes go into
+  one staging slot before their scene or build is queued, so staging them replaces a
+  still-pending scene's lanes (`patterns replaced`). If the engine then refuses the new
+  scene or build (bad bars, mid-gesture), the earlier scene stays pending without its
+  lanes. This predates Night 7 (scenes do the same); builds inherit it. (Silas)
+- ~~**NIGHT4_PROTOCOL.md's message table lists only `scene` as carrying `patterns?`.**~~ Fixed 11-17-2026 (`8673480`).
+- **Bench numbers drift about 4% run to run on this shared machine.** Compare the
+  `build` and `lanes` cases against `plain` from the same run, not across runs. (Silas)
+- **Five `react-hooks/exhaustive-deps` warnings:** `instrument.ts` (idleDeck), `projects.ts`
+  (list), `Deck.tsx` (silenced), `Knob.tsx` and `VerticalFader.tsx` (historyId). Before
+  "fixing" each one, check whether leaving the dependency out was deliberate.
+- **Narration's default true-peak ceiling** (the rc.2 note above) changes what users hear,
+  so it waits for Chris.

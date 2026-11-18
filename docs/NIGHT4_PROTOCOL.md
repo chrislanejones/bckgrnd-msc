@@ -58,6 +58,7 @@ open hat, bass, stab, lead, pad, arp.
 | `patterns` | `requestId, generation, timing, data, deck?` | Stage a revision on the live deck. Coalesced like a parameter (`postParam('patterns')`): of several posted in one frame only the latest is sent, which is what "latest wins" means anyway. |
 | `cancelPatterns` | `requestId` | Withdraw a pending revision; answers `patternsCancelResult`. |
 | `scene` | adds `patterns?, patternsId?` | A launch's lanes, linked to the scene; queued with it (below). |
+| `build` | adds `patterns?, patternsId?` | A Rise's lanes, linked to the timed build and staged just before it; they commit on the build's end bar line, after its landing scene. See `docs/NIGHT7_PROTOCOL.md`. |
 | `audition` | `bar` | Hear Bar: jump the live deck to the bar and loop it. The only action that moves the playhead to what is being edited. |
 
 The worklet refuses a revision itself (event 35) for a malformed message, during an

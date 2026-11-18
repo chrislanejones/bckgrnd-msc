@@ -334,10 +334,11 @@ export function App() {
             views={['perform', 'mix']}
             className="stems-panel"
           >
-            <div className="stems-toolbar" title="Sound selection applies immediately; scenes use the timing selector.">
+            <div className="stems-toolbar">
               <Segmented
                 label="Stem selection · applies immediately"
                 hideLabel
+                title="Sound selection applies immediately; scenes use the timing selector."
                 value={inst.mask}
                 onPick={(m) => m !== 'custom' && inst.applyMask(m)}
                 options={[

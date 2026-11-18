@@ -170,7 +170,7 @@ export function useProjects(inst: Instrument) {
       setNotice(`Opened ${s.project.name} · r${s.revision} · stopped`);
       fileBehind.current = false;
       setSourceWarning(sourceChanged ? { id: s.id, text: `The ${s.project.trackId} track has changed in the library since ${s.project.name} was saved, so it may sound different. Your mix and edits are all here. Have a listen, then Save to keep it with the new track.` } : null);
-    } catch (e) { setNotice(`Open failed: ${(e as Error).message}`); }
+    } catch (e) { setNotice(`Open failed: ${reasonOf(e)}`); }
     finally { loading.current = false; refresh((v) => v + 1); }
   }
 
@@ -196,7 +196,7 @@ export function useProjects(inst: Instrument) {
   async function nativeOpen() {
     if (blocked) return;
     try { const result = await nativeAction('open'); if (!result.cancelled) await open(result.document); }
-    catch (e) { setNotice(`Open failed: ${(e as Error).message}`); }
+    catch (e) { setNotice(`Open failed: ${reasonOf(e)}`); }
   }
   useEffect(() => {
     const bridge = window.BckgrndDesktop; if (!bridge) return;
@@ -263,4 +263,12 @@ export function useProjects(inst: Instrument) {
       await open(projectFromTrack(latest.current.track), true);
     },
   };
+}
+
+/** A failure in words: an aborted or empty error still says something. */
+function reasonOf(e: unknown): string {
+  const err = e as Partial<Error> | undefined;
+  if (err?.message) return err.message;
+  if (err?.name === 'AbortError') return 'it was interrupted before it finished.';
+  return 'no reason was given.';
 }
