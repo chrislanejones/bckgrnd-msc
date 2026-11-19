@@ -337,8 +337,9 @@ fn cancel_mid_build_restores_the_start_and_says_nothing_after() {
 #[test]
 fn stop_seek_and_the_other_transport_paths_cancel_the_build() {
     type Action = fn(&mut Engine);
-    let cases: [(&str, Action, u8); 10] = [
+    let cases: [(&str, Action, u8); 11] = [
         ("stop", |e| e.stop(), reason::STOPPED),
+        ("end of score", |e| e.end_score(), reason::STOPPED),
         ("jump", |e| e.jump(0), reason::TRANSPORT),
         ("play again", |e| e.play(), reason::TRANSPORT),
         ("scratch", |e| e.scratch_start(), reason::TRANSPORT),
@@ -1270,4 +1271,241 @@ fn a_build_without_lanes_touches_no_lanes() {
     );
     assert_eq!((e.track.hat[16], e.track.kick[16]), (0.4, 1.0));
     assert_eq!(e.base().to_vec(), scene(0.3));
+}
+
+/// Cancelled exactly halfway (the bar line where progress reaches one half), a 2, 4 or
+/// 8 bar build stands exactly at the halfway mix, then goes back to the start whole:
+/// the landing never lands and its lanes go with it.
+#[test]
+fn cancel_exactly_halfway_restores_the_start_for_every_length() {
+    use crate::scene::build::value_at;
+    for bars in [2u32, 4, 8] {
+        let mut e = playing(48_000.0);
+        let base0 = e.base();
+        let target = target_from(&base0);
+        let end = 16 + bars as usize * 16;
+        e.queue_patterns(20, timing::BAR, 1, &drum(2, &[(end, 0.9)]));
+        assert_eq!(e.queue_build(1, bars, &target, &scene(0.2)), 0);
+        let half = 16 + bars as usize * 8;
+        let seen = walk_to(&mut e, half);
+        assert_eq!(
+            build_events(&seen).last(),
+            Some(&ev(
+                event::BUILD_PROGRESS,
+                1,
+                (bars / 2 + 1) as f64,
+                bars as f64
+            )),
+            "{bars} bars"
+        );
+        for (i, now) in e.base().iter().enumerate() {
+            let want = value_at(i, &base0, &target, 0.5);
+            assert!(
+                (now - want).abs() < 1e-6,
+                "{bars} bars, slot {i}: {now} not halfway ({want})"
+            );
+        }
+
+        assert!(e.cancel_build(1));
+        assert_eq!(
+            events(&mut e),
+            vec![
+                ev(event::BUILD_CANCELLED, 1, reason::USER as f64, 0.0),
+                ev(event::PATTERNS_CANCELLED, 20, reason::USER as f64, 0.0),
+            ],
+            "{bars} bars"
+        );
+        assert_eq!(e.base(), base0, "{bars} bars");
+        e.trace.clear();
+        let after = walk_to(&mut e, end + 16);
+        assert!(build_events(&after).is_empty(), "{bars} bars: {after:?}");
+        assert!(applies(&e).is_empty(), "{bars} bars: the landing landed");
+        assert!(
+            pattern_applies(&e).is_empty(),
+            "{bars} bars: the lanes landed"
+        );
+        assert_eq!((e.base(), e.track.hat[end]), (base0, 0.4), "{bars} bars");
+    }
+}
+
+/// A tempo change moves no value a build sets on any onset: the base on every step
+/// from the request to the end is the same as at a steady tempo, with the tempo
+/// changed while it waits and twice while it runs, and it still starts on the bar line
+/// it announced.
+#[test]
+fn a_tempo_change_moves_no_value_on_any_onset() {
+    let base_at_each_onset = |changes: &[(usize, f32)]| {
+        let mut e = playing(48_000.0);
+        let target = target_from(&e.base());
+        assert_eq!(e.queue_build(1, 4, &target, &scene(0.3)), 0);
+        let mut out = Vec::new();
+        loop {
+            let (step, _) = next_onset(&mut e);
+            out.push((step, e.base()));
+            if let Some(&(_, bpm)) = changes.iter().find(|c| c.0 == step) {
+                e.set_bpm(bpm);
+            }
+            if step == 80 {
+                break;
+            }
+        }
+        (out, starts(&e).len(), applies(&e))
+    };
+    let (steady, steady_starts, _) = base_at_each_onset(&[]);
+    let (moved, moved_starts, landed) = base_at_each_onset(&[(9, 70.0), (30, 140.0), (61, 96.0)]);
+    assert_eq!((steady_starts, moved_starts), (1, 1));
+    assert_eq!(landed.len(), 1);
+    assert_eq!(steady.len(), moved.len());
+    for ((s, a), (t, b)) in steady.iter().zip(moved.iter()) {
+        assert_eq!(s, t);
+        assert_eq!(a, b, "step {s}: the tempo moved a value");
+    }
+}
+
+/// A Rise into a scene with captured lanes (a drum lane and a note lane, as capture
+/// stores them), over 2, 4 and 8 bars: on the end onset the landing scene commits
+/// whole, then the lanes swap in, then that step's notes play from them.
+#[test]
+fn a_rise_lands_its_captured_lanes_with_the_landing_for_every_length() {
+    use crate::pattern_tests::notes;
+    for bars in [2u32, 4, 8] {
+        let mut e = playing(48_000.0);
+        let end = 16 + bars as usize * 16;
+        let mut payload = vec![2.0f32];
+        payload.extend(&drum(0, &[(end, 0.5)])[1..]);
+        payload.extend(&notes(4, &[(end, 2.0, 45.0)])[1..]);
+        assert_eq!(e.queue_patterns(20, timing::BAR, 1, &payload), reason::OK);
+        let land = scene(0.25);
+        assert_eq!(e.queue_build(1, bars, &target_from(&e.base()), &land), 0);
+        assert!(e.track.bass[end].is_none());
+        let seen = walk_to(&mut e, end);
+        let ends: Vec<_> = seen
+            .iter()
+            .copied()
+            .filter(|x| x[0] == event::PATTERNS_APPLIED as f64 || is_build(x))
+            .skip_while(|x| x[0] != event::PATTERNS_APPLIED as f64)
+            .collect();
+        assert_eq!(
+            ends,
+            vec![
+                ev(event::PATTERNS_APPLIED, 20, end as f64, 0.0),
+                ev(event::BUILD_APPLIED, 1, end as f64, 1.0),
+            ],
+            "{bars} bars"
+        );
+        let pos = |want: fn(&Trace) -> bool| e.trace.iter().position(want).expect("traced");
+        let landing = pos(|t| matches!(t, Trace::Apply(1, _)));
+        let lanes = pos(|t| matches!(t, Trace::Patterns(20, _)));
+        let (_, sample) = applies(&e)[0];
+        let notes_at = e
+            .trace
+            .iter()
+            .position(|t| *t == Trace::Trigger(end, sample))
+            .expect("the end step traced on the landing's sample");
+        assert!(landing < lanes && lanes < notes_at, "{bars} bars: order");
+        assert_eq!(e.base().to_vec(), land, "{bars} bars");
+        assert_eq!(e.track.kick[end], 0.5, "{bars} bars");
+        let bass = e.track.bass[end].as_ref().expect("the bass lane landed");
+        assert_eq!(bass.notes, vec![45.0], "{bars} bars");
+        assert!(e.build_lanes.is_none() && e.staged.is_none());
+    }
+}
+
+/// Measurement only (`cargo test --lib measure_build_filter_steps -- --ignored
+/// --nocapture`): how the filter base moves during an 8-bar build at 70 and 140 bpm,
+/// block by block (128 frames at 48 kHz), and how much of each step the smoothing
+/// (ADR-013, a 30 ms glide on the filter position at control rate) has covered when
+/// the next one lands. Asserts nothing about how it sounds.
+#[test]
+#[ignore = "measurement; run explicitly"]
+fn measure_build_filter_steps() {
+    const BLOCK: usize = 128;
+    let cents = |d: f32| d.abs() * (18_000.0f32 / 240.0).log2() * 1200.0;
+    for (from, to, what) in [
+        (1.0f32, 0.0f32, "full travel 1.0 -> 0.0"),
+        (1.0, 0.62, "Full -> Build 1.0 -> 0.62"),
+    ] {
+        for bpm in [70.0f32, 140.0] {
+            let mut e = engine(48_000.0);
+            e.set_bpm(bpm);
+            e.set_filter(from);
+            e.play();
+            render(&mut e, 48_000, BLOCK);
+            let mut target = e.base();
+            target[FILTER] = to;
+            assert_eq!(e.queue_build(1, 8, &target, &[]), 0);
+            events(&mut e);
+            let mut blocks: Vec<(f32, f32, f32)> = Vec::new();
+            let mut done = false;
+            let mut tail = 0;
+            while tail < 48_000 / BLOCK {
+                let mark = e.trace.len();
+                render(&mut e, BLOCK, BLOCK);
+                let onsets = e.trace[mark..]
+                    .iter()
+                    .filter(|t| matches!(t, Trace::Trigger(..)))
+                    .count();
+                assert!(onsets <= 1, "two onsets in one block");
+                if events(&mut e)
+                    .iter()
+                    .any(|x| x[0] == event::BUILD_APPLIED as f64)
+                {
+                    done = true;
+                }
+                if done {
+                    tail += 1;
+                }
+                blocks.push((
+                    e.master.filter_base(),
+                    e.master.sweep_target(),
+                    e.master.sweep_open_value(),
+                ));
+            }
+            let mut max_base = 0.0f32;
+            let mut max_smooth = 0.0f32;
+            let mut steps = Vec::new();
+            for k in 1..blocks.len() {
+                let d = (blocks[k].0 - blocks[k - 1].0).abs();
+                max_base = max_base.max(d);
+                max_smooth = max_smooth.max((blocks[k].2 - blocks[k - 1].2).abs());
+                if d > 0.0 {
+                    steps.push(k);
+                }
+            }
+            // For each step: how far the glide still had to go when the next landed,
+            // and how long it sat within 5% of the step before the next one.
+            let ms = |n: usize| (n * BLOCK) as f32 / 48.0;
+            let (mut worst_left, mut best_left) = (0.0f32, 1.0f32);
+            let (mut longest, mut shortest) = (0usize, usize::MAX);
+            let mut flat_max = 0.0f32;
+            for w in steps.windows(2) {
+                let (a, b) = (w[0], w[1]);
+                let step = (blocks[a].0 - blocks[a - 1].0).abs();
+                let left = (blocks[b - 1].2 - blocks[b - 1].1).abs() / step;
+                worst_left = worst_left.max(left);
+                best_left = best_left.min(left);
+                longest = longest.max(b - a);
+                shortest = shortest.min(b - a);
+                let within = (a..b)
+                    .find(|&k| (blocks[k].2 - blocks[k].1).abs() <= 0.05 * step)
+                    .unwrap_or(b);
+                flat_max = flat_max.max(ms(b - within));
+            }
+            println!(
+                "{what}, {bpm} bpm: {} steps; base step per block max {:.5} ({:.1} cents of cutoff); \
+                 smoothed step per block max {:.5} ({:.1} cents); onset gap {:.0}-{:.0} ms; \
+                 step left when the next lands {:.1}%-{:.1}%; longest parked stretch (within 5% of target) {:.0} ms",
+                steps.len(),
+                max_base,
+                cents(max_base),
+                max_smooth,
+                cents(max_smooth),
+                ms(shortest),
+                ms(longest),
+                best_left * 100.0,
+                worst_left * 100.0,
+                flat_max,
+            );
+        }
+    }
 }
