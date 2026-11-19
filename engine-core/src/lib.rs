@@ -510,10 +510,14 @@ pub struct Engine {
     scheduler: scheduler::Scheduler,
     /// The pending standalone pattern edit (one at most; the latest replaces it).
     edit: Option<PendingPatterns>,
-    /// Lanes a pending scene sets, applied when that scene commits. Lanes for a timed
-    /// build wait here too, for the moment between their message and the build's, until
-    /// [`Engine::queue_build`] moves them to `build_lanes`.
-    linked: Option<PendingPatterns>,
+    /// Lanes staged for a scene or build request that has not arrived yet (the host
+    /// sends them just before it). Nothing accepted lives here: the request claims them
+    /// into `scene_lanes` or `build_lanes` only once it is accepted, and a refused one
+    /// withdraws them, so staging never disturbs lanes another request was accepted with.
+    staged: Option<PendingPatterns>,
+    /// Lanes the pending scene sets, applied when that scene commits. Only ever the
+    /// pending scene's.
+    scene_lanes: Option<PendingPatterns>,
     /// Lanes the timed build sets, applied on the onset it ends on
     /// (`docs/NIGHT7_PROTOCOL.md`). Only ever the current build's.
     build_lanes: Option<PendingPatterns>,
@@ -600,7 +604,8 @@ impl Engine {
             channel_coef: dsp::glide_coef(CHANNEL_GLIDE, sr),
             scheduler: scheduler::Scheduler::default(),
             edit: None,
-            linked: None,
+            staged: None,
+            scene_lanes: None,
             build_lanes: None,
             parked: None,
             retired: Vec::with_capacity(2 * patterns::LANES),
@@ -1079,6 +1084,12 @@ impl Engine {
     ///   queues them just before [`Engine::queue_build`], which takes them on; they
     ///   apply on the onset the build ends on, after its landing scene, and are
     ///   withdrawn with it (`docs/NIGHT7_PROTOCOL.md`).
+    ///
+    /// Linked lanes are only staged here. The request they name claims them if it is
+    /// accepted and withdraws them (with its reason) if it is refused; until then they
+    /// touch nothing a pending scene or build was accepted with. Lanes staged twice
+    /// with no request between are replaced, and lanes left staged when a request with
+    /// another id is accepted are withdrawn (reason 10): theirs never came.
     pub fn queue_patterns(&mut self, request_id: u32, timing: u8, link: u32, data: &[f32]) -> u8 {
         // What the last boundary swapped out (or a scene withdrew from a build) is
         // freed here, off the audio path.
@@ -1091,7 +1102,7 @@ impl Engine {
             (Some(t), Some(set)) => {
                 let serial = self.scheduler.serial();
                 if link != 0 {
-                    if let Some(old) = self.linked.take() {
+                    if let Some(old) = self.staged.take() {
                         self.scheduler.events.push(
                             scheduler::event::PATTERNS_REPLACED,
                             old.request_id,
@@ -1099,7 +1110,7 @@ impl Engine {
                             0.0,
                         );
                     }
-                    self.linked = Some(PendingPatterns {
+                    self.staged = Some(PendingPatterns {
                         request_id,
                         timing: t,
                         queued_at: serial,
@@ -1172,27 +1183,19 @@ impl Engine {
         verdict
     }
 
-    /// Withdraw a pending pattern revision (standalone, scene-linked or build-linked)
-    /// by request id. False when it is not pending: already applied, replaced or
-    /// unknown.
+    /// Withdraw a pending pattern revision (standalone, staged, scene-linked or
+    /// build-linked) by request id. False when it is not pending: already applied,
+    /// replaced or unknown.
     pub fn cancel_patterns(&mut self, request_id: u32) -> bool {
-        if self
-            .edit
-            .as_ref()
-            .is_some_and(|e| e.request_id == request_id)
-        {
+        let is =
+            |p: &Option<PendingPatterns>| p.as_ref().is_some_and(|p| p.request_id == request_id);
+        if is(&self.edit) {
             self.edit = None;
-        } else if self
-            .linked
-            .as_ref()
-            .is_some_and(|l| l.request_id == request_id)
-        {
-            self.linked = None;
-        } else if self
-            .build_lanes
-            .as_ref()
-            .is_some_and(|l| l.request_id == request_id)
-        {
+        } else if is(&self.staged) {
+            self.staged = None;
+        } else if is(&self.scene_lanes) {
+            self.scene_lanes = None;
+        } else if is(&self.build_lanes) {
             self.build_lanes = None;
         } else {
             return false;
@@ -1217,11 +1220,18 @@ impl Engine {
             Some(_) if !scheduler::valid(values) => reason::INVALID,
             Some(_) if self.transport.in_gesture() => reason::TRANSPORT,
             Some(t) => {
+                // Lanes go with their scene as one transaction: the ones staged for it
+                // become the scene's only now that it is accepted.
+                let lanes = self.claim_staged(request_id);
                 if self.transport.playing {
                     self.scheduler.queue(request_id, t, values, &self.transport);
+                    // The scene it replaced, if one was pending, takes its lanes along.
+                    self.cancel_scene_lanes(reason::USER);
+                    self.scene_lanes = lanes;
                 } else {
                     // Nothing can be pending while stopped (Stop cancels it), so this
                     // replaces nothing.
+                    self.scene_lanes = lanes;
                     let mut copy = [0.0f32; SCENE_LEN];
                     copy.copy_from_slice(&values[..SCENE_LEN]);
                     self.commit_scene(request_id, &copy, -1);
@@ -1236,23 +1246,9 @@ impl Engine {
                 verdict as f64,
                 0.0,
             );
-        }
-        // Lanes go with their scene: a refused scene's are withdrawn; an accepted one
-        // replaces whatever lanes an earlier pending scene was carrying.
-        let orphan = self.linked.as_ref().is_some_and(|l| {
-            if verdict == reason::OK {
-                l.link != request_id
-            } else {
-                l.link == request_id
-            }
-        });
-        if orphan {
-            let why = if verdict == reason::OK {
-                reason::USER
-            } else {
-                verdict
-            };
-            self.cancel_linked(why);
+            // A refused scene takes its own staged lanes and nothing else: a scene or
+            // build already pending keeps the lanes it was accepted with.
+            self.refuse_staged(request_id, verdict);
         }
         verdict
     }
@@ -1277,8 +1273,8 @@ impl Engine {
     /// or never queued.
     pub fn cancel_scene(&mut self, request_id: u32) -> bool {
         let cancelled = self.scheduler.cancel(request_id);
-        if cancelled && self.linked.as_ref().is_some_and(|l| l.link == request_id) {
-            self.cancel_linked(reason::USER);
+        if cancelled {
+            self.cancel_scene_lanes(reason::USER);
         }
         cancelled
     }
@@ -1512,7 +1508,9 @@ impl Engine {
         // composition: a stop, a seek or a panic applies it at once rather than lose
         // it. Only a new track (or the deck handing over) withdraws it, because it was
         // written for the track that is going.
-        self.cancel_linked(why);
+        self.cancel_scene_lanes(why);
+        let staged = self.staged.take();
+        self.withdraw_lanes(staged, why);
         if let Some(edit) = self.edit.take() {
             if why == reason::TRACK {
                 self.scheduler.events.push(
@@ -1528,15 +1526,44 @@ impl Engine {
         scene || fill || build
     }
 
-    /// Cancel the scene-linked lanes, reporting `why`.
-    fn cancel_linked(&mut self, why: u8) {
-        if let Some(l) = self.linked.take() {
+    /// Report `lanes`, if any, as `patterns cancelled` with `why`, and free them. Message
+    /// handler only: on the audio path, withdrawn lanes are parked instead.
+    #[inline(never)]
+    fn withdraw_lanes(&mut self, lanes: Option<PendingPatterns>, why: u8) {
+        if let Some(l) = lanes {
             self.scheduler.events.push(
                 scheduler::event::PATTERNS_CANCELLED,
                 l.request_id,
                 why as f64,
                 0.0,
             );
+        }
+    }
+
+    /// Withdraw the pending scene's lanes, reporting `why`.
+    fn cancel_scene_lanes(&mut self, why: u8) {
+        let lanes = self.scene_lanes.take();
+        self.withdraw_lanes(lanes, why);
+    }
+
+    /// The lanes staged for request `id`, now that it has been accepted. Lanes staged
+    /// for another id are withdrawn (reason 10): their request never came, and they
+    /// must not wait to be claimed by one that reuses the id.
+    fn claim_staged(&mut self, id: u32) -> Option<PendingPatterns> {
+        let staged = self.staged.take();
+        if staged.as_ref().is_some_and(|l| l.link == id) {
+            return staged;
+        }
+        self.withdraw_lanes(staged, reason::USER);
+        None
+    }
+
+    /// Request `id` was refused for `why`: the lanes staged for it go with it. Nothing
+    /// else is touched, so a scene or build already pending keeps its own lanes.
+    fn refuse_staged(&mut self, id: u32, why: u8) {
+        if self.staged.as_ref().is_some_and(|l| l.link == id) {
+            let staged = self.staged.take();
+            self.withdraw_lanes(staged, why);
         }
     }
 
@@ -1767,8 +1794,12 @@ impl Engine {
         // nothing is restored and nothing is left half-built.
         self.replace_build(request_id);
         self.commit_targets(values);
-        if self.linked.as_ref().is_some_and(|l| l.link == request_id) {
-            if let Some(l) = self.linked.take() {
+        if self
+            .scene_lanes
+            .as_ref()
+            .is_some_and(|l| l.link == request_id)
+        {
+            if let Some(l) = self.scene_lanes.take() {
                 self.apply_patterns(l, step);
             }
         }
@@ -2120,6 +2151,9 @@ mod perform_tests;
 
 #[cfg(test)]
 mod pattern_tests;
+
+#[cfg(test)]
+mod staging_tests;
 
 #[cfg(test)]
 mod tests {
