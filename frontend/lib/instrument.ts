@@ -249,6 +249,13 @@ export function useInstrument() {
     /** The render count when `last` was shown; the store only has it after a render. */
     shownAt: number;
   }>({ requestId: -1, last: null, touched: new Set(), shownAt: 0 });
+  /**
+   * A rise a track load interrupted. The engine cancels it on the Stop that comes
+   * before the load and glides back to where it started, but its last base arrives
+   * after the scenes are reset for the new track. Until its final event, that base
+   * still moves the effect knobs (not the faders: the load resets those itself).
+   */
+  const abandonedBuild = useRef<number | null>(null);
   const renders = useRef(0);
   renders.current += 1;
   /** One line for assistive technology: discrete changes only, never every beat. */
@@ -401,6 +408,8 @@ export function useInstrument() {
         if (!arranged) return;
         cancelTempoGlide();
         const deck = liveDeck;
+        const rising = sceneRequestRef.current;
+        abandonedBuild.current = rising?.build && isPending(rising) ? rising.requestId : null;
         engine.stop(deck);
         loadDeck(deck, arranged);
         engine.setMuted(0, false);
@@ -658,6 +667,9 @@ export function useInstrument() {
     setScenes(factoryScenes(arranged));
     setActiveScene(null);
     beforeScenes.current = null;
+    // At once, not on the next render: an outcome for the old track's request that
+    // arrives before then must not fold into it and show the old track's mix.
+    sceneRequestRef.current = null;
     setSceneRequest(null);
     setCompare(null);
     setSceneStatus('');
@@ -698,7 +710,11 @@ export function useInstrument() {
     setMuted(nextMuted);
     setSolo(nextSolo);
     setMask('custom');
-    const p = mix.params;
+    showParams(mix.params);
+  }
+
+  /** The effect half of `showMix`: the scene parameters, without the stems. */
+  function showParams(p: SceneMix['params']) {
     setBandsState({ low: p['fx.low'], mid: p['fx.mid'], high: p['fx.high'] });
     setFilterState(p['fx.filter']);
     setStereoState(p['fx.stereo']);
@@ -720,6 +736,10 @@ export function useInstrument() {
       engine.onSceneEvents((events: readonly WireEvent[]) => {
         for (const e of events) {
           if (!isLaunchEvent(e.kind)) continue;
+          // The interrupted rise's last base came ahead of its outcome; nothing follows.
+          if (e.requestId === abandonedBuild.current && e.kind >= EVENT.buildApplied && e.kind <= EVENT.buildRejected) {
+            abandonedBuild.current = null;
+          }
           const current = sceneRequestRef.current;
           if (!current || current.requestId !== e.requestId) continue;
           const next = foldSceneEvent(current, { kind: e.kind, id: e.requestId, a: e.a, b: e.b });
@@ -756,6 +776,10 @@ export function useInstrument() {
   useEffect(
     () =>
       engine.onBuildBase((requestId, values) => {
+        if (requestId === abandonedBuild.current) {
+          showParamsRef.current(mixFromVector(values).params);
+          return;
+        }
         const current = sceneRequestRef.current;
         if (!current?.build || current.requestId !== requestId) return;
         followBuildRef.current(requestId, values);
@@ -766,6 +790,8 @@ export function useInstrument() {
   // The subscription above lives for the app; it reads these through refs.
   const showMixRef = useRef(showMix);
   showMixRef.current = showMix;
+  const showParamsRef = useRef(showParams);
+  showParamsRef.current = showParams;
   const sceneNameRef = useRef(sceneName);
   sceneNameRef.current = sceneName;
 
