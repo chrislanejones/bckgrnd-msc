@@ -12,8 +12,8 @@
  * off, its feedback and return have nothing to act on and are disabled.
  */
 
-import { useId, useState } from 'react';
-import { ChevronRight } from 'lucide-react';
+import { useEffect, useId, useState } from 'react';
+import { ChevronRight, MoveVertical, RotateCw } from 'lucide-react';
 import { defaultSend, param, stemRange } from '../lib/contract';
 import type { Instrument } from '../lib/instrument';
 import { EFFECT_DEFAULTS, MASTER_DEFAULT } from '../lib/instrument';
@@ -50,6 +50,20 @@ const ECHO_NAMES: Record<string, string> = {
   '1/4.': 'dotted quarter',
 };
 
+/**
+ * Whether Output is unfolded: a per-viewer preference, kept in localStorage like the
+ * knob drag mode (knobPrefs.tsx) and never part of a project. Folded until chosen.
+ */
+const OUTPUT_KEY = 'bckgrnd-msc:output-open';
+
+function readOutputOpen(): boolean {
+  try {
+    return window.localStorage.getItem(OUTPUT_KEY) === 'open';
+  } catch {
+    return false;
+  }
+}
+
 const ECHO_OPTIONS = (param('fx.echoTime').options ?? [])
   .filter((o) => o.value !== 0)
   .map((o) => ({ value: o.value, label: o.label, aria: `Echo every ${ECHO_NAMES[o.label] ?? o.label}` }));
@@ -73,20 +87,33 @@ export function Inspector({
   inst: Instrument;
   onShowPattern: () => void;
 }) {
-  // Kept here rather than in the rack, so a visit to the stem tab doesn't fold it again.
-  const [outputOpen, setOutputOpen] = useState(false);
+  // Kept here rather than in the rack, so a visit to the stem tab doesn't fold it again,
+  // and remembered between sessions.
+  const [outputOpen, setOutputOpen] = useState(readOutputOpen);
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(OUTPUT_KEY, outputOpen ? 'open' : 'folded');
+    } catch {
+      /* storage unavailable: the choice lasts for this visit */
+    }
+  }, [outputOpen]);
   return (
     <div className="inspector-body">
-      <Segmented<InspectorTab>
-        label="Inspect"
-        hideLabel
-        value={tab}
-        onPick={onTab}
-        options={[
-          { value: 'master', label: 'Master' },
-          { value: 'stem', label: STEM_NAMES[stem], aria: `Stem: ${STEM_NAMES[stem]}` },
-        ]}
-      />
+      {/* The tabs, then the panel's one setting as a header action, so the rack below
+          fits a 1280 x 800 or 1024 x 768 screen without scrolling. */}
+      <div className="inspector-head">
+        <Segmented<InspectorTab>
+          label="Inspect"
+          hideLabel
+          value={tab}
+          onPick={onTab}
+          options={[
+            { value: 'master', label: 'Master' },
+            { value: 'stem', label: STEM_NAMES[stem], aria: `Stem: ${STEM_NAMES[stem]}` },
+          ]}
+        />
+        <KnobDragSetting />
+      </div>
       {tab === 'master' ? (
         <MasterRack inst={inst} outputOpen={outputOpen} onOutputOpen={setOutputOpen} />
       ) : (
@@ -99,7 +126,6 @@ export function Inspector({
           onShowPattern={onShowPattern}
         />
       )}
-      <KnobDragSetting />
     </div>
   );
 }
@@ -125,6 +151,8 @@ function MasterRack({
   const echoNoteId = useId();
   const roomOff = effects['fx.reverbMix'] <= 0;
   const roomNoteId = useId();
+  const resonanceNote = inst.filter >= 0.999 ? 'Heard as it closes' : '';
+  const resonanceNoteId = useId();
 
   return (
     <>
@@ -154,6 +182,8 @@ function MasterRack({
         {/* A held filter is an override: the knobs keep showing the mix underneath,
             and the heading says what is on top of it for now. */}
         <legend className="inspector-legend">{inst.filterHeld ? 'Filter · held' : 'Filter'}</legend>
+        {/* Resonance's note stands in the row's third column, as Echo's Time does,
+            rather than holding two lines under the knob. */}
         <div className="knob-row">
           <Knob
             label="Cutoff"
@@ -170,8 +200,11 @@ function MasterRack({
             mapping={RESONANCE}
             defaultValue={EFFECT_DEFAULTS['fx.filterQ']}
             onChange={(v) => setEffect('fx.filterQ', v)}
-            note={inst.filter >= 0.999 ? 'Heard as it closes' : ''}
+            describedBy={resonanceNote ? resonanceNoteId : undefined}
           />
+          <p id={resonanceNoteId} className="knob-row-note">
+            {resonanceNote}
+          </p>
         </div>
       </fieldset>
 
@@ -403,11 +436,13 @@ function KnobDragSetting() {
     <div className="inspector-setting">
       <Segmented<KnobDrag>
         label="Knobs turn by dragging"
+        shortLabel="Drag"
+        title="Knobs turn by dragging"
         value={mode}
         onPick={setMode}
         options={[
-          { value: 'vertical', label: 'Up and down' },
-          { value: 'circular', label: 'Round' },
+          { value: 'vertical', label: 'Up and down', icon: <MoveVertical aria-hidden="true" size={14} strokeWidth={2.25} /> },
+          { value: 'circular', label: 'Round', icon: <RotateCw aria-hidden="true" size={14} strokeWidth={2.25} /> },
         ]}
       />
     </div>

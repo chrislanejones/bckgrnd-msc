@@ -317,6 +317,7 @@ export function Fader({
  */
 export function Segmented<T extends string | number>({
   label,
+  shortLabel,
   options,
   value,
   onPick,
@@ -325,8 +326,13 @@ export function Segmented<T extends string | number>({
   title,
 }: {
   label: string;
-  /** `short` replaces the label on the phone tier; the full label stays the name. */
-  options: Array<{ value: T; label: string; short?: string; aria?: string }>;
+  /** A shorter word shown in place of the label; the full label stays the group's name. */
+  shortLabel?: string;
+  /**
+   * `short` replaces the label on the phone tier; the full label stays the name.
+   * `icon` replaces it everywhere: the label becomes the pill's name and its tooltip.
+   */
+  options: Array<{ value: T; label: string; short?: string; aria?: string; icon?: ReactNode }>;
   value: T;
   onPick: (value: T) => void;
   hideLabel?: boolean;
@@ -339,16 +345,22 @@ export function Segmented<T extends string | number>({
   title?: string;
 }) {
   const id = useId();
-  const pill = (o: { value: T; label: string; short?: string; aria?: string }) => (
+  const pill = (o: { value: T; label: string; short?: string; aria?: string; icon?: ReactNode }) => (
     <button
       key={String(o.value)}
       type="button"
-      className="segment tap"
+      className={cx('segment tap', o.icon ? 'segment-icon' : undefined)}
       aria-pressed={value === o.value}
       aria-label={o.aria ?? (o.short ? o.label : undefined)}
+      title={o.icon ? o.label : undefined}
       onClick={() => onPick(o.value)}
     >
-      {o.short ? (
+      {o.icon ? (
+        <>
+          {o.icon}
+          <span className="sr-only">{o.label}</span>
+        </>
+      ) : o.short ? (
         <>
           <span className="seg-full">{o.label}</span>
           <span className="seg-short">{o.short}</span>
@@ -365,7 +377,14 @@ export function Segmented<T extends string | number>({
   return (
     <div className="segmented-block" title={title}>
       <span id={id} className={cx('control-label', hideLabel && 'sr-only')}>
-        {label}
+        {shortLabel ? (
+          <>
+            <span aria-hidden="true">{shortLabel}</span>
+            <span className="sr-only">{label}</span>
+          </>
+        ) : (
+          label
+        )}
       </span>
       {perKnobColumn ? (
         <div className="segmented segmented-knob-columns" role="group" aria-labelledby={id}>
