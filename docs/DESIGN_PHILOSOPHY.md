@@ -182,7 +182,15 @@ short hint gives the next comparison step. Current, modified, and queued states 
 both text and visual treatment.
 Once the scenes panel is 45rem or narrower, Switch on uses its short names (Now, Beat,
 Bar, Rise), as the phone does, so Rise never wraps the row; the full names stay the
-accessible names.
+accessible names. With a mouse, below 38rem (the 1180–1279 px three-column layout, and
+900–1000 px with the inspector docked) the pills tighten and the word "bars" goes, so
+Switch on, 2 · 4 · 8, Drum fill and Cancel still share one row; the stacked,
+thumb-sized toolbar below 34rem is for touch only.
+
+The inspector fits 1280 × 800 and 1024 × 768 without scrolling. Its one preference
+(how knobs turn by dragging) sits beside the Master/stem tabs as an icon pair, a note
+such as Resonance's "Heard as it closes" stands in its row's spare third column, and
+Output's fold is remembered per viewer (folded until chosen).
 Cancel clears the selected scene and returns to the mix from before scene choices.
 It stays available for an active scene even when nothing is queued.
 
