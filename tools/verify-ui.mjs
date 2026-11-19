@@ -13,6 +13,7 @@
 
 import { chromium } from 'playwright';
 import { existsSync } from 'node:fs';
+import { riseChecks } from './verify-ui-rise.mjs';
 
 const baseUrl = process.argv[2] ?? 'http://127.0.0.1:8080';
 const executablePath =
@@ -1159,6 +1160,9 @@ try {
     check('mixing: no page errors', errors.length === 0, errors.join('; '));
     await page.close();
   }
+
+  // ---- Rise (Night 7 timed builds), the rest of the contract: tools/verify-ui-rise.mjs.
+  await riseChecks({ open, check });
 
   // ---- Tablet: the library is an overlay opened from the transport. -----------
   {

@@ -118,6 +118,42 @@ check('cancelled settles with its reason', bc.status === 'cancelled' && bc.reaso
 const br = s.foldSceneEvent(bq, { kind: s.EVENT.buildRejected, id: 20, a: 7, b: 0 });
 check('rejected settles with its reason', br.status === 'rejected' && br.reason === 7);
 check('build kinds count as launch events', [41, 42, 43, 44, 45, 46, 47].every(s.isLaunchEvent) && !s.isLaunchEvent(11) && !s.isLaunchEvent(31));
+// Rise coverage (Night 8): every bar count, every way a rise can end, and nothing
+// stale after it. The browser half is tools/verify-ui-rise.mjs.
+for (const n of s.BUILD_BAR_CHOICES) {
+  let r = { ...req, requestId: 30 + n, build: { bars: n } };
+  const id = r.requestId;
+  r = s.foldSceneEvent(r, { kind: s.EVENT.buildQueued, id, a: 3, b: 32 });
+  r = s.foldSceneEvent(r, { kind: s.EVENT.buildStarted, id, a: 32, b: n });
+  const seen = [r.build.bar];
+  for (let bar = 2; bar <= n; bar += 1) {
+    r = s.foldSceneEvent(r, { kind: s.EVENT.buildProgress, id, a: bar, b: n });
+    seen.push(r.build.bar);
+  }
+  const counted = seen.join(',') === Array.from({ length: n }, (_, k) => k + 1).join(',');
+  check(`a ${n}-bar build counts bar 1 to ${n} and stays pending`, counted && r.status === 'building' && r.build.bars === n && s.isPending(r), seen.join(','));
+  const end = s.foldSceneEvent(r, { kind: s.EVENT.buildApplied, id, a: 32 + 16 * n, b: 0 });
+  check(`a ${n}-bar build ends applied on bar ${n} of ${n}`, end.status === 'applied' && end.build.bar === n && !s.isPending(end));
+}
+const waiting = s.foldSceneEvent({ ...req, requestId: 40, build: { bars: 4 } }, { kind: s.EVENT.buildQueued, id: 40, a: 5, b: 64 });
+const reannounced = s.foldSceneEvent(waiting, { kind: s.EVENT.buildQueued, id: 40, a: 4, b: 48 });
+check('a loop change re-announcing a waiting build moves its bar', reannounced.status === 'queued' && reannounced.bar === 4, `bar ${reannounced.bar}`);
+const running = s.foldSceneEvent(waiting, { kind: s.EVENT.buildStarted, id: 40, a: 64, b: 4 });
+for (const [why, reason] of [['Stop', 2], ['a seek', 3], ['a track load', 4], ['Panic', 5], ['the user', 10]]) {
+  const ended = s.foldSceneEvent(running, { kind: s.EVENT.buildCancelled, id: 40, a: reason, b: 0 });
+  const late = s.foldSceneEvent(ended, { kind: s.EVENT.buildProgress, id: 40, a: 3, b: 4 });
+  check(`a running build cancelled by ${why} settles with reason ${reason}, and later progress is ignored`,
+    ended.status === 'cancelled' && ended.reason === reason && !s.isPending(ended) && late === ended);
+}
+const swapped = s.foldSceneEvent(running, { kind: s.EVENT.buildReplaced, id: 40, a: 41, b: 0 });
+check('a running build replaced settles, and a late applied cannot revive it',
+  swapped.status === 'replaced' && s.foldSceneEvent(swapped, { kind: s.EVENT.buildApplied, id: 40, a: 128, b: 1 }) === swapped);
+check("another build's progress does not move this one", s.foldSceneEvent(running, { kind: s.EVENT.buildProgress, id: 41, a: 3, b: 4 }) === running);
+check('the status words for a stopped, moved, reloaded and panicked rise',
+  s.REASON[2] === 'playback stopped' && s.REASON[3] === 'the playhead moved' && s.REASON[4] === 'the track changed' && s.REASON[5] === 'panic');
+check('a refused rise says to press Play, or not while scratching',
+  s.BUILD_REFUSAL[7] === 'press Play first' && s.BUILD_REFUSAL[3] === 'not while the deck is scratched or braking');
+
 const vec = s.sceneVector(applied);
 const back = s.mixFromVector(vec);
 check('mixFromVector inverts sceneVector', s.sameMix(s.copyMix(back), applied) && s.sceneVector(back).every((v, i) => v === vec[i]));

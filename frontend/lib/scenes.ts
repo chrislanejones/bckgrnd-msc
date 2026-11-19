@@ -340,7 +340,9 @@ function foldBuildEvent(
 ): SceneRequest {
   switch (event.kind) {
     case EVENT.buildQueued:
-      return request.status === 'sending' ? { ...request, status: 'queued', bar: event.a } : request;
+      // A loop change re-announces a waiting build with its new bar; once it has
+      // started, a late one must not rewind it.
+      return request.status === 'building' ? request : { ...request, status: 'queued', bar: event.a };
     case EVENT.buildStarted:
       return { ...request, status: 'building', build: { ...build, bar: 1 } };
     case EVENT.buildProgress:
