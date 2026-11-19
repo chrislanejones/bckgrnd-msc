@@ -19,13 +19,13 @@ const FEEDBACK: usize = FX_BASE + 6;
 const RETURN: usize = FX_BASE + 7;
 const ROOM: usize = FX_BASE + 8;
 
-fn at(stem: Stem, field: usize) -> usize {
+pub(crate) fn at(stem: Stem, field: usize) -> usize {
     stem.index() * 4 + field
 }
 
 /// Playing, with step 5 just fired (so the next bar line is step 16), the trace and
 /// the event ring empty.
-fn playing(sr: f32) -> Engine {
+pub(crate) fn playing(sr: f32) -> Engine {
     let mut e = engine(sr);
     e.play();
     // An odd block first, so block edges and onsets do not line up by accident.
@@ -38,7 +38,7 @@ fn playing(sr: f32) -> Engine {
 
 /// `base` with the filter closing, the kick down, the clap's send and the room up
 /// and the low isolator down: values from every kind of continuous slot.
-fn target_from(base: &[f32; SCENE_LEN]) -> [f32; SCENE_LEN] {
+pub(crate) fn target_from(base: &[f32; SCENE_LEN]) -> [f32; SCENE_LEN] {
     let mut t = *base;
     t[at(Stem::Kick, 0)] = 0.3;
     t[at(Stem::Clap, 1)] = 0.6;
@@ -50,7 +50,7 @@ fn target_from(base: &[f32; SCENE_LEN]) -> [f32; SCENE_LEN] {
 
 /// Render one sample at a time until the next step fires. Returns the step and the
 /// sample it fired on.
-fn next_onset(e: &mut Engine) -> (usize, u64) {
+pub(crate) fn next_onset(e: &mut Engine) -> (usize, u64) {
     let mut l = [0.0f32; 1];
     let mut r = [0.0f32; 1];
     for _ in 0..(e.sample_rate as usize * 4) {
@@ -68,7 +68,7 @@ fn next_onset(e: &mut Engine) -> (usize, u64) {
 }
 
 /// Walk onsets until `step` has fired, returning the events seen on the way.
-fn walk_to(e: &mut Engine, step: usize) -> Vec<[f64; 4]> {
+pub(crate) fn walk_to(e: &mut Engine, step: usize) -> Vec<[f64; 4]> {
     let mut seen = Vec::new();
     for _ in 0..(STEPS * 2) {
         let (fired, _) = next_onset(e);
@@ -936,7 +936,7 @@ fn value_at_follows_the_rules() {
 }
 
 /// The ids of the pattern revisions swapped in so far, in order.
-fn lane_ids(e: &Engine) -> Vec<u32> {
+pub(crate) fn lane_ids(e: &Engine) -> Vec<u32> {
     pattern_applies(e).iter().map(|a| a.0).collect()
 }
 
@@ -1250,7 +1250,7 @@ fn a_build_without_lanes_touches_no_lanes() {
             ev(event::BUILD_QUEUED, 1, 2.0, 16.0),
         ]
     );
-    assert!(e.build_lanes.is_none() && e.linked.is_none());
+    assert!(e.build_lanes.is_none() && e.scene_lanes.is_none() && e.staged.is_none());
     e.trace.clear();
     let seen = walk_to(&mut e, 48);
     assert_eq!(lane_ids(&e), vec![30], "only the edit, on its own bar line");
