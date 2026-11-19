@@ -345,21 +345,12 @@ not. Things to settle before or while building it:
 
 ## Found in the Night 7 follow-ups (11-17-2026)
 
-- **Around 1180px the scenes panel stacks, and Rise still adds a row there** (150 → 194 px).
-  The 45rem short-label rule covers 1280 and 1024; the stacked tier between them wasn't in
-  the brief. (Lacey)
-- **The inspector still scrolls at 1280 × 800 (724 px box, 811 content) and at 1024 × 768.**
-  1440 × 900 fits. (Lacey)
-- **The Output fold isn't remembered.** It starts folded every session, so Master level is a
-  click away after a reload. (Lacey)
+- ~~**Around 1180px the scenes panel stacks, and Rise still adds a row there**~~ Fixed 11-19-2026 (`ccf3ece`): 108 → 108 px with Rise on; 1200 px no longer wraps.
+- ~~**The inspector still scrolls at 1280 × 800 and 1024 × 768**~~ Fixed 11-19-2026 (`ccf3ece`): 686 px of content in 722 and 690.
+- ~~**The Output fold isn't remembered**~~ Fixed 11-19-2026 (`ccf3ece`): saved as `bckgrnd-msc:output-open`.
 - ~~**`--knob-size` is a new density token**~~ Fixed 11-17-2026 (`8673480`).
-- **At 1366 × 640 the drawer body scrolls 23 px at rest** under its 78dvh cap. The follow-ups
-  didn't change this. (Lacey)
-- **Lanes staged for a refused request can strip a pending scene's.** Linked lanes go into
-  one staging slot before their scene or build is queued, so staging them replaces a
-  still-pending scene's lanes (`patterns replaced`). If the engine then refuses the new
-  scene or build (bad bars, mid-gesture), the earlier scene stays pending without its
-  lanes. This predates Night 7 (scenes do the same); builds inherit it. (Silas)
+- ~~**At 1366 × 640 the drawer body scrolls 23 px at rest**~~ Fixed 11-19-2026 (`ccf3ece`).
+- ~~**Lanes staged for a refused request can strip a pending scene's**~~ Fixed 11-19-2026 (`2e29170`): linked lanes wait in a staging slot until their request is accepted.
 - ~~**NIGHT4_PROTOCOL.md's message table lists only `scene` as carrying `patterns?`.**~~ Fixed 11-17-2026 (`8673480`).
 - **Bench numbers drift about 4% run to run on this shared machine.** Compare the
   `build` and `lanes` cases against `plain` from the same run, not across runs. (Silas)
@@ -368,3 +359,38 @@ not. Things to settle before or while building it:
   "fixing" each one, check whether leaving the dependency out was deliberate.
 - **Narration's default true-peak ceiling** (the rc.2 note above) changes what users hear,
   so it waits for Chris.
+
+## Found on Night 8 (11-19-2026)
+
+- **The host tracks one scene request at a time.** A refused newer launch or Rise
+  overwrites the record of a still-pending older one, so when the older one applies the
+  host ignores it (lanes not adopted, not shown active). The engine is now right; the host
+  isn't. Not reachable from the UI today. (Silas)
+- **Linked-lane event sequence changed.** A pending scene with lanes replaced by a request
+  carrying its own lanes now sends `scene replaced` then `patterns cancelled` (33, reason
+  10), not `patterns replaced` (34). NIGHT4_PROTOCOL should say what 33 vs 34 mean for
+  linked lanes. (Silas, for Dara)
+- **`queue_scene`'s doc comment sits above `queue_patterns`** in `engine-core/src/lib.rs`. (Silas)
+- **Slow Rise is a staircase.** The build base moves once per 16th; smoothing glides each
+  step in 30 ms. At 70 bpm the cutoff then sits still up to 141 ms per 16th (58-cent steps
+  on a full sweep, 22 on Full → Build). At 140 bpm it's near continuous. Listen before
+  changing DSP. (Silas, for Chris)
+- **The "held arrow is one undoable gesture" editor check flakes under load.** Second time it
+  failed `verify:desktop` while other heavy jobs ran; passes standalone. (Silas, Tara)
+- **"cancelled" vs US "canceled"** in Rise status lines and the protocol. Kept because the
+  checks pin it; a rename touches UI copy, docs and tests together. (Tara)
+- **`verify:web` doesn't run `verify-ui`**, so the Rise browser checks run only under
+  `verify:desktop`. (Tara)
+- **At 1366 × 640 the inspector scrolls** (686 px in 562); needs a short-window layout. (Lacey)
+- **With Output open, the inspector scrolls at 1280 × 800 and 1024 × 768** (778 px). Opt-in
+  and remembered. (Lacey)
+- **At 1180 and 900 the scenes toolbar is 108 px, not 74**, because Compare A/B stacks there.
+  Rise no longer changes it. (Lacey)
+- **On the phone, Rise on still adds a row** below Switch on; controls below shift down. (Lacey)
+- **Phone inspector sheet targets under 44 px:** knob value buttons (26), knob Reset (20),
+  Echo time pills (32). The pattern editor's step grid wasn't audited. (Lacey)
+- **The MCP needs a resync before rc.2** from the same commit as the next desktop build.
+  Audio is byte-identical to `main`, but four engine files differ, so the render-parity
+  file check would fail. (Phase 5 audit)
+- **The Linux candidate needs a rebuild** before the .deb checks count: rc.3 (`19c93c5`)
+  predates Night 7. Checklist: `docs/releases/RC_MANUAL_CHECKLIST_11-19-2026.md`.
