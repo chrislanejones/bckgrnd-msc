@@ -1272,6 +1272,133 @@ try {
     await page.close();
   }
 
+  // ---- Responsive (Night 8): the narrow desktop tiers and short windows. ---------
+  // Scenes toolbar, mouse: Switch on, Rise's 2 · 4 · 8, Drum fill and Cancel share one
+  // row at every compact width, including the stacked tier around 1180px, and choosing
+  // Rise never adds a row, even with Fill's widest label.
+  for (const width of [1440, 1280, 1279, 1200, 1180, 1100, 1024, 960, 900]) {
+    const { page } = await open(width, 900);
+    const toolbar = () => page.evaluate(() => {
+      const bar = document.querySelector('.scene-toolbar');
+      const top = (sel) => bar.querySelector(sel)?.getBoundingClientRect().top;
+      const switchOn = top(':scope > .segmented-block');
+      const rows = [':scope > .segmented-block', '.scene-build-bars', '.scene-strip-actions'].map(top).filter((t) => t !== undefined);
+      return { h: Math.round(bar.getBoundingClientRect().height * 10) / 10, oneRow: rows.every((t) => Math.abs(t - switchOn) < 3) };
+    });
+    const off = await toolbar();
+    await page.getByRole('button', { name: 'Rise into the scene over several bars' }).click();
+    const on = await toolbar();
+    const widest = await page.evaluate(() => {
+      const fill = document.querySelector('.fill-button');
+      const was = fill.textContent;
+      fill.textContent = 'Fill · Bar 16';
+      const bar = document.querySelector('.scene-toolbar');
+      const h = bar.getBoundingClientRect().height;
+      fill.textContent = was;
+      return Math.round(h * 10) / 10;
+    });
+    check(`${width}px: Switch on, Rise bars, Fill and Cancel share one row`, off.oneRow && on.oneRow, `off ${off.oneRow}, on ${on.oneRow}`);
+    check(`${width}px: choosing Rise adds no row to the scenes toolbar`, on.h === off.h && widest === off.h, `${off.h}px, ${on.h}px with Rise, ${widest}px with "Fill · Bar 16"`);
+    await page.close();
+  }
+
+  // Inspector, mouse: the master rack fits the window with nothing to scroll, at rest
+  // (Output folded) and on a stem. At 1440 x 900 it fits with Output open too.
+  // Knobs stay 48px (--knob-size, compact).
+  for (const [w, h] of [[1440, 900], [1280, 800], [1180, 800], [1024, 768]]) {
+    const { page } = await open(w, h);
+    const fit = () => page.evaluate(() => {
+      const el = document.querySelector('.inspector');
+      return { client: el.clientHeight, scroll: el.scrollHeight };
+    });
+    const dials = await page.evaluate(() =>
+      [...document.querySelectorAll('.inspector .knob-dial')]
+        .filter((d) => d.getClientRects().length > 0) // Output's folded knobs are not rendered
+        .map((d) => `${Math.round(d.getBoundingClientRect().width)}x${Math.round(d.getBoundingClientRect().height)}`));
+    check(`${w}x${h}: inspector knobs are 48px`, dials.length > 0 && dials.every((d) => d === '48x48'), [...new Set(dials)].join(', '));
+    const master = await fit();
+    check(`${w}x${h}: the master rack fits without scrolling`, master.scroll <= master.client, `${master.scroll}px of content in ${master.client}px`);
+    if (w === 1440) {
+      await page.locator('.inspector-fold-toggle').click();
+      const open = await fit();
+      check(`${w}x${h}: the master rack fits with Output open`, open.scroll <= open.client, `${open.scroll}px of content in ${open.client}px`);
+    }
+    await page.getByRole('button', { name: 'Inspect Lead' }).click();
+    const stem = await fit();
+    check(`${w}x${h}: a stem's controls fit without scrolling`, stem.scroll <= stem.client, `${stem.scroll}px of content in ${stem.client}px`);
+    await page.close();
+  }
+
+  // Pattern drawer: its body holds the canvas, selection, actions and message line with
+  // nothing to scroll at rest, down to a 640px-tall window, and the transport stays in view.
+  for (const [w, h] of [[1440, 900], [1366, 640], [1280, 720], [1024, 768]]) {
+    const { page } = await open(w, h);
+    await page.getByRole('button', { name: 'Edit patterns' }).click();
+    await page.locator('#pattern-drawer').waitFor({ state: 'visible' });
+    await page.waitForTimeout(250);
+    const d = await page.evaluate(() => {
+      const body = document.querySelector('#pattern-drawer .editor-body');
+      return {
+        client: body.clientHeight,
+        scroll: body.scrollHeight,
+        drawerTop: Math.round(document.querySelector('#pattern-drawer').getBoundingClientRect().top),
+        transportBottom: Math.round(document.querySelector('.transport').getBoundingClientRect().bottom),
+      };
+    });
+    check(`${w}x${h}: the drawer body does not scroll at rest`, d.scroll <= d.client, `${d.scroll}px of content in ${d.client}px`);
+    check(`${w}x${h}: the transport stays above the open drawer`, d.drawerTop >= d.transportBottom, `drawer at ${d.drawerTop}px, transport ends at ${d.transportBottom}px`);
+    await page.close();
+  }
+
+  // Output's fold is remembered per viewer; folded when nothing is stored.
+  {
+    const { page } = await open(1440, 900);
+    const toggle = page.locator('.inspector-fold-toggle');
+    const expanded = () => toggle.getAttribute('aria-expanded');
+    check('Output starts folded with nothing stored', (await expanded()) === 'false');
+    await toggle.click();
+    await page.reload({ waitUntil: 'networkidle' });
+    await page.waitForSelector('article.stem');
+    check('an opened Output stays open after a reload',
+      (await expanded()) === 'true' && (await page.getByRole('slider', { name: 'Width' }).isVisible()));
+    await toggle.click();
+    await page.reload({ waitUntil: 'networkidle' });
+    await page.waitForSelector('article.stem');
+    check('a folded Output stays folded after a reload', (await expanded()) === 'false');
+    await page.close();
+  }
+
+  // 375px phone: no sideways scrolling in any view, with the sheet open or Rise on, and
+  // every button a thumb presses is at least 44px both ways.
+  for (const h of [667, 812]) {
+    const { page } = await open(375, h, { hasTouch: true, isMobile: true });
+    const wide = () => page.evaluate(() => document.documentElement.scrollWidth);
+    const under44 = (scope) => page.evaluate((sc) =>
+      [...document.querySelectorAll(`${sc} button, ${sc} [role="button"]`)]
+        .map((el) => ({ el, b: el.getBoundingClientRect() }))
+        .filter(({ el, b }) => b.width > 1 && b.height > 1 && !el.closest('.sr-only, [hidden]') &&
+          getComputedStyle(el).visibility !== 'hidden' && (b.width < 44 || b.height < 44))
+        .map(({ el, b }) => `${String(el.className).split(' ')[0] || el.tagName} ${Math.round(b.width)}x${Math.round(b.height)}`), scope);
+    for (const view of ['Perform', 'Mix', 'Edit']) {
+      await page.getByRole('button', { name: view, exact: true }).click();
+      await page.waitForTimeout(150);
+      check(`375x${h} ${view}: no horizontal scroll`, (await wide()) <= 375, `${await wide()}px`);
+      if (view !== 'Edit') {
+        const small = [...new Set(await under44('.workspace'))];
+        check(`375x${h} ${view}: buttons are at least 44px`, small.length === 0, small.join(', '));
+      }
+    }
+    await page.getByRole('button', { name: 'Perform', exact: true }).click();
+    await page.getByRole('button', { name: 'Rise into the scene over several bars' }).click();
+    check(`375x${h}: Rise on, no horizontal scroll`, (await wide()) <= 375, `${await wide()}px`);
+    await page.getByRole('button', { name: 'Show the inspector' }).click();
+    await page.waitForTimeout(300);
+    check(`375x${h}: inspector sheet open, no horizontal scroll`, (await wide()) <= 375, `${await wide()}px`);
+    const head = [...new Set(await under44('.inspector-head'))];
+    check(`375x${h}: the sheet's tabs and drag setting are at least 44px`, head.length === 0, head.join(', '));
+    await page.close();
+  }
+
   // ---- Phone: one view at a time. --------------------------------------------
   {
     const { page } = await open(390, 844, { hasTouch: true, isMobile: true });
