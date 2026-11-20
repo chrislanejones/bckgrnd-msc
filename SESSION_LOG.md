@@ -287,3 +287,49 @@ Output knobs counted), fixed in `11b4944`.
 
 Listening (Rise at 70–140 bpm, filter stepping, live vs WAV), the Linux candidate rebuild
 and .deb checks, MCP resync before rc.2, and the 7 open questions in `NIGHT8_SPEC.md`.
+
+# Night 8 session log: transitions (11-19-2026)
+
+Branch `night8/transitions`, worktree `~/ai-repo/bckgrnd-night8-fills`, from main
+`393bed4` (PR #10, the stabilize pass). Built to `docs/NIGHT8_DECISIONS.md` in Chris's
+priority order. Branches merged in: `night8/adrs` (Dara), `night8/fill-ui`,
+`night8/crash-v4` (Vivek), `night8/layout2` (Lacey). Engine by Silas on this branch.
+
+## What changed
+
+| Area | Change |
+|---|---|
+| Engine | `queue_fill_at` (phrase 2/4/8/16, late press rolls to the next phrase, loop wrap counts); `queue_fill_into` (fill + scene, atomic); `queue_build_with` (Rise + Fill); accent on scene/Fill into/Rise; events 51–53, reason 11. `docs/NIGHT8_PROTOCOL.md` |
+| UI | Fill at (Next bar · Phrase end) + phrase bars; Fill → Drop beside Fill; Finish with Fill on Rise; prefs saved (Rise bars now saved too) |
+| Project | Version 4: required boolean `crash` per scene; v1–v3 files and v3 snapshots migrate on read; originals untouched until Save; `.bak` keeps v3 |
+| Crash | "Crash on launch" in each pad's menu, bolt + "Crash ·" mark; one undo step; status "Drop active, with a crash" |
+| Layout/a11y | Scene toolbar 108 px at every mouse width; pickers are radio groups, toggles are switches, fill buttons `aria-disabled` with reasons; phone targets ≥ 44 px |
+| ADRs (draft) | 020 phrase fills, 021 linked atomic requests, 022 crash accent, 023 project v4 |
+
+## Decisions made in the build (per Chris: decide by intent)
+
+| Call | Why |
+|---|---|
+| v4 bump, field `crash` (boolean) | ADR-014 completeness; `accent` already names a note field |
+| Fill → Drop over a queued plain Fill upgrades it | Forgiving, not refusing |
+| Fill disabled while a Rise ends with a fill | One fill slot; say why instead of a silent refusal |
+| Fill → Drop targets slot 4, named after it | Predictable; follows a rename |
+| Crash available on every scene, off | Explicit; Chris said others don't *need* one, not that they can't |
+
+## Gates (`night8/transitions` before layout; layout pass re-ran the app suites)
+
+| Gate | Result |
+|---|---|
+| cargo fmt / clippy `--all-targets -D warnings` | clean |
+| cargo test | 324 pass, 1 ignored |
+| wasm | 240,448 → 246,024 B (+5,576, +2.3%) |
+| bench, same run | build +1.1%, lanes +1.3% vs plain; Fill into costs nothing measurable vs its Night 3 control |
+| Existing renders | bit-identical to main (90 s parity render) |
+| typecheck / lint / check:contract / check:scenes / phpunit | pass (lint: the same 5 warnings) |
+| verify:web | pass, 8/8 |
+| verify:desktop | pass, 10/10 (1,005 browser checks after the layout pass) |
+
+## Waiting on Chris
+
+Listening: Fill → Drop and Rise + Fill at 70/105/140 bpm, crash level alone and merged,
+slow Rise stepping. ADRs 020–023 to accept. MCP resync + npm publish to ship with v4.
