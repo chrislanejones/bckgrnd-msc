@@ -30,14 +30,23 @@ every request ends in an explicit outcome, and nothing on the audio path allocat
 ### Behavior
 
 A fill can be set to **end on the phrase line** instead of starting on the next bar.
-A phrase is **4 bars (64 steps), aligned to step 0**: the same grid Auto mix and the song
-form already use.
+**Phrase length is a choice: 2, 4, 8 or 16 bars**, aligned to step 0, default **4** (the
+grid Auto mix and the song form already use). All four divide the 16-bar song form, so
+every phrase line is also a 16-bar line or falls inside one evenly. Chris, 11-19-2026:
+"maybe there can be variations".
+
+| Phrase | Steps | Fill (Bar) starts on | Feel |
+|---|---|---|---|
+| 2 bars | 32 | step 16 of 32 | Busy: a fill every other bar |
+| **4 bars (default)** | 64 | step 48 of 64 | The song's own part length |
+| 8 bars | 128 | step 112 of 128 | One fill per two parts |
+| 16 bars | 256 | step 240 of 256 | Once per song pass, before the top |
 
 | Choice | Starts | Plays | Ends on |
 |---|---|---|---|
 | Next bar (today) | Next bar line | 16 steps, recipe 0–15 | The bar line after |
-| Phrase end · Bar | The phrase's last bar line (step 48 of 64) | 16 steps, recipe 0–15 | **The phrase line** |
-| Phrase end · Beat | The phrase's last beat (step 60 of 64) | 4 steps, recipe 12–15 | **The phrase line** |
+| Phrase end · Bar | The phrase's last bar line (step 48 of 64 at 4 bars) | 16 steps, recipe 0–15 | **The phrase line** |
+| Phrase end · Beat | The phrase's last beat (step 60 of 64 at 4 bars) | 4 steps, recipe 12–15 | **The phrase line** |
 
 "Beat" reuses the last beat of the existing one-bar recipe, which is where its roll
 sits. PHP doesn't need new recipes. If a recipe's last beat turns out too thin, a
@@ -45,9 +54,11 @@ sits. PHP doesn't need new recipes. If a recipe's last beat turns out too thin, 
 
 ### Engine scheduling
 
-- `queue_fill_at(request_id, index, at: u8, length: u8) -> u8`, where `at` is 0 next bar
-  or 1 phrase end, and `length` is 0 bar or 1 beat. `queue_fill(id, i)` stays as
-  `queue_fill_at(id, i, 0, 0)`.
+- `queue_fill_at(request_id, index, phrase_bars: u8, length: u8) -> u8`, where
+  `phrase_bars` is 0 (next bar, today's behavior) or 2, 4, 8 or 16, and `length` is 0 bar
+  or 1 beat. Any other value is refused. `queue_fill(id, i)` stays as
+  `queue_fill_at(id, i, 0, 0)`. The phrase length rides on the request, so the engine
+  keeps no phrase setting of its own.
 - `PendingFill` gains `start_serial: u64` and `first_pos: u8` (0 or 12). Both are
   fixed-size, so nothing allocates.
 - On queue, walk the clock with `Transport::following` (as `predict` does, bounded by
@@ -55,8 +66,8 @@ sits. PHP doesn't need new recipes. If a recipe's last beat turns out too thin, 
   `start_serial = serial + onsets_until_start`. `fill_onset` starts the fill when
   `serial == start_serial`. Counted in onsets, so tempo changes move nothing.
 - **Too late for this phrase:** if the start step has already passed (for example a
-  Bar fill asked for during bar 4), the fill goes to the **next** phrase, up to 4 bars
-  away. The `fill queued` bar number says which.
+  Bar fill asked for during bar 4 of a 4-bar phrase), the fill goes to the **next**
+  phrase, up to one phrase away (16 bars at the longest). The `fill queued` bar number says which.
 - **Loops:** the phrase end is the first bar (or beat) whose end is a phrase line **or
   the loop's wrap**. So in a 1- or 2-bar loop the fill plays the loop's last bar and
   turns it around. A loop change while a fill waits recomputes `start_serial` and
@@ -173,13 +184,15 @@ automatic: you set it per scene from the scene menu ("Crash on launch").
 | Where | A | B | C |
 |---|---|---|---|
 | Fill button | "Fill · Bar 8" (phrase end) / "Fill playing" | "Fill · Bar 8 → Drop" | — |
-| Control | A "Fill at" picker beside Fill: **Next bar · Phrase end**, plus Bar · Beat | A Switch on choice **Fill** (pads launch with a fill and land on the phrase line) | "Crash on launch" in the scene menu; a small mark on the pad |
+| Control | A "Fill at" picker beside Fill: **Next bar · Phrase end**, plus Bar · Beat; with Phrase end, a **2 · 4 · 8 · 16** bars picker (the Rise bars pattern, remembered) | A Switch on choice **Fill** (pads launch with a fill and land on the phrase line) | "Crash on launch" in the scene menu; a small mark on the pad |
 | Pad lines | — | "Fill in · Bar 9" → "Filling into Drop" → "Active" | Unchanged |
 | Status line | "Fill queued for the end of bar 8" | "Drop lands on bar 9 after a fill" / "… not started: <reason>" | "Drop active, with a crash" |
 | Shortcuts | — | Shift+1–4 follows Switch on, so it does Fill into with Fill on | — |
 
-**Width.** The Switch on row is the one Lacey is fitting at 1180 and 1280 px right now. A
-fifth option has to be measured there before it is accepted. The fallback is a Fill
+**Width.** The Switch on row now fits at 1180 and 1280 px (Lacey, `ccf3ece`, with checks at
+nine widths). A fifth option, and the phrase bars picker beside Fill, have to be measured
+against those checks before they are accepted. The phrase picker can share the space the
+Rise bars picker uses, since a Rise and a phrase fill are rarely set up at the same moment. The fallback is a Fill
 toggle next to the Fill button, so Switch on stays at four options.
 
 ## Accessibility
@@ -198,7 +211,7 @@ toggle next to the Fill button, so Switch on stays at four options.
 
 | Layer | Cases |
 |---|---|
-| cargo (`fill_tests.rs`, new) | Phrase end Bar starts on 48/112/176/240 and Beat on 60…; a late request rolls to the next phrase; a 1-bar, a 2-bar and a phrase-aligned loop; a tempo change while waiting moves nothing; a loop change re-announces; `fill started` b = 0 / 12 |
+| cargo (`fill_tests.rs`, new) | For each phrase length 2/4/8/16, Bar starts one bar before every phrase line (4 bars: 48/112/176/240) and Beat one beat before; bad `phrase_bars` (3, 5, 32) refused; a late request rolls to the next phrase; a 1-bar, a 2-bar and a phrase-aligned loop; a tempo change while waiting moves nothing; a loop change re-announces; `fill started` b = 0 / 12 |
 | cargo (Fill into) | The scene commits on the onset the fill ends; the landing step's kick is the scene's, not silence and not the fill; render energy is continuous across the line (no gap); refusal is atomic for each part; lanes untouched on refusal; each row of the cancel/replace table; interrupts end both |
 | cargo (C) | Crash fires once on commit; once on 192 (merged); silent under solo; none when stopped; on Rise landing and Fill into |
 | cargo, no allocation | Queue, wait, start, land and cancel under a counting allocator. Use the one `night8/staging` adds if it lands; otherwise add one |
@@ -209,8 +222,10 @@ toggle next to the Fill button, so Switch on stays at four options.
 
 ## Open questions for Chris
 
-1. **Phrase length:** 4 bars on the absolute grid, as Auto mix uses? Or follow the loop
-   when one is set? This proposal does both: phrase lines plus the loop's wrap.
+1. ~~**Phrase length**~~ Answered 11-19-2026: variations. 2 · 4 · 8 · 16 bars, default 4,
+   plus the loop's wrap when a loop is set. Still open: should the choice be saved with
+   the project (a project-format field, ADR-012) or stay a remembered UI preference like
+   Rise's bars? This proposal starts as a UI preference.
 2. **Too late:** if you press in the phrase's last bar, should it wait for the next phrase
    (this proposal, up to about 4 bars away) or be refused?
 3. **Beat length:** is the last beat of the existing one-bar recipe enough, or do you want
@@ -226,7 +241,7 @@ toggle next to the Fill button, so Switch on stays at four options.
 
 | Decision | Touches |
 |---|---|
-| The engine knows a 4-bar phrase grid (and the loop wrap) for fills | Bends ADR-001 again, as ADR-008 did. Same pre-mortem: a track form that isn't 4-bar parts |
+| The engine knows a phrase grid of 2, 4, 8 or 16 bars, passed per request (and the loop wrap) for fills | Bends ADR-001 again, as ADR-008 did. Same pre-mortem: a track form that isn't 4-bar parts |
 | A fill and a scene can be one atomic linked request with a shared deadline | Extends ADR-015 ("one scene and one fill") and leans on the staging fix |
 | A scene launch may make a transition sound when the scene says so | Amends ADR-008 ("a launch makes no transition sound") |
 | Scenes gain an `accent` field | ADR-014 (scene contents), and ADR-012 (whether it's a version bump) |
