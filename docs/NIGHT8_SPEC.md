@@ -220,22 +220,22 @@ toggle next to the Fill button, so Switch on stays at four options.
 | verify-ui.mjs | Fill at picker; Fill into sequence (queued → filling → active); cancel at each stage; aria-labels; Switch on row width at 1180/1280/1440; Shift+N with Fill on |
 | Listening (Chris) | Fill into Drop at 70, 105 and 140 bpm; Bar against Beat; a crash scene against the natural 192 crash |
 
-## Open questions for Chris
+## Decisions applied (11-19-2026)
 
-1. ~~**Phrase length**~~ Answered 11-19-2026: variations. 2 · 4 · 8 · 16 bars, default 4,
-   plus the loop's wrap when a loop is set. Still open: should the choice be saved with
-   the project (a project-format field, ADR-012) or stay a remembered UI preference like
-   Rise's bars? This proposal starts as a UI preference.
-2. **Too late:** if you press in the phrase's last bar, should it wait for the next phrase
-   (this proposal, up to about 4 bars away) or be refused?
-3. **Beat length:** is the last beat of the existing one-bar recipe enough, or do you want
-   dedicated one-beat fills from `Fills.php`?
-4. **Default Fill timing:** keep Next bar, or switch to Phrase end?
-5. **Where Fill into lives:** a fifth Switch on choice, or a toggle next to Fill?
-6. **Rise + fill:** should a Rise be able to end with a fill in its last bar (a
-   `fill_index` on `queue_build`)? It's left out here; it would be B2.
-7. **Crash per scene or per launch?** This proposal makes it per scene (saved). A
-   per-launch modifier (hold a key) is the alternative.
+All seven questions are answered in `docs/NIGHT8_DECISIONS.md`. Where this spec says
+otherwise, the decisions win:
+
+| # | Decision | Changes to this spec |
+|---|---|---|
+| 1 | Phrase 2 · 4 · 8 · 16 bars, default 4, loop end counts; an app preference | As written above |
+| 2 | A late press queues for the next phrase, never refused | As written above; the Fill button reads "Fill · Next phrase" when it rolls over |
+| 3 | One-bar fill only for now | **Drop "Phrase end · Beat"** and `first_pos`. Keep the `length` argument (0 only for now) so more lengths fit later |
+| 4 | Next bar stays the default; Phrase end added; Now kept where supported | Fill has no Now today; nothing to add |
+| 5 | Fill → Drop is its own action beside Fill | **No fifth Switch on choice.** A "Fill → Drop" button beside Fill; Shift+N unchanged |
+| 6 | Rise can finish with a fill (toggle, off) | **In scope** (was B2): `queue_build` gains a fill index; the fill plays the Rise's last bar; the landing scene and lanes commit on the next downbeat, atomically |
+| 7 | Crash accent saved per scene, off, in the versioned project format | As section C; the project-format change needs ADR-012/014 handling |
+
+Later, not Night 8: fill variations (Simple, Busy, Syncopated).
 
 ## ADR-level decisions (for Dara)
 
