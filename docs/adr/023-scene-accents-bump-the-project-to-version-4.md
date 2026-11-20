@@ -10,9 +10,9 @@ field won't know the new field: the MCP companion (vendored contracts, pinned at
 IndexedDB. ADR-014 kept `scenes` out of v1 for the same reason.
 
 ## Decision
-Bump the project to `version: 4`. In v4 every scene states its accent explicitly
-("none" or "crash"), because ADR-014 keeps scenes complete on disk with nothing filled
-from defaults. The v3 → v4 migration writes "none" on every scene, so nothing plays
+Bump the project to `version: 4`. In v4 every scene states its crash accent explicitly
+as a required boolean `crash`, because ADR-014 keeps scenes complete on disk with nothing
+filled from defaults. The v3 → v4 migration writes `crash: false` on every scene, so nothing plays
 differently. Readers refuse v5 and above, as ADR-012 says. Every stored v3 snapshot
 (IndexedDB, native storage, MCP project files) has to keep opening. Today the snapshot
 reader requires `project.version` to equal the current version, so it needs a
@@ -28,7 +28,7 @@ implementation.
 - **Cross-repo:** the MCP companion refuses *every* project the new app saves, crash
   or not, until it vendors the v4 contracts and a new npm version ships (Chris's
   step). The two have to release together.
-- The field name needs care: `accent` already means a boolean on pattern note events.
+- The field is named `crash`, not `accent`: `accent` already means a boolean on pattern note events.
 
 ## Alternatives rejected
 - An optional `accent` within v3, where absent means none: cheaper, with no migration,

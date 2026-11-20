@@ -3957,6 +3957,41 @@ html[data-control-drag="yes"] * {
   border-color: var(--color-acid);
 }
 
+/* Crash on launch: a real checkbox, a whole-row target like the items above it. */
+.scene-menu-check {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-height: var(--control-sm);
+  padding: 0.3rem 0.6rem;
+  border: 1px solid var(--color-line);
+  border-radius: 0.6rem;
+  color: var(--color-fg);
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.scene-menu-check:hover,
+.scene-menu-check:focus-within {
+  border-color: var(--color-acid);
+}
+
+.scene-menu-check input {
+  accent-color: var(--color-acid);
+}
+
+/* The pad's crash mark: a bolt and the word, never color alone. It leads the summary
+   line so a long summary is what gets cut short, not the mark. */
+.scene-crash-mark {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.15rem;
+  color: var(--color-fg);
+  font-weight: 700;
+  vertical-align: bottom;
+}
+
 .scene-menu-group {
   margin-top: 0.25rem;
   font-size: var(--text-label);

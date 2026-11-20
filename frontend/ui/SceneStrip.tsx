@@ -4,8 +4,9 @@
  * choices) and Compare A/B. The status line and the Shift+1–4 hint sit in the panel
  * header (`SceneHeader`), so they cost no rows of their own.
  *
- * A pad press only ever *launches*. Saving, renaming, duplicating and resetting live
- * in each pad's own menu, so a performance click can never overwrite a scene.
+ * A pad press only ever *launches*. Saving, renaming, duplicating, resetting and Crash
+ * on launch live in each pad's own menu, so a performance click can never overwrite a
+ * scene. A pad whose scene crashes on launch says so in words beside a bolt icon.
  *
  * What the pads show comes from the engine: a pad reads Active only after the engine
  * says the scene was applied. Until then it reads Sending…, then Queued · Bar N.
@@ -23,7 +24,7 @@
  */
 
 import { useEffect, useId, useRef, useState } from 'react';
-import { MoreHorizontal, X } from 'lucide-react';
+import { MoreHorizontal, X, Zap } from 'lucide-react';
 import type { Scene, SceneSlotId } from '../lib/contract';
 import { SCENE_SLOTS } from '../lib/contract';
 import {
@@ -104,6 +105,8 @@ type Props = {
   onRename: (slot: SceneSlotId, name: string) => boolean;
   onDuplicate: (from: SceneSlotId, to: SceneSlotId) => void;
   onReset: (slot: SceneSlotId) => void;
+  /** Crash on launch for one slot (project version 4). */
+  onCrash: (slot: SceneSlotId, crash: boolean) => void;
   /** Rendered at the end of the toolbar row (Compare A/B). */
   children?: ReactNode;
 };
@@ -175,11 +178,23 @@ export function SceneStrip(props: Props) {
                 aria-pressed={isActive}
                 aria-keyshortcuts={`Shift+${i + 1}`}
                 aria-describedby={`scene-summary-${slot} scene-line-${slot}`}
+                data-crash={scene.crash ? 'on' : undefined}
                 title={`${preview.description} · Shift+${i + 1}`}
                 onClick={() => props.onLaunch(slot)}
               >
                 <span className="scene-name">{scene.name}</span>
-                <span id={`scene-summary-${slot}`} className="scene-summary">{preview.summary}</span>
+                <span id={`scene-summary-${slot}`} className="scene-summary">
+                  {scene.crash ? (
+                    <>
+                      <span className="scene-crash-mark">
+                        <Zap aria-hidden="true" size={10} strokeWidth={2.5} />
+                        Crash<span className="sr-only"> on launch</span>
+                      </span>
+                      <span aria-hidden="true"> · </span>
+                    </>
+                  ) : null}
+                  {preview.summary}
+                </span>
                 <span className="scene-pad-foot">
                   <span className="scene-mix-preview" aria-hidden="true">
                     {sceneLevels(scene).map((level, index) => (
@@ -226,6 +241,7 @@ export function SceneStrip(props: Props) {
                     props.onReset(slot);
                     setMenuFor(null);
                   }}
+                  onCrash={(on) => props.onCrash(slot, on)}
                 />
               ) : null}
             </div>
@@ -420,6 +436,7 @@ function SceneMenu({
   onRename,
   onDuplicate,
   onReset,
+  onCrash,
 }: {
   scene: Scene;
   scenes: Scene[];
@@ -429,6 +446,7 @@ function SceneMenu({
   onRename: (name: string) => boolean;
   onDuplicate: (to: SceneSlotId) => void;
   onReset: () => void;
+  onCrash: (crash: boolean) => void;
 }) {
   const titleId = useId();
   const ref = useRef<HTMLDivElement>(null);
@@ -520,6 +538,11 @@ function SceneMenu({
           Rename…
         </button>
       )}
+      {/* Saved with the scene; stays open so the change is seen. Undo takes it back. */}
+      <label className="scene-menu-check">
+        <input type="checkbox" checked={scene.crash} onChange={(e) => onCrash(e.target.checked)} />
+        <span>Crash on launch</span>
+      </label>
       <p className="scene-menu-group">Duplicate to</p>
       <div className="scene-menu-row">
         {scenes

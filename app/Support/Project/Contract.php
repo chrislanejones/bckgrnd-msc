@@ -22,7 +22,7 @@ final class Contract
 {
     public const FORMAT = 'bckgrnd-msc/project';
 
-    public const VERSION = 3;
+    public const VERSION = 4;
 
     /** The four scene slots, in order. */
     public const SCENE_SLOTS = ['full', 'sparse', 'build', 'drop'];
@@ -123,6 +123,7 @@ final class Contract
             'params' => $params,
             'stems' => $stems,
             'patterns' => new \stdClass,
+            'crash' => false,
         ];
     }
 
@@ -221,10 +222,11 @@ final class Contract
     }
 
     /**
-     * Read any supported document into a complete, clamped version 2 project.
+     * Read any supported document into a complete, clamped current-version project.
      *
-     * Accepts version 2, version 1 (migrated by adding the track's factory scenes and
-     * changing nothing else) or a legacy preset (the shape `PresetController` writes,
+     * Accepts version 4; version 3 (every scene gains `crash: false`); version 2 (adds
+     * empty `locks`); version 1 (adds the track's factory scenes, changing nothing
+     * else); or a legacy preset (the shape `PresetController` writes,
      * which has no `format`). Anything else is refused: an unknown format, or a
      * version newer than this reader, would otherwise be half-understood and saved
      * back with data missing. A version 2 document whose scenes do not read cleanly
@@ -338,10 +340,11 @@ final class Contract
     }
 
     /**
-     * Read version 2 scenes strictly. Every slot must be present, in order, and
+     * Read stored scenes strictly. Every slot must be present, in order, and
      * complete; any unknown key, wrong type, out-of-range value or pattern reference
      * refuses the whole set. Nothing is clamped or filled here: a scene is written
-     * complete when it is captured.
+     * complete when it is captured. The one thing a migration states is the accent: a
+     * scene older than version 4 has no `crash` key and reads as `crash: false`.
      *
      * @return array{slots: list<array<string, mixed>>}
      */
@@ -359,7 +362,7 @@ final class Contract
 
         $factoryIds = array_column(self::scenesContract()['factory'], 'id');
         $sceneIds = self::sceneParameterIds();
-        $keys = ['slot', 'name', 'factory', 'revision', 'params', 'stems', 'patterns'];
+        $keys = ['slot', 'name', 'factory', 'revision', 'params', 'stems', 'patterns', ...($version >= 4 ? ['crash'] : [])];
         $out = [];
         foreach ($slots as $i => $scene) {
             $slot = self::SCENE_SLOTS[$i];
@@ -388,6 +391,12 @@ final class Contract
                 $fail("slot {$slot} refers to patterns, which this version does not support");
             }
             $scenePatterns = $version < 3 ? [] : Patterns::readScenePatterns($scene['patterns'], $slot);
+            // Version 4 states the accent on every scene; v3 -> v4 writes it off, so
+            // nothing that plays changes.
+            if ($version >= 4 && ! is_bool($scene['crash'])) {
+                $fail("slot {$slot} crash must be true or false");
+            }
+            $crash = $version >= 4 ? $scene['crash'] : false;
 
             $params = $scene['params'];
             if (! is_array($params) || array_diff(array_keys($params), $sceneIds) !== [] || array_diff($sceneIds, array_keys($params)) !== []) {
@@ -438,6 +447,7 @@ final class Contract
                 'params' => $readParams,
                 'stems' => $readStems,
                 'patterns' => $scenePatterns === [] ? new \stdClass : $scenePatterns,
+                'crash' => $crash,
             ];
         }
 

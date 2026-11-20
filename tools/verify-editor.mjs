@@ -416,7 +416,7 @@ try {
   } catch (e) {
     read = { error: e.message };
   }
-  check('project: version 3 with the edited lanes', project.version === 3 && Object.keys(project.patterns).includes('hat'));
+  check('project: version 4 with the edited lanes', project.version === 4 && Object.keys(project.patterns).includes('hat'));
   check('project: serializes and reads back unchanged', isDeepStrictEqual(read, project), read.error ?? '');
   check('project: the captured scene keeps its lanes', Boolean(project.scenes.slots[3].patterns.hat));
 

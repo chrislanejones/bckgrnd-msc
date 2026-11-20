@@ -92,8 +92,8 @@ function withSlot(scenes: Scenes, next: Scene): Scenes {
 }
 
 /**
- * Capture the working mix into a slot. The name and factory recipe stay; the
- * revision goes up, so anything already queued from the old revision is not changed
+ * Capture the working mix into a slot. The name, factory recipe and Crash on launch
+ * stay; the revision goes up, so anything already queued from the old revision is not changed
  * by this (the engine holds its own copy).
  */
 export function captureScene(
@@ -123,7 +123,7 @@ export function renameScene(scenes: Scenes, slot: SceneSlotId, name: string): Sc
   return withSlot(scenes, { ...old, name: clean, revision: old.revision + 1 });
 }
 
-/** Copy one slot's mix (and name) into another slot. */
+/** Copy one slot's mix (and name) into another slot. The target keeps its own Crash on launch. */
 export function duplicateScene(scenes: Scenes, from: SceneSlotId, to: SceneSlotId): Scenes {
   const src = scenes.slots.find((s) => s.slot === from);
   const dst = scenes.slots.find((s) => s.slot === to);
@@ -139,7 +139,10 @@ export function duplicateScene(scenes: Scenes, from: SceneSlotId, to: SceneSlotI
   });
 }
 
-/** Put a slot back to its factory recipe for this track. */
+/**
+ * Put a slot back to its factory mix for this track. Crash on launch is the user's
+ * own choice, not part of the recipe, so it stays as it was.
+ */
 export function resetScene(
   scenes: Scenes,
   slot: SceneSlotId,
@@ -147,7 +150,18 @@ export function resetScene(
 ): Scenes {
   const old = scenes.slots.find((s) => s.slot === slot);
   if (!old) return scenes;
-  return withSlot(scenes, factoryScene(track, old.factory, slot, old.revision + 1));
+  return withSlot(scenes, { ...factoryScene(track, old.factory, slot, old.revision + 1), crash: old.crash });
+}
+
+/**
+ * Turn Crash on launch on or off for one slot (ADR-022). Explicit only: nothing else
+ * ever sets it. The revision moves, as for a rename, so the slot reads as changed;
+ * a launch already queued keeps the accent it was sent with.
+ */
+export function setSceneCrash(scenes: Scenes, slot: SceneSlotId, crash: boolean): Scenes {
+  const old = scenes.slots.find((s) => s.slot === slot);
+  if (!old || old.crash === crash) return scenes;
+  return withSlot(scenes, { ...old, crash, revision: old.revision + 1 });
 }
 
 /** Stored levels for the miniature mixer, accounting for both cuts and solos. */
@@ -430,6 +444,14 @@ export const isFillEvent = (kind: number): boolean =>
   (kind >= EVENT.fillQueued && kind <= EVENT.fillRejected) ||
   kind === EVENT.fillLinked ||
   kind === EVENT.fillUnlinked;
+/**
+ * The status line for `accentFired` (kind 53, `b`: 0 silent under a solo, 1 played,
+ * 2 merged with the Drop's own crash). A crash you could hear is said; a silent one
+ * under a solo says nothing, so the line stays "<name> active".
+ */
+export function accentStatus(name: string, b: number): string | null {
+  return b === 1 || b === 2 ? `${name} active, with a crash` : null;
+}
 
 /** Whether an engine event kind belongs to a scene launch or a timed build. */
 export const isLaunchEvent = (kind: number): boolean =>

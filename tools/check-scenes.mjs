@@ -307,6 +307,27 @@ check('a Rise refused names the fill or the lanes, and keeps the Night 7 words o
 check('a Fill into canceled: by the user, once filling, or by Stop (US spelling in new words)',
   fl.fillIntoCancelled('Drop', 10, false) === 'Fill → Drop canceled' && fl.fillIntoCancelled('Drop', 10, true) === 'Drop canceled; the fill plays out its bar'
   && fl.fillIntoCancelled('Drop', 2, false) === 'Fill → Drop canceled: playback stopped');
+// Crash on launch (project version 4, ADR-022): off by default, set only explicitly,
+// kept by a capture and a reset, and one revision step like a rename.
+check('every factory scene has its crash off', scenes.slots.every((x) => x.crash === false));
+const crashed = s.setSceneCrash(scenes, 'drop', true);
+const crashDrop = crashed.slots.find((x) => x.slot === 'drop');
+check('the toggle turns one slot on and moves its revision', crashDrop.crash === true && crashDrop.revision === factory('drop').revision + 1
+  && crashed.slots.filter((x) => x.slot !== 'drop').every((x, i) => x === scenes.slots.filter((y) => y.slot !== 'drop')[i]));
+check('setting it to what it is changes nothing', s.setSceneCrash(crashed, 'drop', true) === crashed);
+check('the mix is untouched by the toggle', s.sameMix(crashDrop, factory('drop')) && JSON.stringify(crashDrop.patterns) === '{}');
+const recaptured = s.captureScene(crashed, 'drop', working).slots.find((x) => x.slot === 'drop');
+check('capturing over a scene keeps its crash', recaptured.crash === true && recaptured.params['fx.filter'] === working.params['fx.filter']);
+check('a new capture into a slot without one stays off', s.captureScene(scenes, 'build', working).slots.find((x) => x.slot === 'build').crash === false);
+check('reset to factory keeps the crash: it is the user’s, not the recipe’s', s.resetScene(crashed, 'drop', track).slots.find((x) => x.slot === 'drop').crash === true);
+check('duplicate keeps the target slot’s own crash', s.duplicateScene(crashed, 'drop', 'full').slots.find((x) => x.slot === 'full').crash === false
+  && s.duplicateScene(crashed, 'full', 'drop').slots.find((x) => x.slot === 'drop').crash === true);
+check('turning it off again is explicit too', s.setSceneCrash(crashed, 'drop', false).slots.find((x) => x.slot === 'drop').crash === false);
+// Event 53: the status says the crash when it was heard, merged or not, and stays quiet under a solo.
+check('a played crash is said', s.accentStatus('Drop', 1) === 'Drop active, with a crash');
+check('a merged crash is said the same way', s.accentStatus('Drop', 2) === 'Drop active, with a crash');
+check('a crash silent under a solo says nothing', s.accentStatus('Drop', 0) === null);
+check('accentFired is not a launch event, so it never settles a request', !s.isLaunchEvent(s.EVENT.accentFired));
 
 const vec = s.sceneVector(applied);
 const back = s.mixFromVector(vec);

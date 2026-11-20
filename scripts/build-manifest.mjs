@@ -17,7 +17,10 @@ const git = (...args) => execFileSync('git', args, { cwd: root, encoding: 'utf8'
 const manifest = {
   format: 'bckgrnd-msc/build', version: 1, appCommit: git('rev-parse', 'HEAD'),
   dirty: git('status', '--porcelain', '--untracked-files=normal') !== '',
-  renderer: 'project-renderer-1', projectVersion: 3, snapshotVersion: 1,
+  renderer: 'project-renderer-1',
+  // The musical version comes from the contract, so a format bump can't ship a stale stamp.
+  projectVersion: JSON.parse(readFileSync(resolve(root, 'contracts/project.schema.json'), 'utf8')).properties.version.const,
+  snapshotVersion: 1,
   frontend: hashTree(resolve(root, 'frontend')),
   engine: hashTree(resolve(root, 'public/wasm')), library: hashTree(resolve(root, 'public/library')),
   contracts: hashTree(resolve(root, 'contracts')), shared: hashTree(resolve(root, 'public/shared')),
