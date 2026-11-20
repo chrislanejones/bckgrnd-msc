@@ -113,6 +113,27 @@ type Inbound =
       length?: number;
     }
   | { type: 'cancelFill'; requestId: number }
+  | {
+      /**
+       * Fill into (docs/NIGHT8_PROTOCOL.md): a phrase fill and the scene that commits on
+       * the onset it ends, as one request. Both are accepted or neither is.
+       */
+      type: 'fillInto';
+      fillId: number;
+      sceneId: number;
+      generation: number;
+      index: number;
+      /** 0 the next bar, or 2, 4, 8 or 16: the fill ends on that phrase line. */
+      phrase?: number;
+      /** 0, one bar. The only length so far. */
+      length?: number;
+      values: ArrayLike<number>;
+      deck?: DeckId;
+      /** The lanes the scene sets, compiled (NIGHT4_PROTOCOL.md); applied with it. */
+      patterns?: Float32Array;
+      /** The request id those lanes carry in events. */
+      patternsId?: number;
+    }
   | { type: 'gestureBegin'; token: number; kind: number }
   | { type: 'gestureEnd'; token: number }
   | { type: 'gestureRenew'; token: number }
@@ -158,6 +179,9 @@ const EVENT_SCENE_APPLIED = 2;
 const EVENT_SCENE_CANCELLED = 3;
 const EVENT_SCENE_REJECTED = 5;
 const EVENT_FILL_REJECTED = 15;
+/** `b` of a refused Fill into's two `rejected` events: the part refused (`fills::detail`). */
+const FILL_INTO_PART_SCENE = 1;
+const FILL_INTO_PART_LANES = 3;
 const EVENT_PATTERNS_REJECTED = 35;
 const EVENT_BUILD_APPLIED = 42;
 const EVENT_BUILD_CANCELLED = 43;
@@ -502,8 +526,15 @@ class EngineProcessor extends AudioWorkletProcessor {
         const id = message.requestId >>> 0;
         const cancelled = engine ? engine.cancel_fill(id) : false;
         this.port.postMessage({ type: 'fillCancelResult', deck: this.live, requestId: id, cancelled });
+        // A linked fill's cancel also cancels its scene or build: say so now.
+        this.drainEvents(this.live, engine);
         return;
       }
+
+      case 'fillInto':
+        this.queueFillInto(message);
+        this.drainEvents(this.live, this.engines[this.live]);
+        return;
 
       // Gestures are the live deck's: they are something the performer is doing to
       // what they hear. The outgoing deck's are released when a mix starts.
@@ -720,6 +751,67 @@ class EngineProcessor extends AudioWorkletProcessor {
     }
     const index = Number.isInteger(message.index) && message.index >= 0 ? message.index : 0xffffffff;
     engine.queue_fill_at(requestId, index >>> 0, fillPhrase(message.phrase), fillLength(message.length));
+  }
+
+  /**
+   * Hand a Fill into to the live engine, or refuse both of its parts here, each in the
+   * engine's own `rejected` shape (`fill rejected` for the fill, `scene rejected` for
+   * the scene, `b` the part): a scene vector that is not 44 long (`invalid`, part 1),
+   * an auto-mix in progress (`mixing`), a stale deck or generation, no engine yet (`not
+   * playing`), or lanes the engine refused (`invalid`, part 3). The engine checks the
+   * rest and reports its own outcome for both parts.
+   */
+  private queueFillInto(message: Extract<Inbound, { type: 'fillInto' }>): void {
+    const fillId = message.fillId >>> 0;
+    const sceneId = message.sceneId >>> 0;
+    const values = message.values;
+    let refusal = 0;
+    let part = 0;
+    if (values == null || values.length !== SCENE_LEN) {
+      refusal = REASON_INVALID;
+      part = FILL_INTO_PART_SCENE;
+    } else if (this.mix) refusal = REASON_MIXING;
+    else if (
+      (message.deck !== undefined && message.deck !== this.live) ||
+      message.generation !== this.generation[this.live]
+    )
+      refusal = REASON_STALE;
+    const engine = this.engines[this.live];
+    if (refusal === 0 && !engine) refusal = REASON_NOT_PLAYING;
+    if (refusal !== 0 || !engine) {
+      this.postSceneEvents(this.live, [
+        EVENT_FILL_REJECTED, fillId, refusal, part,
+        EVENT_SCENE_REJECTED, sceneId, refusal, part,
+      ]);
+      return;
+    }
+    // The scene's lanes go in first, linked to it, as a launch's do. Refused lanes
+    // refuse the whole request: half a Fill into would play something nobody captured.
+    if (message.patterns && message.patterns.length > 0) {
+      const linkId = (message.patternsId ?? 0) >>> 0;
+      if (engine.queue_patterns(linkId, 2, sceneId, message.patterns) !== 0) {
+        this.postSceneEvents(this.live, [
+          EVENT_FILL_REJECTED, fillId, REASON_INVALID, FILL_INTO_PART_LANES,
+          EVENT_SCENE_REJECTED, sceneId, REASON_INVALID, FILL_INTO_PART_LANES,
+        ]);
+        return;
+      }
+    }
+    for (let i = 0; i < SCENE_LEN; i += 1) this.sceneIn[i] = Number(values[i]);
+    const index = Number.isInteger(message.index) && message.index >= 0 ? message.index : 0xffffffff;
+    const verdict = engine.queue_fill_into(
+      fillId,
+      index >>> 0,
+      fillPhrase(message.phrase),
+      fillLength(message.length),
+      sceneId,
+      this.sceneIn,
+    );
+    if (verdict === 0) {
+      // The scene is the pending one now: its `applied` carries it to the idle deck.
+      this.scenePending.set(this.sceneIn);
+      this.scenePendingId = sceneId;
+    }
   }
 
   /**

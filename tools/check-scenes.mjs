@@ -154,6 +154,36 @@ check('the status words for a stopped, moved, reloaded and panicked rise',
 check('a refused rise says to press Play, or not while scratching',
   s.BUILD_REFUSAL[7] === 'press Play first' && s.BUILD_REFUSAL[3] === 'not while the deck is scratched or braking');
 
+// Fills and Fill into (Night 8): kinds 11-15, 51 and 52 fold into a fill request.
+check('fill linked and unlinked are 51 and 52, not launch events',
+  s.EVENT.fillLinked === 51 && s.EVENT.fillUnlinked === 52 && !s.isLaunchEvent(51) && !s.isLaunchEvent(52));
+const fq = { requestId: 60, status: 'sending' };
+const fill1 = s.foldFillEvent(fq, { kind: s.EVENT.fillQueued, id: 60, a: 4, b: 48 });
+check('a phrase fill queued carries the bar it plays', fill1.status === 'queued' && fill1.bar === 4 && s.isFillPending(fill1));
+const linked = s.foldFillEvent(fill1, { kind: s.EVENT.fillLinked, id: 60, a: 61, b: 64 });
+check('fill linked names the scene and the landing step', linked.linkedTo === 61 && linked.landing === 64 && linked.status === 'queued');
+const moved = s.foldFillEvent(linked, { kind: s.EVENT.fillQueued, id: 60, a: 1, b: 0 });
+check('a loop change re-announcing a linked fill moves its bar and keeps the link', moved.bar === 1 && moved.linkedTo === 61);
+const fplay = s.foldFillEvent(linked, { kind: s.EVENT.fillStarted, id: 60, a: 48, b: 0 });
+check('started is playing and still linked', fplay.status === 'playing' && fplay.linkedTo === 61 && s.isFillPending(fplay));
+check('a late queued cannot rewind a playing fill', s.foldFillEvent(fplay, { kind: s.EVENT.fillQueued, id: 60, a: 8, b: 112 }) === fplay);
+const unlinked = s.foldFillEvent(fplay, { kind: s.EVENT.fillUnlinked, id: 60, a: 10, b: 0 });
+check('unlinked drops the partner and keeps playing', unlinked.status === 'playing' && unlinked.linkedTo === undefined && unlinked.landing === undefined);
+const fend = s.foldFillEvent(fplay, { kind: s.EVENT.fillEnded, id: 60, a: 64, b: 0 });
+check('ended on its line settles it', fend.status === 'ended' && !s.isFillPending(fend) && fend.reason === undefined);
+check('nothing moves a fill after it ended', s.foldFillEvent(fend, { kind: s.EVENT.fillLinked, id: 60, a: 9, b: 0 }) === fend);
+const cut = s.foldFillEvent(fplay, { kind: s.EVENT.fillEnded, id: 60, a: -1, b: 2 });
+check('cut short by Stop settles with the reason', cut.status === 'ended' && cut.reason === 2);
+const frej = s.foldFillEvent(fq, { kind: s.EVENT.fillRejected, id: 60, a: 8, b: 2 });
+check('a refused Fill into keeps the reason and the part', frej.status === 'rejected' && frej.reason === 8 && frej.part === 2);
+const fcan = s.foldFillEvent(linked, { kind: s.EVENT.fillCancelled, id: 60, a: 10, b: 0 });
+check('cancelled settles with its reason', fcan.status === 'cancelled' && fcan.reason === 10 && !s.isFillPending(fcan));
+check("another fill's events do not move this one", s.foldFillEvent(linked, { kind: s.EVENT.fillStarted, id: 61, a: 0, b: 0 }) === linked);
+// The Fill into's scene is a launch like any other: queued with the landing bar, then applied.
+const into = s.foldSceneEvent({ ...req, requestId: 61 }, { kind: s.EVENT.sceneQueued, id: 61, a: 5, b: 64 });
+check("a Fill into's scene queues with its landing bar", into.status === 'queued' && into.bar === 5);
+check("a Fill into's scene refused settles with the reason", s.foldSceneEvent(into, { kind: s.EVENT.sceneRejected, id: 61, a: 8, b: 2 }).status === 'rejected');
+
 const vec = s.sceneVector(applied);
 const back = s.mixFromVector(vec);
 check('mixFromVector inverts sceneVector', s.sameMix(s.copyMix(back), applied) && s.sceneVector(back).every((v, i) => v === vec[i]));

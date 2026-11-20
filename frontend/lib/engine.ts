@@ -65,6 +65,8 @@ export const ENGINE_EVENT = {
   buildRejected: 45,
   buildStarted: 46,
   buildProgress: 47,
+  fillLinked: 51,
+  fillUnlinked: 52,
 } as const;
 
 /** How many bars a timed build may rise over (docs/NIGHT7_PROTOCOL.md). */
@@ -77,6 +79,12 @@ export type BuildBars = (typeof BUILD_BARS)[number];
  */
 export const FILL_PHRASE_BARS = [0, 2, 4, 8, 16] as const;
 export type FillPhrase = (typeof FILL_PHRASE_BARS)[number];
+
+/**
+ * `b` of the `fillRejected` and `sceneRejected` a refused Fill into posts: which part
+ * was refused (0: the whole request, such as not playing).
+ */
+export const FILL_INTO_REJECTED_PART = { scene: 1, fill: 2, lanes: 3 } as const;
 
 /** `b` of a `buildRejected` with reason `invalid`: which part was refused. */
 export const BUILD_REJECTED_PART = { bars: 1, target: 2, land: 3 } as const;
@@ -107,7 +115,8 @@ export type GestureKind = (typeof GESTURE_KIND)[keyof typeof GESTURE_KIND];
  * |---|---|---|
  * | sceneQueued, fillQueued | predicted bar (1-based) | predicted step |
  * | sceneApplied | step it applied on (-1 for Now / stopped) | 0 |
- * | sceneCancelled, sceneRejected, fillCancelled, fillRejected | reason (`ENGINE_REASON`) | 0 |
+ * | sceneCancelled, fillCancelled | reason (`ENGINE_REASON`) | 0 |
+ * | sceneRejected, fillRejected | reason (`ENGINE_REASON`) | 0, or for a Fill into the part refused (`FILL_INTO_REJECTED_PART`) |
  * | sceneReplaced | request id that replaced it | 0 |
  * | fillStarted | step | 0 |
  * | fillEnded | step the track's drums resume on (-1 when cut short) | 0, or the reason it was cut short |
@@ -123,6 +132,8 @@ export type GestureKind = (typeof GESTURE_KIND)[keyof typeof GESTURE_KIND];
  * | buildCancelled | reason (`ENGINE_REASON`) | 0 |
  * | buildReplaced | request id that replaced it (0: the idle deck's follower) | 0 |
  * | buildRejected | reason (`ENGINE_REASON`) | for `invalid`, the part (`BUILD_REJECTED_PART`) |
+ * | fillLinked | id of the request the fill leads into | predicted landing step |
+ * | fillUnlinked | reason (`ENGINE_REASON`) its partner went | 0 |
  *
  * A phrase fill's `fillQueued` names the bar it plays (the phrase's last), and comes
  * again if a loop change moves it (docs/NIGHT8_PROTOCOL.md).
@@ -699,8 +710,44 @@ export class EngineHost {
   }
 
   /**
+   * Fill into (docs/NIGHT8_PROTOCOL.md): play fill `index` as `queueFill` would with
+   * `phrase`, and commit the scene `values` (44 values, copied here) on the onset the
+   * fill ends, before that step's notes, as one request. `patterns` are the lanes the
+   * scene sets, compiled, as for `queueScene`.
+   *
+   * Both parts are accepted or neither is. Outcomes arrive through `onSceneEvents`, for
+   * the fill as `fillQueued`, `fillLinked` (with the landing step), `fillStarted`,
+   * `fillEnded`, and for the scene (`sceneId`) as a launch's: `sceneQueued` with the
+   * landing bar, then `sceneApplied`. A refusal posts `fillRejected` and `sceneRejected`
+   * with the same reason and the part (`FILL_INTO_REJECTED_PART`). Another scene or a
+   * Rise replaces the scene, and the fill carries on unlinked (`fillUnlinked`).
+   */
+  queueFillInto(
+    fillId: number,
+    sceneId: number,
+    index: number,
+    values: ArrayLike<number>,
+    generation: number,
+    options: { phrase?: FillPhrase; patterns?: { requestId: number; data: Float32Array } } = {},
+  ): void {
+    const { phrase = 0, patterns } = options;
+    this.post({
+      type: 'fillInto',
+      fillId,
+      sceneId,
+      generation,
+      index,
+      ...(phrase ? { phrase } : {}),
+      values: Array.from(values),
+      ...(patterns ? { patterns: patterns.data, patternsId: patterns.requestId } : {}),
+    });
+  }
+
+  /**
    * Withdraw a queued fill. Resolves true when it was still waiting for its bar (a
    * `fillCancelled` event follows), false otherwise; a fill already playing runs its bar.
+   * A Fill into's fill cancels the whole request: resolves true while the scene is
+   * still to land, and a fill already playing runs its bar unlinked.
    */
   cancelFill(requestId: number): Promise<boolean> {
     return this.ask(this.fillCancelWaiters, requestId, { type: 'cancelFill', requestId });

@@ -150,6 +150,9 @@ pub enum Timing {
     Beat,
     /// The first eligible onset on a multiple of 16 steps.
     Bar,
+    /// On the onset serial [`PendingScene::due`]: the scene of a Fill into, which
+    /// commits on the onset its fill ends (`docs/NIGHT8_PROTOCOL.md`). Never on the wire.
+    Linked,
 }
 
 impl Timing {
@@ -165,7 +168,7 @@ impl Timing {
     /// Steps between eligible onsets, or `None` for `Now`, which waits on no onset.
     pub fn grid(self) -> Option<usize> {
         match self {
-            Self::Now => None,
+            Self::Now | Self::Linked => None,
             Self::Beat => Some(4),
             Self::Bar => Some(16),
         }
@@ -206,6 +209,11 @@ pub mod event {
     pub const BUILD_REJECTED: u8 = 45;
     pub const BUILD_STARTED: u8 = 46;
     pub const BUILD_PROGRESS: u8 = 47;
+    /// Linked requests (`docs/NIGHT8_PROTOCOL.md`): a fill tied to the scene or build it
+    /// leads into (`a` = that request's id, `b` = the predicted landing step), and the
+    /// tie broken while the fill lives on as a plain fill (`a` = the reason).
+    pub const FILL_LINKED: u8 = 51;
+    pub const FILL_UNLINKED: u8 = 52;
 }
 
 /// Reason codes, carried by `cancelled` and `rejected` events and returned by
@@ -222,6 +230,9 @@ pub mod reason {
     pub const ALREADY_PLAYING: u8 = 8;
     pub const STALE: u8 = 9;
     pub const USER: u8 = 10;
+    /// One part of a linked request was cancelled because its partner was replaced
+    /// (`docs/NIGHT8_PROTOCOL.md`).
+    pub const LINKED: u8 = 11;
 }
 
 /// Numbers per event: `[kind, request id, a, b]`.
@@ -310,6 +321,8 @@ pub struct PendingScene {
     /// The onset serial when the boundary was announced. Only an onset with a higher
     /// serial can apply it.
     pub queued_at: u64,
+    /// For [`Timing::Linked`], the onset serial it commits on. Unused otherwise.
+    pub due: u64,
     /// The snapshot, copied when queued.
     pub values: [f32; SCENE_LEN],
 }
@@ -326,6 +339,16 @@ pub struct PendingFill {
     /// The onset serial its first step plays on: counted in onsets, so a tempo change
     /// moves nothing. Recomputed when the loop changes under it.
     pub start_serial: u64,
+    /// The request it leads into, if any.
+    pub link: Link,
+}
+
+/// What a fill is tied to (`docs/NIGHT8_PROTOCOL.md`): nothing, or the scene it leads
+/// into (Fill into).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Link {
+    None,
+    Scene(u32),
 }
 
 /// The fill playing now.
@@ -335,6 +358,8 @@ pub struct ActiveFill {
     pub index: u32,
     /// Which of its sixteen steps the current onset plays, 0..16.
     pub pos: usize,
+    /// The request it leads into, if any.
+    pub link: Link,
 }
 
 /// The scheduler's state: the onset serial, the pending scene, the pending and
@@ -376,8 +401,11 @@ impl Scheduler {
                     request_id as f64,
                     0.0,
                 );
-                if timing == Timing::Now {
-                    (Timing::Now, self.serial)
+                // A Fill into's scene replaced: its fill plays on as a plain fill, and
+                // the new scene keeps its own timing, not the fill's end.
+                self.unlink_fill(Link::Scene(old.request_id), reason::USER);
+                if timing == Timing::Now || old.timing == Timing::Linked {
+                    (timing, self.serial)
                 } else {
                     (old.timing, old.queued_at)
                 }
@@ -388,9 +416,26 @@ impl Scheduler {
             request_id,
             timing,
             queued_at,
+            due: 0,
             values: copy,
         });
         self.announce(t);
+    }
+
+    /// Put `values` (already validated) in the pending slot as a Fill into's scene,
+    /// committing on onset serial `due`. A scene already pending is replaced, as by
+    /// [`Scheduler::queue`]. Announced with its fill, by [`Scheduler::announce_fill`].
+    pub fn queue_linked(&mut self, request_id: u32, values: &[f32], due: u64) {
+        let mut copy = [0.0f32; SCENE_LEN];
+        copy.copy_from_slice(&values[..SCENE_LEN]);
+        self.replace_pending(request_id);
+        self.scene = Some(PendingScene {
+            request_id,
+            timing: Timing::Linked,
+            queued_at: self.serial,
+            due,
+            values: copy,
+        });
     }
 
     /// Report `queued` for the pending scene with a fresh prediction. Called when it
@@ -409,19 +454,31 @@ impl Scheduler {
 
     /// Work out the pending fill's start onset afresh (the loop may have moved its
     /// phrase end) and report `fill queued` with the bar and step it starts on.
+    ///
+    /// A Fill into's scene moves with it, to the onset the fill ends on, and is
+    /// re-announced (`scene queued`) with its landing.
     #[inline(never)]
     pub fn announce_fill(&mut self, t: &Transport) {
         let serial = self.serial;
         let Some(f) = self.fill.as_mut() else { return };
         let ahead = fill_offset(t, f.phrase_bars);
         f.start_serial = serial + 1 + ahead as u64;
+        let (id, start_serial, link) = (f.request_id, f.start_serial, f.link);
         let step = walk(t, ahead);
-        self.events.push(
-            event::FILL_QUEUED,
-            f.request_id,
-            (step / 16 + 1) as f64,
-            step as f64,
-        );
+        self.events
+            .push(event::FILL_QUEUED, id, (step / 16 + 1) as f64, step as f64);
+        if let Link::Scene(scene) = link {
+            if let Some(p) = self.scene.as_mut().filter(|p| p.request_id == scene) {
+                p.due = start_serial + FILL_STEPS as u64;
+                let land = walk(t, ahead + FILL_STEPS);
+                self.events.push(
+                    event::SCENE_QUEUED,
+                    scene,
+                    (land / 16 + 1) as f64,
+                    land as f64,
+                );
+            }
+        }
     }
 
     /// Whether a fill is queued or playing. A second one is refused while either is.
@@ -441,14 +498,64 @@ impl Scheduler {
     /// `phrase_bars` picks ([`fill_offset`]), and report `fill queued`. The caller has
     /// already checked the arguments and refused a request while
     /// [`Scheduler::fill_busy`].
-    pub fn queue_fill(&mut self, request_id: u32, index: u32, phrase_bars: u8, t: &Transport) {
+    ///
+    /// `link` ties it to the request it leads into.
+    pub fn queue_fill(
+        &mut self,
+        request_id: u32,
+        index: u32,
+        phrase_bars: u8,
+        link: Link,
+        t: &Transport,
+    ) {
         self.fill = Some(PendingFill {
             request_id,
             index,
             phrase_bars,
             start_serial: u64::MAX,
+            link,
         });
         self.announce_fill(t);
+    }
+
+    /// The pending fill's id and link, and whether it is pending (true) or playing
+    /// (false), if `request_id` is either.
+    pub fn fill_state(&self, request_id: u32) -> Option<(bool, Link)> {
+        if let Some(f) = self.fill.filter(|f| f.request_id == request_id) {
+            return Some((true, f.link));
+        }
+        self.active_fill
+            .filter(|a| a.request_id == request_id)
+            .map(|a| (false, a.link))
+    }
+
+    /// The fill tied to `partner` loses it and carries on as a plain fill, waiting or
+    /// playing: `fill unlinked` with `why`. Nothing if no fill is tied to it.
+    #[inline(never)]
+    pub fn unlink_fill(&mut self, partner: Link, why: u8) {
+        let pending = self.fill.as_mut().map(|f| (&mut f.link, f.request_id));
+        let active = self
+            .active_fill
+            .as_mut()
+            .map(|a| (&mut a.link, a.request_id));
+        for (link, id) in [pending, active].into_iter().flatten() {
+            if *link == partner {
+                *link = Link::None;
+                self.events.push(event::FILL_UNLINKED, id, why as f64, 0.0);
+            }
+        }
+    }
+
+    /// The fill tied to `partner` goes with it: cancelled with `why` while it waits.
+    /// One already playing runs its bar (Night 3) and is unlinked instead.
+    #[inline(never)]
+    pub fn drop_fill(&mut self, partner: Link, why: u8) {
+        if let Some(f) = self.fill.filter(|f| f.link == partner) {
+            self.fill = None;
+            self.events
+                .push(event::FILL_CANCELLED, f.request_id, why as f64, 0.0);
+        }
+        self.unlink_fill(partner, why);
     }
 
     /// The fill's part of an onset, run after [`Scheduler::on_onset`] has counted it
@@ -478,6 +585,7 @@ impl Scheduler {
                     request_id: f.request_id,
                     index: f.index,
                     pos: 0,
+                    link: f.link,
                 });
                 self.events
                     .push(event::FILL_STARTED, f.request_id, step as f64, 0.0);
@@ -523,11 +631,12 @@ impl Scheduler {
     #[inline]
     pub fn on_onset(&mut self, step: usize) -> Option<PendingScene> {
         self.serial += 1;
-        let due = self.scene.as_ref().is_some_and(|p| {
-            self.serial > p.queued_at
-                && p.timing
-                    .grid()
-                    .is_some_and(|grid| step.is_multiple_of(grid))
+        let due = self.scene.as_ref().is_some_and(|p| match p.timing {
+            Timing::Linked => self.serial >= p.due,
+            timing => {
+                self.serial > p.queued_at
+                    && timing.grid().is_some_and(|grid| step.is_multiple_of(grid))
+            }
         });
         if due {
             self.scene.take()
@@ -554,7 +663,11 @@ impl Scheduler {
             .as_ref()
             .is_some_and(|p| p.request_id == request_id)
         {
-            self.cancel_pending(reason::USER)
+            self.cancel_pending(reason::USER);
+            // A Fill into is one request: its waiting fill goes too, and a playing one
+            // runs its bar unlinked.
+            self.drop_fill(Link::Scene(request_id), reason::USER);
+            true
         } else {
             false
         }
@@ -567,6 +680,7 @@ impl Scheduler {
             Some(p) => {
                 self.events
                     .push(event::SCENE_REPLACED, p.request_id, by as f64, 0.0);
+                self.unlink_fill(Link::Scene(p.request_id), reason::USER);
                 true
             }
             None => false,

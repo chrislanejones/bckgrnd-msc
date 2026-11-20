@@ -114,6 +114,12 @@ pub mod scene {
     pub mod build {
         pub use crate::build::{detail, value_at, BUILD_BARS};
     }
+
+    /// Fill into (`docs/NIGHT8_PROTOCOL.md`): the codes for which part of the request
+    /// was refused.
+    pub mod fill {
+        pub use crate::fills::detail;
+    }
 }
 use scheduler::{reason, SCENE_LEN};
 pub use transport::Transport;
@@ -1301,13 +1307,6 @@ impl Engine {
     /// from the step after. The same as [`Engine::queue_fill_at`] with phrase 0.
     pub fn queue_fill(&mut self, request_id: u32, index: u32) -> u8 {
         self.queue_fill_at(request_id, index, 0, 0)
-    }
-
-    /// Cancel the queued fill if it is `request_id` (`fill cancelled`, reason 10).
-    /// False when it is not queued: never queued, already started (a playing fill
-    /// runs its bar), or already cancelled.
-    pub fn cancel_fill(&mut self, request_id: u32) -> bool {
-        self.scheduler.cancel_fill(request_id)
     }
 
     /// The request id of the queued fill, if one is waiting for its bar.

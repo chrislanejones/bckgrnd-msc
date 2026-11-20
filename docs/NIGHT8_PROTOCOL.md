@@ -76,3 +76,100 @@ it.
 
 The host API is `EngineHost.queueFill(requestId, index, generation, phrase = 0)` with
 `FILL_PHRASE_BARS` in `frontend/lib/engine.ts`.
+
+## Fill into
+
+One press: a phrase fill, and a scene (Drop, or any slot) that **commits on the onset
+the fill ends**. A separate performance action beside Fill, not a Switch on choice
+(`NIGHT8_DECISIONS.md` §5).
+
+### The request
+
+| Engine (`engine-core/src/fills.rs`) | Returns |
+|---|---|
+| `queue_patterns(patternsId, 2, link = scene_id, data)` just before, if the scene sets lanes | 0 staged, else `patterns rejected` (Night 4) |
+| `queue_fill_into(fill_id: u32, index: u32, phrase_bars: u8, length: u8, scene_id: u32, values: &[f32]) -> u8` | 0 accepted, else the reason |
+| `cancel_fill(fill_id) -> bool` | true while there was something to cancel (below) |
+| `cancel_scene(scene_id) -> bool` | Unchanged signature; cancels the whole request (below) |
+
+- `phrase_bars` and `length` are `queue_fill_at`'s: the fill plays the phrase's last
+  bar (or the next bar with phrase 0), and the scene lands on the phrase line.
+- `values` is the 44-value scene vector (Night 3), validated as a whole.
+- Two request ids: the fill's and the scene's. The host already numbers fills and
+  launches from one counter, so they never collide.
+
+### All or nothing
+
+Everything is checked before anything changes: the scene vector, the fill (index,
+phrase, length), the transport, and that no fill is queued or playing. Either both parts
+are queued or neither is.
+
+| Refused for | Reason | `b` (part) |
+|---|---|---|
+| The scene vector | 1 invalid | 1 scene |
+| The fill index, phrase or length | 1 invalid | 2 fill |
+| A fill already queued or playing | 8 already playing | 2 fill |
+| Stopped | 7 not playing | 0 the whole request |
+| A scratch, brake or backspin | 3 transport | 0 |
+| The lanes (worklet: the engine refused the payload) | 1 invalid | 3 lanes |
+| Mixing, a stale generation, no engine yet (worklet) | 6, 9, 7 | 0 (1 for a vector that is not 44 long) |
+
+A refusal posts **both** `fill rejected` (15, the fill's id) and `scene rejected` (5,
+the scene's id), with the same reason and the same `b`, then withdraws the lanes staged
+for the scene with that reason. A scene, a build or a fill already pending keeps what it
+was accepted with, lanes included (the staging rule from `night8/staging`).
+
+Accepted, the events are, in order: `scene replaced` for a scene that was pending (and
+`patterns cancelled`, reason 10, for its lanes), `fill queued` (the bar the fill plays),
+`scene queued` (`a` = the landing bar, `b` = the landing step), and `fill linked` (51).
+
+### Timing
+
+- No new slots: the one pending fill and the one pending scene, tied by id. The scene
+  waits as `Timing::Linked`, due on onset serial `start_serial + 16`.
+- On the landing onset the order is unchanged (Night 4, Night 7):
+
+  > pattern edit → **the scene commits, with its lanes** → build → `fill_onset` (**the
+  > fill ends**) → that step's notes.
+
+  So the downbeat plays the new scene's drums: not silence, and not the fill.
+- A loop change while waiting moves both together: `fill queued` and `scene queued` are
+  posted again with the new bar and landing. Tempo changes move nothing.
+
+### Cancel and replace
+
+| Situation | Outcome |
+|---|---|
+| `cancel_fill(fill_id)` or `cancel_scene(scene_id)` before the fill starts | Both cancelled, reason 10, and the lanes (10). Events: `scene cancelled`, `fill cancelled`, `patterns cancelled` |
+| Either of those while the fill plays | The scene is cancelled (10) with its lanes; the fill plays out its bar and is unlinked (52, `a` = 10). Returns true |
+| Stop, seek, scratch, brake, backspin, Play while playing, track load, panic, the host's `cancel_pending` | Both cancelled, or the fill cut short (`fill ended`, -1), with that reason, and the lanes. Nothing is unlinked: both are gone |
+| Another scene launched (any timing) | The scene is `replaced` (latest wins) and its lanes withdrawn (10). The fill is unlinked (52, 10) and plays as a plain phrase fill. The new scene keeps **its own** timing |
+| A Rise queued | The scene is `replaced` by the build (Night 7); the fill is unlinked (52, 10) |
+| A Rise running when the Fill into lands | The scene commits and replaces the build (`build replaced`, `a` = the scene's id) on the phrase line; the fill played on top |
+| Another Fill into, or any fill | Refused, 8 (no stacking). The pending one is untouched |
+| A pattern edit | Unaffected (Night 4). On a lane both set on the same onset, the scene's lanes win |
+
+### Events: kinds 51 and 52
+
+| kind | name | a | b |
+|---|---|---|---|
+| 51 | fill linked | the id of the request the fill leads into | the predicted landing step |
+| 52 | fill unlinked | the reason its partner went (10) | 0 |
+
+`fill linked` comes once, on acceptance; a re-announce after a loop change is `fill
+queued` and `scene queued`. After `fill unlinked` the fill is a plain fill and reports
+11-15 as usual.
+
+### Worklet messages
+
+| Host → worklet | Engine call |
+|---|---|
+| `{type: 'fillInto', fillId, sceneId, generation, index, phrase?, length?, values, deck?, patterns?, patternsId?}` | `patterns` (if any) staged first with `queue_patterns(patternsId, 2, sceneId, patterns)`; then `queue_fill_into`. Refusals made here post both rejected events, as above |
+| `{type: 'cancelFill', requestId}` | `cancel_fill`, answered with `fillCancelResult`, and the events drained at once |
+
+The host API is `EngineHost.queueFillInto(fillId, sceneId, index, values, generation,
+{phrase, patterns})` with `FILL_INTO_REJECTED_PART`, `ENGINE_EVENT.fillLinked` and
+`fillUnlinked` in `frontend/lib/engine.ts`. `frontend/lib/scenes.ts` folds a fill's
+events with `foldFillEvent` (`FillRequest`: status, bar, `linkedTo`, `landing`); the
+scene part is an ordinary launch for `foldSceneEvent`. When the scene is applied the
+worklet carries it to the idle deck, as for a launch.

@@ -267,6 +267,8 @@ export const EVENT = {
   buildRejected: 45,
   buildStarted: 46,
   buildProgress: 47,
+  fillLinked: 51,
+  fillUnlinked: 52,
 } as const;
 
 /** Why something was refused or cancelled, in words for the status line. */
@@ -357,6 +359,58 @@ function foldBuildEvent(
       return { ...request, status: 'rejected', reason: event.a };
     default:
       return request;
+  }
+}
+
+/** Where a fill request stands (docs/NIGHT3_PROTOCOL.md, docs/NIGHT8_PROTOCOL.md). */
+export type FillStatus = 'sending' | 'queued' | 'playing' | 'ended' | 'cancelled' | 'rejected';
+
+export type FillRequest = {
+  requestId: number;
+  status: FillStatus;
+  /** The bar it plays (1-based), from `fillQueued`: a phrase fill's is the phrase's last. */
+  bar?: number;
+  /** The request it leads into (a Fill into's scene), from `fillLinked` until `fillUnlinked`. */
+  linkedTo?: number;
+  /** The step that request is predicted to land on, while linked. */
+  landing?: number;
+  reason?: number;
+  /** For a refused linked request, the part refused (`b` of `fillRejected`). */
+  part?: number;
+};
+
+/** Whether a fill request may still start or is playing. */
+export const isFillPending = (f: FillRequest | null): f is FillRequest =>
+  f !== null && (f.status === 'sending' || f.status === 'queued' || f.status === 'playing');
+
+/**
+ * Fold one engine event into a fill request (kinds 11-15, 51, 52). Returns the same
+ * object for another request's event, and once the fill has ended, been cancelled or
+ * been refused, nothing moves it again. A late `fillQueued` cannot rewind a playing fill.
+ */
+export function foldFillEvent(fill: FillRequest, event: EngineEvent): FillRequest {
+  if (event.id !== fill.requestId || !isFillPending(fill)) return fill;
+  switch (event.kind) {
+    case EVENT.fillQueued:
+      return fill.status === 'playing' ? fill : { ...fill, status: 'queued', bar: event.a };
+    case EVENT.fillStarted:
+      return { ...fill, status: 'playing' };
+    case EVENT.fillEnded:
+      return { ...fill, status: 'ended', ...(event.a < 0 ? { reason: event.b } : {}) };
+    case EVENT.fillCancelled:
+      return { ...fill, status: 'cancelled', reason: event.a };
+    case EVENT.fillRejected:
+      return { ...fill, status: 'rejected', reason: event.a, part: event.b };
+    case EVENT.fillLinked:
+      return { ...fill, linkedTo: event.a, landing: event.b };
+    case EVENT.fillUnlinked: {
+      const rest = { ...fill };
+      delete rest.linkedTo;
+      delete rest.landing;
+      return rest;
+    }
+    default:
+      return fill;
   }
 }
 
