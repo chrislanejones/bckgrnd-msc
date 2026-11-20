@@ -4090,7 +4090,8 @@ html[data-control-drag="yes"] * {
   cursor: default;
 }
 
-.fill-button {
+.fill-button,
+.fill-into-button {
   min-height: var(--control-sm);
   padding: 0.25rem 0.85rem;
   border: 1px solid var(--color-line);
@@ -4103,19 +4104,78 @@ html[data-control-drag="yes"] * {
   white-space: nowrap;
 }
 
-.fill-button.is-on {
+.fill-button.is-on,
+.fill-into-button.is-on {
   border-style: dashed;
   border-color: var(--color-acid);
 }
 
-.fill-button[data-state="playing"] {
+.fill-button[data-state="playing"],
+.fill-into-button[data-state="playing"] {
   border-style: solid;
   background: var(--color-acid);
   color: var(--color-acid-ink);
 }
 
-.fill-button:disabled:not([data-state="playing"]) {
+.fill-button:disabled:not([data-state="playing"]),
+.fill-into-button:disabled {
   opacity: 0.5;
+}
+
+/* Fill → Drop names the fourth scene as it is called now; a long name ends in an
+   ellipsis rather than widening the row (its full name is the button's name). */
+.fill-into-button {
+  max-width: 13rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Fill (Night 8): Fill at, the phrase length, Fill and Fill → Drop share a row of their
+   own under Switch on, so the timing sits beside the buttons it times and choosing
+   Phrase end or Rise never moves the other row. */
+.scene-fill-tools {
+  flex: 1 0 100%;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--group-gap) var(--space-3);
+  min-width: 0;
+}
+
+.scene-fill-tools > .segmented-block {
+  grid-template-columns: auto auto;
+  align-items: center;
+}
+
+.scene-fill-tools > .fill-button,
+.scene-fill-tools > .fill-into-button {
+  min-height: var(--button-sm-h);
+}
+
+/* The phrase length: 2 · 4 · 8 · 16 with "bars" after it, as Rise's bar count. */
+.scene-phrase-bars {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.scene-phrase-bars > .segmented-block {
+  grid-template-columns: auto;
+  align-items: center;
+}
+
+/* Numbers only, so the four pills need less air than Switch on's words. */
+.scene-toolbar .scene-phrase-bars .segment {
+  padding-inline: 0.5rem;
+}
+
+/* Finish with Fill: one pill in its own track, beside Rise's bar count. */
+.scene-rise-fill {
+  margin-inline-start: var(--space-1);
+}
+
+.rise-fill-short {
+  display: none;
 }
 
 /* Compare A/B: two session snapshots of the same track, kept visibly apart from the
@@ -4238,6 +4298,8 @@ html[data-control-drag="yes"] * {
 @media (pointer: coarse) {
   .scene-toolbar .segment,
   .scene-strip-actions > button,
+  .scene-fill-tools > .fill-button,
+  .scene-fill-tools > .fill-into-button,
   .compare-chip,
   .compare-row .text-button {
     min-height: var(--control-md);
@@ -4278,6 +4340,28 @@ html[data-control-drag="yes"] * {
   }
 
   .scene-toolbar > .segmented-block .seg-short {
+    display: inline;
+  }
+
+  .scene-fill-tools > .segmented-block .seg-full {
+    display: none;
+  }
+
+  .scene-fill-tools > .segmented-block .seg-short {
+    display: inline;
+  }
+}
+
+/* Finish with Fill reads "+ Fill" once the panel is too narrow for Switch on's full
+   names, Rise's 2 · 4 · 8 bars, "Finish with Fill" and Cancel in one row (about 47rem,
+   the 1100px docked tier). Its name stays the full one. The stacked phone rows have
+   room for the words again. */
+@container scenes (max-width: 47rem) {
+  .rise-fill-full {
+    display: none;
+  }
+
+  .rise-fill-short {
     display: inline;
   }
 }
@@ -4341,6 +4425,34 @@ html[data-control-drag="yes"] * {
     flex: 1 1 0;
   }
 
+  .rise-fill-full {
+    display: inline;
+  }
+
+  .rise-fill-short {
+    display: none;
+  }
+
+  /* Fill at and the phrase length each take a row; Fill and Fill → Drop share one. */
+  .scene-fill-tools {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--section-gap) var(--group-gap);
+  }
+
+  .scene-fill-tools > .segmented-block,
+  .scene-fill-tools > .scene-phrase-bars {
+    grid-column: 1 / -1;
+  }
+
+  .scene-fill-tools > .segmented-block {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .scene-fill-tools .segmented {
+    grid-auto-columns: minmax(0, 1fr);
+  }
+
   .compare-bar {
     padding: var(--section-gap) 0 0;
     border-inline-start: 0;
@@ -4389,12 +4501,39 @@ html[data-control-drag="yes"] * {
     .scene-build-unit {
       display: none;
     }
+
+    .scene-fill-tools {
+      column-gap: var(--space-2);
+    }
+
+    /* The word "Fill at" goes here too, as "bars" does, so a late Fill → Drop ("Fill ·
+       Next phrase → Drop") still fits the fill row. The group keeps it as its name. */
+    .scene-fill-tools > .segmented-block > .control-label {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      overflow: hidden;
+      clip-path: inset(50%);
+      white-space: nowrap;
+    }
+
+    .rise-fill-full {
+      display: none;
+    }
+
+    .rise-fill-short {
+      display: inline;
+    }
   }
 
   @container scenes (max-width: 34rem) {
     .scene-toolbar {
       display: flex;
       gap: var(--group-gap) var(--space-2);
+    }
+
+    .scene-fill-tools {
+      display: flex;
     }
 
     .scene-toolbar > .segmented-block {

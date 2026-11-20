@@ -1,0 +1,704 @@
+/**
+ * Night 8 fills at the host and UI level (docs/NIGHT8_PROTOCOL.md, NIGHT8_DECISIONS.md):
+ * Fill at (Next bar, Phrase end with 2 · 4 · 8 · 16 bars), Fill → Drop, Rise + Fill, and
+ * the preferences that remember them.
+ *
+ * What the screen promises: Fill at Next bar is the Night 3 fill, unchanged; a Phrase
+ * end fill plays the phrase's last bar and ends on the phrase line, and a late press
+ * says "Fill · Next phrase"; Fill → Drop reads Fill in · Bar N, Filling into Drop, then
+ * Active on bar N, and a cancel at any stage leaves nothing half queued; a plain fill
+ * still waiting is upgraded, not refused; a Rise that finishes with a fill plays it on
+ * its last bar and lands on the next downbeat, with Fill and Fill → Drop disabled
+ * meanwhile; the choices survive a reload; every control has a full name; and the
+ * scenes toolbar adds no row as the options and the widest labels come and go.
+ *
+ * Every change of the pads, the fill buttons, the bar readout and the status line is
+ * logged in the page with its time, so the checks read what the screen showed and for
+ * how long, not a poll that can miss a bar.
+ *
+ * Run by tools/verify-ui.mjs (fillChecks), or on its own:
+ *   node tools/verify-ui-fills.mjs [baseUrl]
+ */
+
+import { readFileSync, existsSync } from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+
+const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+const SCENE_PARAMS = JSON.parse(readFileSync(join(root, 'contracts/scenes.json'), 'utf8')).sceneVector;
+
+/** Long enough for an 8-bar wait at the tempo these checks use. */
+const RT = { timeout: 30000 };
+/** How far apart a landing and the transport's bar change may be seen (ms). */
+const LAND_SLACK = 300;
+/** The tempo the checks play at, so phrase waits stay short. */
+const BPM = 160;
+
+/** The bar readout wraps 16 -> 1. */
+const wrapBar = (b) => ((((b - 1) % 16) + 16) % 16) + 1;
+
+const DROP = 3;
+const RISE_FILL_NAME = "Finish with Fill: the fill plays the Rise's last bar";
+
+/** A mix as flat numbers, keyed `fx.filter`, `kick.volume`, `kick.muted`... */
+function flat(mix) {
+  const out = {};
+  for (const id of Object.keys(mix.params)) out[id] = mix.params[id];
+  for (const [id, s] of Object.entries(mix.stems)) {
+    out[`${id}.volume`] = s.volume;
+    out[`${id}.send`] = s.send;
+    out[`${id}.muted`] = s.muted ? 1 : 0;
+    out[`${id}.solo`] = s.solo ? 1 : 0;
+  }
+  return out;
+}
+const differ = (a, b, tol = 1e-4) => Object.keys(a).filter((k) => !(Math.abs(a[k] - b[k]) <= tol));
+
+/** The helpers one page needs. */
+function kit(page) {
+  const slot = (i) => page.locator('.scene-slot').nth(i);
+  const pad = (i) => slot(i).locator('.scene-pad');
+  const stateOf = (i) => slot(i).getAttribute('data-state');
+  const lineOf = async (i) => (await slot(i).locator('.scene-line').textContent())?.trim();
+  const statusText = async () => (await page.locator('.scene-status').textContent())?.trim();
+  const fillBtn = page.locator('.fill-button');
+  const intoBtn = page.locator('.fill-into-button');
+  const text = async (loc) => (await loc.textContent())?.trim();
+  const waitText = (sel, re, opts = RT) =>
+    page.waitForFunction(([s, src]) => new RegExp(src).test(document.querySelector(s)?.textContent?.trim() ?? ''), [sel, re.source], opts);
+  const waitStatus = (re, opts = RT) => waitText('.scene-status', re, opts);
+  const waitLine = (i, re, opts = RT) =>
+    page.waitForFunction(
+      ([n, src]) => new RegExp(src).test(document.querySelectorAll('.scene-slot')[n]?.querySelector('.scene-line')?.textContent?.trim() ?? ''),
+      [i, re.source],
+      opts,
+    );
+  const waitState = (i, states, opts = RT) =>
+    page.waitForFunction(([n, list]) => list.includes(document.querySelectorAll('.scene-slot')[n]?.getAttribute('data-state')), [i, [].concat(states)], opts);
+  const waitFill = (state, opts = RT) =>
+    page.waitForFunction((s) => document.querySelector('.fill-button')?.getAttribute('data-state') === s, state, opts);
+  const barNow = async () => Number(await page.locator('.bar-readout .tabular-nums').textContent());
+  const waitBar = (bar, opts = RT) =>
+    page.waitForFunction((want) => Number(document.querySelector('.bar-readout .tabular-nums')?.textContent) === want, bar, opts);
+  const nextBar = async () => {
+    const b = await barNow();
+    await page.waitForFunction((was) => Number(document.querySelector('.bar-readout .tabular-nums')?.textContent) !== was, b, RT);
+  };
+  const playing = async () => (await page.locator('.app').getAttribute('data-playing')) === 'yes';
+  const play = async () => {
+    if (await playing()) return;
+    await page.getByRole('button', { name: 'Play the track', exact: true }).click();
+    await page.waitForFunction(() => document.querySelector('.app')?.getAttribute('data-playing') === 'yes', null, RT);
+  };
+  const knobFill = async (name, value) => {
+    const slider = page.getByRole('slider', { name, exact: true });
+    if ((await slider.count()) === 0) await page.locator('.inspector').getByText('Master', { exact: true }).click();
+    const step = Number(await slider.getAttribute('step')) || 1;
+    await slider.fill(String(Math.round(value / step) * step));
+  };
+  /** Tempo is linear over the control's 60-180 BPM. */
+  const tempo = (bpm) => knobFill('Tempo', ((bpm - 60) / 120) * 1000);
+  /** Jump to the first step of `bar` (1-16) with a tap on the live waveform. */
+  const seekTo = async (bar) => {
+    const wave = page.locator('.deck-wave[data-live="yes"] .deck-wave-body');
+    const box = await wave.boundingBox();
+    await page.mouse.click(box.x + (box.width * ((bar - 1) * 16 + 0.5)) / 256, box.y + box.height / 2);
+    await waitBar(bar);
+  };
+  const fillAt = (at) =>
+    page.getByRole('button', { name: at === 'phrase' ? 'Fill at the phrase end' : 'Fill on the next bar', exact: true }).click();
+  const phrase = (n) => page.getByRole('button', { name: `Phrases of ${n} bars`, exact: true }).click();
+  const riseOver = async (n) => {
+    const rise = page.getByRole('button', { name: 'Rise into the scene over several bars' });
+    if ((await rise.getAttribute('aria-pressed')) !== 'true') await rise.click();
+    await page.getByRole('button', { name: `Rise over ${n} bars` }).click();
+  };
+  const finishWithFill = async (on) => {
+    const b = page.getByRole('button', { name: RISE_FILL_NAME, exact: true });
+    if (((await b.getAttribute('aria-pressed')) === 'true') !== on) await b.click();
+  };
+  const switchOn = (name) => page.getByRole('button', { name, exact: true }).click();
+  const mix = async () =>
+    flat(await page.evaluate((ids) => {
+      const p = window.__BCKGRND_PROJECT__();
+      return { params: Object.fromEntries(ids.map((id) => [id, p.params[id]])), stems: p.stems };
+    }, SCENE_PARAMS));
+  const sceneMix = async (i) =>
+    flat(await page.evaluate(([n, ids]) => {
+      const s = window.__BCKGRND_PROJECT__().scenes.slots[n];
+      return { params: Object.fromEntries(ids.map((id) => [id, s.params[id]])), stems: s.stems };
+    }, [i, SCENE_PARAMS]));
+
+  // The timeline: one entry per change of a pad, a fill button, the bar or the status.
+  const record = () =>
+    page.evaluate(() => {
+      window.__FILL_OBS__?.disconnect();
+      const log = (window.__FILL_LOG__ = []);
+      let last = '';
+      const btn = (sel) => {
+        const el = document.querySelector(sel);
+        return el ? { text: el.textContent.trim(), state: el.getAttribute('data-state'), disabled: el.disabled, title: el.title } : null;
+      };
+      const snap = () => {
+        const pads = [...document.querySelectorAll('.scene-slot')].map((el) => ({
+          state: el.getAttribute('data-state'),
+          line: el.querySelector('.scene-line')?.textContent?.trim() ?? '',
+        }));
+        const readout = document.querySelector('.bar-readout .tabular-nums')?.textContent;
+        const status = document.querySelector('.scene-status')?.textContent?.trim() ?? '';
+        const entry = { pads, bar: readout == null ? null : Number(readout), status, fill: btn('.fill-button'), into: btn('.fill-into-button') };
+        const key = JSON.stringify(entry);
+        if (key === last) return;
+        last = key;
+        log.push({ t: performance.now(), ...entry });
+      };
+      const obs = new MutationObserver(snap);
+      for (const sel of ['.scene-pads', '.bar-readout', '.scene-status', '.scene-toolbar']) {
+        const el = document.querySelector(sel);
+        if (el) obs.observe(el, { subtree: true, childList: true, characterData: true, attributes: true });
+      }
+      window.__FILL_OBS__ = obs;
+      snap();
+    });
+  const log = () => page.evaluate(() => window.__FILL_LOG__);
+
+  return {
+    slot, pad, stateOf, lineOf, statusText, fillBtn, intoBtn, text, waitText, waitStatus, waitLine, waitState, waitFill,
+    barNow, waitBar, nextBar, play, playing, tempo, knobFill, seekTo, fillAt, phrase, riseOver, finishWithFill, switchOn,
+    mix, sceneMix, record, log,
+  };
+}
+
+/** Milliseconds each bar was on screen while `pred(entry)` held, and the bar seen most. */
+function barsWhile(log, pred) {
+  const ms = {};
+  for (let k = 0; k + 1 < log.length; k += 1) {
+    if (!pred(log[k])) continue;
+    ms[log[k].bar] = (ms[log[k].bar] ?? 0) + (log[k + 1].t - log[k].t);
+  }
+  const [bar, most] = Object.entries(ms).sort((a, b) => b[1] - a[1])[0] ?? [null, 0];
+  const total = Object.values(ms).reduce((s, x) => s + x, 0);
+  return { bar: bar === null ? null : Number(bar), most: Math.round(most), other: Math.round(total - most), ms };
+}
+
+/** The distinct values of `pick(entry)` in order. */
+function seq(log, pick) {
+  const out = [];
+  for (const e of log) {
+    const v = pick(e);
+    if (out.at(-1) !== v) out.push(v);
+  }
+  return out;
+}
+
+/** Time from the first entry matching `a` (after `from`) to the first matching `b`. */
+function gap(log, a, b, from = 0) {
+  const i = log.findIndex((e, k) => k >= from && a(e));
+  const j = log.findIndex((e, k) => k >= from && b(e));
+  return i >= 0 && j >= 0 ? Math.round(log[i].t - log[j].t) : null;
+}
+
+const fillPlaying = (e) => e.fill?.state === 'playing';
+const padActive = (i) => (e) => ['active', 'modified'].includes(e.pads[i].state);
+
+/** Measure the scenes toolbar: its height and whether each of its two rows is one row. */
+async function toolbar(page) {
+  return page.evaluate(() => {
+    const bar = document.querySelector('.scene-toolbar');
+    // Rows are compared by their middles: the pills, the buttons and the word "bars"
+    // are not all one height.
+    const top = (el) => {
+      const b = el.getBoundingClientRect();
+      return b.top + b.height / 2;
+    };
+    const sameRow = (els) => {
+      const tops = els.filter(Boolean).map(top);
+      return tops.every((t) => Math.abs(t - tops[0]) < 3);
+    };
+    const row1 = [':scope > .segmented-block', ':scope > .scene-build-bars', ':scope > .scene-strip-actions'].map((s) => bar.querySelector(s));
+    const tools = bar.querySelector('.scene-fill-tools');
+    const row2 = tools ? [...tools.children] : [];
+    const r = (el) => {
+      const b = el.getBoundingClientRect();
+      return Math.round(b.width);
+    };
+    return {
+      h: Math.round(bar.getBoundingClientRect().height * 10) / 10,
+      w: Math.round(bar.getBoundingClientRect().width),
+      row1: sameRow(row1),
+      row2: sameRow(row2),
+      // Inside the build group too: Finish with Fill may not wrap under the bar count.
+      build: sameRow([...(bar.querySelector('.scene-build-bars')?.children ?? [])].filter((c) => c.getClientRects().length)),
+      used1: row1.filter(Boolean).reduce((s, el) => s + r(el), 0),
+      used2: row2.filter((c) => c.getClientRects().length).reduce((s, el) => s + r(el), 0),
+      tools: tools ? r(tools) : 0,
+      scroll: document.documentElement.scrollWidth,
+    };
+  });
+}
+
+/**
+ * The fill checks. `open(width, height, extra)` returns `{ page, errors }` on a fresh
+ * app; `check(name, ok, detail)` records one result.
+ */
+export async function fillChecks({ open, check }) {
+  // ---- Defaults, names, and stopped: nothing changed until the new options are used. --
+  {
+    const { page, errors } = await open(1440, 1000);
+    const k = kit(page);
+    try {
+      await page.waitForSelector('.scene-fill-tools');
+      const fillAtGroup = page.getByRole('group', { name: 'Fill at' });
+      check('fill names: the fill row is a group named Fill, with a Fill at group in it',
+        (await page.getByRole('group', { name: 'Fill', exact: true }).count()) === 1 && (await fillAtGroup.count()) === 1);
+      check('fill defaults: Fill at is Next bar, and no phrase picker shows',
+        (await page.getByRole('button', { name: 'Fill on the next bar', exact: true }).getAttribute('aria-pressed')) === 'true'
+        && (await page.getByRole('button', { name: 'Fill at the phrase end', exact: true }).getAttribute('aria-pressed')) === 'false'
+        && (await page.locator('.scene-phrase-bars').count()) === 0);
+      check('fill defaults: the Fill button reads Drum fill', (await k.text(k.fillBtn)) === 'Drum fill', await k.text(k.fillBtn));
+      const fillName = (await k.fillBtn.getAttribute('aria-label'))?.replace(/ for one bar, from the next bar$/, '');
+      check('fill names: Fill at Next bar keeps the Night 3 name', /^.+ for one bar, from the next bar$/.test((await k.fillBtn.getAttribute('aria-label')) ?? ''),
+        await k.fillBtn.getAttribute('aria-label'));
+      check('fill names: Fill → Drop names the fourth scene, at the next bar',
+        (await k.text(k.intoBtn)) === 'Fill → Drop' && (await k.intoBtn.getAttribute('aria-label')) === 'Fill into Drop: a fill on the next bar, then Drop',
+        `${await k.text(k.intoBtn)} / ${await k.intoBtn.getAttribute('aria-label')}`);
+      check('fill stopped: Fill → Drop is disabled before Play, and its title says why',
+        (await k.intoBtn.isDisabled()) && /play/i.test((await k.intoBtn.getAttribute('title')) ?? ''), await k.intoBtn.getAttribute('title'));
+      await k.fillAt('phrase');
+      check('fill names: Phrase end shows 2 · 4 · 8 · 16 bars, 4 picked',
+        (await page.locator('.scene-phrase-bars').count()) === 1
+        && (await page.getByRole('button', { name: 'Phrases of 4 bars', exact: true }).getAttribute('aria-pressed')) === 'true'
+        && (await Promise.all([2, 8, 16].map((n) => page.getByRole('button', { name: `Phrases of ${n} bars`, exact: true }).count()))).every((c) => c === 1));
+      check('fill names: with Phrase end, Fill and Fill → Drop name the phrase',
+        (await k.fillBtn.getAttribute('aria-label')) === `${fillName} for one bar, ending on the next 4-bar phrase line`
+        && (await k.intoBtn.getAttribute('aria-label')) === 'Fill into Drop at the end of the 4-bar phrase',
+        `${await k.fillBtn.getAttribute('aria-label')} / ${await k.intoBtn.getAttribute('aria-label')}`);
+      await k.fillAt('bar');
+      await k.switchOn('Rise into the scene over several bars');
+      const toggle = page.getByRole('button', { name: RISE_FILL_NAME, exact: true });
+      check('rise fill: Finish with Fill shows beside the Rise bars, off', (await toggle.count()) === 1 && (await toggle.getAttribute('aria-pressed')) === 'false'
+        && (await page.locator('.scene-build-bars .scene-rise-fill').count()) === 1);
+      check('rise fill: Rise bars still default to 4', (await page.getByRole('button', { name: 'Rise over 4 bars' }).getAttribute('aria-pressed')) === 'true');
+      check('rise fill: the pads say Rise into Drop over 4 bars, with no fill yet',
+        (await k.pad(DROP).getAttribute('aria-label')) === 'Rise into Drop over 4 bars', await k.pad(DROP).getAttribute('aria-label'));
+      await k.finishWithFill(true);
+      check('rise fill: with Finish with Fill on, the pads say so',
+        (await k.pad(DROP).getAttribute('aria-label')) === 'Rise into Drop over 4 bars, ending with a fill', await k.pad(DROP).getAttribute('aria-label'));
+      await k.finishWithFill(false);
+      await k.switchOn('Launch on the next bar');
+      // A renamed fourth slot renames the button.
+      await k.slot(DROP).locator('.scene-menu-button').click();
+      await page.getByRole('button', { name: 'Rename…' }).click();
+      await page.getByLabel('Scene name').fill('Peak');
+      await page.getByRole('button', { name: 'Save name' }).click();
+      check('fill names: Fill → Drop follows the fourth slot\'s name', (await k.text(k.intoBtn)) === 'Fill → Peak', await k.text(k.intoBtn));
+      await k.slot(DROP).locator('.scene-menu-button').click();
+      await page.getByRole('button', { name: 'Rename…' }).click();
+      await page.getByLabel('Scene name').fill('Drop');
+      await page.getByRole('button', { name: 'Save name' }).click();
+    } catch (e) {
+      check('fill names: the walk-through ran to the end', false, String(e.message).split('\n')[0]);
+    }
+    check('fill names: no page errors', errors.length === 0, errors.join('; '));
+    await page.close();
+  }
+
+  // ---- Fill at Next bar (unchanged), Phrase end at 2/4/8/16, and late presses. -------
+  {
+    const { page, errors } = await open(1440, 1000);
+    const k = kit(page);
+    try {
+      await page.waitForSelector('.scene-fill-tools');
+      await k.play();
+      await k.tempo(BPM);
+
+      // One press at the start of `from`, expecting the fill to play `want`.
+      const onePress = async (tag, from, want, label, status) => {
+        await k.seekTo(from);
+        await k.record();
+        await k.fillBtn.click();
+        await k.waitText('.fill-button', /^Fill · /);
+        const shown = await k.text(k.fillBtn);
+        const said = await k.statusText();
+        await k.waitFill('playing');
+        await k.waitFill('idle');
+        await page.waitForTimeout(300);
+        const log = await k.log();
+        const played = barsWhile(log, fillPlaying);
+        const endDelta = gap(log, (e) => e.fill?.state === 'idle' && log.indexOf(e) > log.findIndex(fillPlaying), (e) => e.bar === wrapBar(want + 1));
+        check(`${tag}: pressed in bar ${from}, the button reads "${label}"`, shown === label, shown);
+        check(`${tag}: the status says "${status}"`, said === status, said);
+        check(`${tag}: it plays bar ${want}`, played.bar === want && played.other < 250, JSON.stringify(played.ms));
+        check(`${tag}: it ends on the line into bar ${wrapBar(want + 1)}`, endDelta !== null && Math.abs(endDelta) <= LAND_SLACK, `Δ${endDelta}ms`);
+      };
+
+      // Next bar: the Night 3 fill, words and all.
+      await onePress('fill next bar', 5, 6, 'Fill · Bar 6', 'Fill queued for bar 6');
+      check('fill next bar: its queued name is the Night 3 one', true);
+
+      await k.fillAt('phrase');
+      for (const [n, from, want] of [[2, 3, 4], [4, 5, 8], [8, 11, 16], [16, 13, 16]]) {
+        await k.phrase(n);
+        await onePress(`fill phrase ${n}`, from, want, `Fill · Bar ${want}`, `Fill queued for bar ${want}, the end of the phrase`);
+      }
+
+      // Late: pressed in the phrase's last bar, it goes to the next phrase, never refused.
+      for (const [n, from, want] of [[4, 8, 12], [2, 6, 8]]) {
+        await k.phrase(n);
+        await onePress(`fill late ${n}`, from, want, 'Fill · Next phrase', `Fill queued for bar ${want}, the end of the next phrase`);
+      }
+
+      // The aria while queued, and a second press cancels it (the Night 3 rule).
+      await k.phrase(4);
+      await k.seekTo(5);
+      await k.fillBtn.click();
+      await k.waitText('.fill-button', /^Fill · Bar 8$/);
+      check('fill phrase: the queued name says where it plays',
+        / at the end of bar 8$/.test((await k.fillBtn.getAttribute('aria-label')) ?? ''), await k.fillBtn.getAttribute('aria-label'));
+      await k.fillBtn.click();
+      await k.waitFill('idle');
+      check('fill phrase: a second press cancels it, with the Night 3 words', (await k.statusText()) === 'Fill cancelled', await k.statusText());
+    } catch (e) {
+      check('fill timing: the walk-through ran to the end', false, String(e.message).split('\n')[0]);
+    }
+    check('fill timing: no page errors', errors.length === 0, errors.join('; '));
+    await page.close();
+  }
+
+  // ---- Fill → Drop: queued, filling, active; and the upgrade from a plain Fill. -------
+  {
+    const { page, errors } = await open(1440, 1000);
+    const k = kit(page);
+    try {
+      await page.waitForSelector('.scene-fill-tools');
+      await k.play();
+      await k.tempo(BPM);
+      await k.knobFill('Cutoff', 450);
+      await k.fillAt('phrase');
+      await k.phrase(2);
+
+      await k.seekTo(3);
+      await k.record();
+      await k.intoBtn.click();
+      await k.waitLine(DROP, /^Fill in · Bar \d+$/);
+      const queued = { line: await k.lineOf(DROP), button: await k.text(k.intoBtn), status: await k.statusText(),
+        aria: await k.intoBtn.getAttribute('aria-label'), pad: await k.pad(DROP).getAttribute('aria-label'),
+        fill: await k.text(k.fillBtn), fillOff: await k.fillBtn.isDisabled(), fillTitle: await k.fillBtn.getAttribute('title') };
+      await k.waitState(DROP, ['active', 'modified']);
+      await page.waitForTimeout(500);
+      const log = await k.log();
+      check('fill into: queued, the pad reads "Fill in · Bar 5"', queued.line === 'Fill in · Bar 5', queued.line);
+      check('fill into: the button reads "Fill · Bar 4 → Drop"', queued.button === 'Fill · Bar 4 → Drop', queued.button);
+      check('fill into: the status reads "Drop lands on bar 5 after a fill"', queued.status === 'Drop lands on bar 5 after a fill', queued.status);
+      check('fill into: the button is named for the bar and how to cancel',
+        queued.aria === 'Fill into Drop at the end of bar 4. Press again to cancel.', queued.aria);
+      check('fill into: the pad is named for the cancel', queued.pad === 'Cancel Fill into Drop', queued.pad);
+      check('fill into: Fill is disabled meanwhile, and says why',
+        queued.fill === 'Drum fill' && queued.fillOff && queued.fillTitle === 'Fill → Drop is queued: press it again to cancel', `${queued.fill} ${queued.fillOff} ${queued.fillTitle}`);
+      const lines = seq(log, (e) => e.pads[DROP].line).filter((l) => l !== '');
+      check('fill into: the pad reads Fill in · Bar 5, Filling into Drop, then Active',
+        JSON.stringify(lines.slice(lines.indexOf('Fill in · Bar 5'))) === JSON.stringify(['Fill in · Bar 5', 'Filling into Drop', 'Active']), lines.join(' > '));
+      const filling = barsWhile(log, (e) => e.pads[DROP].line === 'Filling into Drop');
+      check('fill into: Filling into Drop shows while bar 4 plays', filling.bar === 4 && filling.other < 250, JSON.stringify(filling.ms));
+      const played = barsWhile(log, fillPlaying);
+      check('fill into: the fill plays bar 4 (the Fill button reads Fill playing)', played.bar === 4 && played.other < 250, JSON.stringify(played.ms));
+      check('fill into: meanwhile the button reads "Filling → Drop"', log.some((e) => e.into?.text === 'Filling → Drop' && e.bar === 4));
+      const land = gap(log, padActive(DROP), (e) => e.bar === 5);
+      check('fill into: Drop turns Active on bar 5, as the transport counts it', land !== null && Math.abs(land) <= LAND_SLACK, `Δ${land}ms`);
+      const statuses = seq(log, (e) => e.status);
+      check('fill into: the status says lands, filling, then active, once each',
+        JSON.stringify(statuses.slice(statuses.indexOf('Drop lands on bar 5 after a fill'))) === JSON.stringify(['Drop lands on bar 5 after a fill', 'Filling into Drop', 'Drop active']),
+        statuses.join(' | '));
+      const off = differ(await k.mix(), await k.sceneMix(DROP));
+      check("fill into: every knob and fader lands on Drop", off.length === 0, off.join(', '));
+      check('fill into: afterwards Fill and Fill → Drop are free again',
+        (await k.text(k.intoBtn)) === 'Fill → Drop' && !(await k.intoBtn.isDisabled()) && !(await k.fillBtn.isDisabled()));
+
+      // Active: Cancel clears the scene as for any launch.
+      await page.getByRole('button', { name: 'Cancel scene', exact: true }).click();
+      await k.waitStatus(/^Scene cleared; previous mix restored$/);
+      check('fill into cancel, active: Cancel clears Drop', !['active', 'modified'].includes(await k.stateOf(DROP)), await k.stateOf(DROP));
+
+      // The upgrade: a plain Phrase end fill waiting, then Fill → Drop.
+      await k.phrase(4);
+      await k.seekTo(5);
+      await k.record();
+      await k.fillBtn.click();
+      await k.waitText('.fill-button', /^Fill · Bar 8$/);
+      await k.intoBtn.click();
+      await k.waitLine(DROP, /^Fill in · Bar 9$/);
+      const up = { fill: await k.text(k.fillBtn), off: await k.fillBtn.isDisabled(), into: await k.text(k.intoBtn), status: await k.statusText() };
+      await k.waitState(DROP, ['active', 'modified']);
+      await page.waitForTimeout(400);
+      const ulog = await k.log();
+      check('fill upgrade: Fill → Drop takes over the waiting fill',
+        up.into === 'Fill · Bar 8 → Drop' && up.fill === 'Drum fill' && up.off && up.status === 'Drop lands on bar 9 after a fill', JSON.stringify(up));
+      check('fill upgrade: nothing is refused along the way', !ulog.some((e) => /not started|not launched/.test(e.status)), seq(ulog, (e) => e.status).join(' | '));
+      check('fill upgrade: one fill plays, in bar 8', barsWhile(ulog, fillPlaying).bar === 8, JSON.stringify(barsWhile(ulog, fillPlaying).ms));
+      const uland = gap(ulog, padActive(DROP), (e) => e.bar === 9);
+      check('fill upgrade: Drop lands on bar 9', uland !== null && Math.abs(uland) <= LAND_SLACK, `Δ${uland}ms`);
+    } catch (e) {
+      check('fill into: the walk-through ran to the end', false, String(e.message).split('\n')[0]);
+    }
+    check('fill into: no page errors', errors.length === 0, errors.join('; '));
+    await page.close();
+  }
+
+  // ---- Fill → Drop canceled at each stage: queued (button, pad, Cancel), filling. ----
+  {
+    const { page, errors } = await open(1440, 1000);
+    const k = kit(page);
+    try {
+      await page.waitForSelector('.scene-fill-tools');
+      await k.play();
+      await k.tempo(BPM);
+      await k.fillAt('phrase');
+      await k.phrase(2);
+      const ways = [
+        ['the button again', () => k.intoBtn.click(), /^Fill → Drop canceled$/],
+        ['the Drop pad', () => k.pad(DROP).click(), /^Fill → Drop canceled$/],
+        ['Cancel', () => page.getByRole('button', { name: 'Cancel scene', exact: true }).click(), /^Scene cleared; previous mix restored$/],
+      ];
+      for (const [how, act, status] of ways) {
+        await k.seekTo(3);
+        await k.record();
+        await k.intoBtn.click();
+        await k.waitLine(DROP, /^Fill in · Bar 5$/);
+        await act();
+        const said = await k.waitStatus(status).then(() => true, () => false);
+        await k.waitBar(6);
+        await page.waitForTimeout(300);
+        const log = await k.log();
+        const after = log.slice(log.findIndex((e) => status.test(e.status)));
+        check(`fill into cancel, queued, by ${how}: the status says so`, said, await k.statusText());
+        check(`fill into cancel, queued, by ${how}: the fill never plays`, !log.some(fillPlaying), seq(log, (e) => e.fill?.state).join(' > '));
+        check(`fill into cancel, queued, by ${how}: Drop never lands`, !after.some(padActive(DROP)) && !['active', 'modified'].includes(await k.stateOf(DROP)),
+          seq(log, (e) => e.pads[DROP].state).join(' > '));
+        check(`fill into cancel, queued, by ${how}: both buttons are free again`,
+          (await k.text(k.intoBtn)) === 'Fill → Drop' && (await k.text(k.fillBtn)) === 'Drum fill' && !(await k.fillBtn.isDisabled()) && !(await k.intoBtn.isDisabled()));
+      }
+
+      // Filling: the scene goes, the fill plays out its bar.
+      await k.seekTo(3);
+      await k.record();
+      await k.intoBtn.click();
+      await k.waitLine(DROP, /^Filling into Drop$/);
+      await k.intoBtn.click();
+      const said = await k.waitStatus(/^Drop canceled; the fill plays out its bar$/).then(() => true, () => false);
+      const still = await k.fillBtn.getAttribute('data-state');
+      await k.waitBar(6);
+      await page.waitForTimeout(300);
+      const log = await k.log();
+      const played = barsWhile(log, fillPlaying);
+      check('fill into cancel, filling: the status says the fill plays out its bar', said, await k.statusText());
+      check('fill into cancel, filling: the fill is still playing just after', still === 'playing', still);
+      check('fill into cancel, filling: it plays out bar 4 and ends on the line', played.bar === 4 && played.other < 250 && !log.slice(-1)[0].fill.state.includes('play'),
+        JSON.stringify(played.ms));
+      check('fill into cancel, filling: Drop never lands', !log.some(padActive(DROP)), seq(log, (e) => e.pads[DROP].state).join(' > '));
+    } catch (e) {
+      check('fill into cancel: the walk-through ran to the end', false, String(e.message).split('\n')[0]);
+    }
+    check('fill into cancel: no page errors', errors.length === 0, errors.join('; '));
+    await page.close();
+  }
+
+  // ---- Rise + Fill: the fill on the Rise's last bar, the landing, and cancel. ---------
+  {
+    const { page, errors } = await open(1440, 1000);
+    const k = kit(page);
+    try {
+      await page.waitForSelector('.scene-fill-tools');
+      await k.play();
+      await k.tempo(BPM);
+      await k.knobFill('Cutoff', 450);
+      await k.riseOver(2);
+      await k.finishWithFill(true);
+      await k.nextBar();
+      const pressed = await k.barNow();
+      const N = wrapBar(pressed + 1);
+      await k.record();
+      await k.pad(DROP).click();
+      await k.waitLine(DROP, /^Rise · Bar \d+$/);
+      const waiting = { fill: await k.fillBtn.isDisabled(), fillTitle: await k.fillBtn.getAttribute('title'),
+        into: await k.intoBtn.isDisabled(), intoTitle: await k.intoBtn.getAttribute('title'), status: await k.statusText() };
+      await k.waitState(DROP, ['active', 'modified']);
+      await page.waitForTimeout(500);
+      const log = await k.log();
+      check('rise fill: the status says it ends with a fill', waiting.status === `Drop rises over 2 bars from bar ${N}, ending with a fill`, waiting.status);
+      check('rise fill: Fill is disabled meanwhile, titled "The Rise ends with a fill"', waiting.fill && waiting.fillTitle === 'The Rise ends with a fill', `${waiting.fill} ${waiting.fillTitle}`);
+      check('rise fill: Fill → Drop too', waiting.into && waiting.intoTitle === 'The Rise ends with a fill', `${waiting.into} ${waiting.intoTitle}`);
+      const lines = seq(log, (e) => e.pads[DROP].line).filter((l) => l !== '');
+      check('rise fill: the pad reads Rise · Bar N, Rising · 1 of 2, Filling into Drop, then Active',
+        JSON.stringify(lines.slice(lines.indexOf(`Rise · Bar ${N}`))) === JSON.stringify([`Rise · Bar ${N}`, 'Rising · 1 of 2', 'Filling into Drop', 'Active']), lines.join(' > '));
+      const played = barsWhile(log, fillPlaying);
+      check("rise fill: the fill plays the Rise's last bar, N+1", played.bar === wrapBar(N + 1) && played.other < 250, `N=${N}; ${JSON.stringify(played.ms)}`);
+      const land = gap(log, padActive(DROP), (e) => e.bar === wrapBar(N + 2));
+      check('rise fill: Drop lands on the next downbeat, N+2', land !== null && Math.abs(land) <= LAND_SLACK, `Δ${land}ms`);
+      const statuses = seq(log, (e) => e.status);
+      check('rise fill: the status says rises, rising, filling, then active',
+        JSON.stringify(statuses.slice(statuses.indexOf(waiting.status))) === JSON.stringify([waiting.status, 'Drop rising over 2 bars', 'Filling into Drop', 'Drop active']),
+        statuses.join(' | '));
+      const disabledUntil = log.filter((e) => !padActive(DROP)(e) && log.indexOf(e) > 0 && e.fill?.state !== 'playing');
+      check('rise fill: Fill stays disabled until the fill has played', disabledUntil.every((e) => e.fill.disabled), seq(disabledUntil, (e) => e.fill.disabled).join(' > '));
+      check('rise fill: then Fill is free again', !(await k.fillBtn.isDisabled()) && (await k.text(k.fillBtn)) === 'Drum fill');
+      const off = differ(await k.mix(), await k.sceneMix(DROP));
+      check('rise fill: every knob lands on Drop', off.length === 0, off.join(', '));
+
+      // Cancel halfway through a 4-bar Rise + Fill: both go, the knobs come back.
+      await page.getByRole('button', { name: 'Cancel scene', exact: true }).click();
+      await k.waitStatus(/^Scene cleared; previous mix restored$/);
+      const before = await k.mix();
+      await k.riseOver(4);
+      await k.nextBar();
+      const cN = wrapBar((await k.barNow()) + 1);
+      await k.record();
+      await k.pad(DROP).click();
+      await k.waitLine(DROP, /^Rising · 2 of 4$/);
+      await k.pad(DROP).click();
+      const said = await k.waitStatus(/^Drop rise cancelled$/).then(() => true, () => false);
+      await page.waitForTimeout(300);
+      const free = !(await k.fillBtn.isDisabled()) && !(await k.intoBtn.isDisabled());
+      await k.waitBar(wrapBar(cN + 4));
+      await page.waitForTimeout(500);
+      const clog = await k.log();
+      check('rise fill cancel: the pad cancels the Rise', said, await k.statusText());
+      check('rise fill cancel: and its fill: Fill and Fill → Drop are free at once', free);
+      check('rise fill cancel: the fill never plays', !clog.some(fillPlaying), seq(clog, (e) => e.fill?.state).join(' > '));
+      check('rise fill cancel: Drop never lands, and the knobs are back', !clog.some(padActive(DROP)) && differ(before, await k.mix()).length === 0,
+        differ(before, await k.mix()).join(', '));
+    } catch (e) {
+      check('rise fill: the walk-through ran to the end', false, String(e.message).split('\n')[0]);
+    }
+    check('rise fill: no page errors', errors.length === 0, errors.join('; '));
+    await page.close();
+  }
+
+  // ---- Preferences survive a reload. -------------------------------------------------
+  {
+    const { page, errors } = await open(1440, 1000);
+    const k = kit(page);
+    try {
+      await page.waitForSelector('.scene-fill-tools');
+      await k.fillAt('phrase');
+      await k.phrase(8);
+      await k.riseOver(2);
+      await k.finishWithFill(true);
+      const stored = await page.evaluate(() => Object.fromEntries(Object.keys(localStorage).filter((x) => x.startsWith('bckgrnd-msc:')).map((x) => [x, localStorage.getItem(x)])));
+      await page.reload({ waitUntil: 'networkidle' });
+      await page.waitForSelector('.scene-fill-tools');
+      const pressedName = (name) => page.getByRole('button', { name, exact: true }).getAttribute('aria-pressed');
+      check('fill prefs: stored under bckgrnd-msc: keys',
+        stored['bckgrnd-msc:fill-at'] === 'phrase' && stored['bckgrnd-msc:fill-phrase-bars'] === '8'
+        && stored['bckgrnd-msc:rise-bars'] === '2' && stored['bckgrnd-msc:rise-fill'] === 'on', JSON.stringify(stored));
+      check('fill prefs: after a reload Fill at is still Phrase end, 8 bars',
+        (await pressedName('Fill at the phrase end')) === 'true' && (await pressedName('Phrases of 8 bars')) === 'true');
+      check('fill prefs: Switch on itself is not remembered (Rise is off)', (await page.locator('.scene-build-bars').count()) === 0);
+      await k.switchOn('Rise into the scene over several bars');
+      check('fill prefs: choosing Rise brings back 2 bars and Finish with Fill on',
+        (await pressedName('Rise over 2 bars')) === 'true' && (await pressedName(RISE_FILL_NAME)) === 'true');
+      check('fill prefs: the Fill button reads the remembered phrase', / 8-bar phrase line$/.test((await k.fillBtn.getAttribute('aria-label')) ?? ''));
+    } catch (e) {
+      check('fill prefs: the walk-through ran to the end', false, String(e.message).split('\n')[0]);
+    }
+    check('fill prefs: no page errors', errors.length === 0, errors.join('; '));
+    await page.close();
+  }
+
+  // ---- The toolbar with a mouse at 1440, 1280 and 1180 (and the other compact widths
+  // Lacey's checks use): no row added. At 375 (touch) the toolbar stacks a row per
+  // control by design, so there it is measured, and held to 44px targets and no
+  // sideways scroll. -------------------------------------------------------------
+  const widths = [[1440, 900], [1280, 800], [1279, 800], [1200, 800], [1180, 800], [1100, 800], [1024, 768], [960, 800], [900, 800],
+    [375, 812, { hasTouch: true, isMobile: true }]];
+  for (const [w, h, extra] of widths) {
+    const { page, errors } = await open(w, h, extra ?? {});
+    const k = kit(page);
+    try {
+      await page.waitForSelector('.scene-fill-tools', { state: 'attached' });
+      const base = await toolbar(page);
+      await k.switchOn('Rise into the scene over several bars');
+      const rise = await toolbar(page);
+      await k.finishWithFill(true);
+      const riseFill = await toolbar(page);
+      await k.fillAt('phrase');
+      const phrase = await toolbar(page);
+      await k.phrase(16);
+      // The widest words the two buttons show together. They never both wait: while a
+      // Fill → Drop waits, Fill reads Drum fill (or Fill playing once its fill plays).
+      const widest = await page.evaluate(() => {
+        const bar = document.querySelector('.scene-toolbar');
+        const fill = document.querySelector('.fill-button');
+        const into = document.querySelector('.fill-into-button');
+        const was = [fill.textContent, into.textContent];
+        const out = { h: 0, cut: false, each: [] };
+        for (const [a, b] of [['Fill · Next phrase', 'Fill → Drop'], ['Drum fill', 'Fill · Next phrase → Drop'], ['Drum fill', 'Fill · Bar 16 → Drop'], ['Fill playing', 'Filling → Drop']]) {
+          fill.textContent = a;
+          into.textContent = b;
+          const h = Math.round(bar.getBoundingClientRect().height * 10) / 10;
+          out.each.push(h);
+          out.h = Math.max(out.h, h);
+          out.cut ||= into.scrollWidth > into.clientWidth + 1;
+        }
+        [fill.textContent, into.textContent] = was;
+        return out;
+      });
+      const all = { base, rise, riseFill, phrase };
+      console.log(`      toolbar ${w}px: ${Object.entries(all).map(([n, m]) => `${n} ${m.h}px (row 1 ${m.used1}px, row 2 ${m.used2}px of ${m.w}px)`).join('; ')}; widest labels ${widest.h}px${widest.cut ? ', Fill → Drop ellipsized' : ''}`);
+      if (w >= 900) {
+        check(`${w}px: Switch on, Rise bars, Finish with Fill and Cancel share one row`,
+          Object.values(all).every((m) => m.row1 && m.build), Object.entries(all).map(([n, m]) => `${n} ${m.row1}/${m.build}`).join(', '));
+        check(`${w}px: Fill at, the phrase bars, Fill and Fill → Drop share one row`,
+          Object.values(all).every((m) => m.row2), Object.entries(all).map(([n, m]) => `${n} ${m.row2}`).join(', '));
+      }
+      if (w >= 900) {
+        check(`${w}px: Rise, Finish with Fill, Phrase end and the widest labels add no row to the toolbar`,
+          [rise.h, riseFill.h, phrase.h, widest.h].every((x) => x === base.h), `${base.h} / ${rise.h} / ${riseFill.h} / ${phrase.h} / ${widest.each.join(',')}px`);
+        check(`${w}px: Fill → Drop's widest words are not cut short`, !widest.cut);
+      }
+      check(`${w}px: the page doesn't scroll sideways`, Object.values(all).every((m) => m.scroll <= w), Object.values(all).map((m) => m.scroll).join(','));
+      if (extra?.hasTouch) {
+        const small = await page.evaluate(() => [...document.querySelectorAll('.scene-fill-tools button, .scene-build-bars button')]
+          .filter((b) => b.getClientRects().length && b.getBoundingClientRect().height < 44)
+          .map((b) => `${b.textContent.trim()} ${Math.round(b.getBoundingClientRect().height)}px`));
+        check(`${w}px touch: every fill control is at least 44px tall`, small.length === 0, small.join(', '));
+      }
+    } catch (e) {
+      check(`${w}px toolbar: the walk-through ran to the end`, false, String(e.message).split('\n')[0]);
+    }
+    check(`${w}px toolbar: no page errors`, errors.length === 0, errors.join('; '));
+    await page.close();
+  }
+}
+
+// ---- On its own: node tools/verify-ui-fills.mjs [baseUrl] ----------------------
+if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
+  const { chromium } = await import('playwright');
+  const baseUrl = process.argv[2] ?? 'http://127.0.0.1:8080';
+  const executablePath =
+    process.env.PLAYWRIGHT_CHROMIUM && existsSync(process.env.PLAYWRIGHT_CHROMIUM) ? process.env.PLAYWRIGHT_CHROMIUM : undefined;
+  const failures = [];
+  const check = (name, ok, detail) => {
+    console.log(`${ok ? 'ok  ' : 'FAIL'}  ${name}${detail ? ` — ${detail}` : ''}`);
+    if (!ok) failures.push(name);
+  };
+  const browser = await chromium.launch({ executablePath, args: ['--no-sandbox', '--autoplay-policy=no-user-gesture-required'] });
+  const open = async (width, height, extra = {}) => {
+    const page = await browser.newPage({ viewport: { width, height }, ...extra });
+    const errors = [];
+    page.on('pageerror', (e) => errors.push(e.message));
+    page.on('console', (m) => m.type() === 'error' && errors.push(m.text()));
+    await page.goto(`${baseUrl}/`, { waitUntil: 'networkidle' });
+    await page.waitForSelector('article.stem');
+    return { page, errors };
+  };
+  try {
+    await fillChecks({ open, check });
+  } finally {
+    await browser.close();
+  }
+  if (failures.length) {
+    console.error(`\n${failures.length} fill check(s) failed: ${failures.join(', ')}`);
+    process.exit(1);
+  }
+  console.log('\nAll fill checks passed.');
+}

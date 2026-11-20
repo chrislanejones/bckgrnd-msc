@@ -242,10 +242,19 @@ export type SceneRequest = {
   /**
    * Set when the launch is a timed build (Night 7): the mix rises to the scene over
    * `bars` bars instead of switching on one onset. `bar` is the bar of the build now
-   * playing (1 to `bars`) once it has started.
+   * playing (1 to `bars`) once it has started. `fill` (Rise + Fill, Night 8) is the fill
+   * that plays its last bar, under its own request id; `filling` once it has started.
    */
-  build?: { bars: BuildBars; bar?: number };
+  build?: { bars: BuildBars; bar?: number; fill?: LinkedFill };
+  /**
+   * Set when the launch is the scene half of a Fill into (Night 8): it lands on the
+   * onset its fill ends. `filling` once that fill has started.
+   */
+  fillInto?: LinkedFill;
 };
+
+/** The fill a Fill into's scene or a Rise waits on (docs/NIGHT8_PROTOCOL.md). */
+export type LinkedFill = { fillId: number; filling?: boolean };
 
 /** Engine event kinds (docs/NIGHT3_PROTOCOL.md). */
 export const EVENT = {
@@ -390,7 +399,7 @@ export const isFillPending = (f: FillRequest | null): f is FillRequest =>
  * object for another request's event, and once the fill has ended, been cancelled or
  * been refused, nothing moves it again. A late `fillQueued` cannot rewind a playing fill.
  */
-export function foldFillEvent(fill: FillRequest, event: EngineEvent): FillRequest {
+export function foldFillEvent<F extends FillRequest>(fill: F, event: EngineEvent): F {
   if (event.id !== fill.requestId || !isFillPending(fill)) return fill;
   switch (event.kind) {
     case EVENT.fillQueued:
@@ -415,6 +424,12 @@ export function foldFillEvent(fill: FillRequest, event: EngineEvent): FillReques
       return fill;
   }
 }
+
+/** Whether an engine event kind belongs to a fill (kinds 11-15, 51 and 52). */
+export const isFillEvent = (kind: number): boolean =>
+  (kind >= EVENT.fillQueued && kind <= EVENT.fillRejected) ||
+  kind === EVENT.fillLinked ||
+  kind === EVENT.fillUnlinked;
 
 /** Whether an engine event kind belongs to a scene launch or a timed build. */
 export const isLaunchEvent = (kind: number): boolean =>

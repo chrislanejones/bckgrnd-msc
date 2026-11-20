@@ -416,11 +416,21 @@ export function App() {
                 onReset={inst.resetSceneSlot}
                 {...(inst.hasFill
                   ? {
-                      fill: inst.fill.status,
-                      fillBar: inst.fill.bar,
-                      fillName: inst.fillName,
-                      fillUnavailable: inst.mixing ? 'Available after mix' : !inst.playing ? 'Press play first: a fill needs playback' : null,
-                      onFill: inst.toggleFill,
+                      fill: {
+                        job: inst.fill,
+                        name: inst.fillName,
+                        at: inst.fillAt,
+                        phraseBars: inst.phraseBars,
+                        riseFill: inst.riseFill,
+                        unavailable: inst.fillUnavailable,
+                        intoName: inst.fillIntoName,
+                        intoUnavailable: inst.fillIntoUnavailable,
+                        onFill: inst.toggleFill,
+                        onFillInto: inst.toggleFillInto,
+                        onAt: inst.setFillAt,
+                        onPhraseBars: inst.setPhraseBars,
+                        onRiseFill: inst.setRiseFill,
+                      },
                     }
                   : {})}
               >

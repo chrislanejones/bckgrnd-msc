@@ -23,6 +23,16 @@ const bundled = await build({
   logLevel: 'silent',
 });
 const s = await import(`data:text/javascript;base64,${Buffer.from(bundled.outputFiles[0].text).toString('base64')}`);
+// The host's fill logic (frontend/lib/fills.ts), bundled on its own: it imports scenes.ts.
+const fillsBundle = await build({
+  entryPoints: [join(root, 'frontend/lib/fills.ts')],
+  bundle: true,
+  format: 'esm',
+  platform: 'neutral',
+  write: false,
+  logLevel: 'silent',
+});
+const fl = await import(`data:text/javascript;base64,${Buffer.from(fillsBundle.outputFiles[0].text).toString('base64')}`);
 const contract = JSON.parse(readFileSync(join(root, 'contracts/scenes.json'), 'utf8'));
 const library = JSON.parse(readFileSync(join(root, 'public/library/index.json'), 'utf8'));
 const track = library.tracks.find((t) => t.id === 'warehouse');
@@ -193,6 +203,110 @@ check('an accent fired leaves the scene request where it was',
 const into = s.foldSceneEvent({ ...req, requestId: 61 }, { kind: s.EVENT.sceneQueued, id: 61, a: 5, b: 64 });
 check("a Fill into's scene queues with its landing bar", into.status === 'queued' && into.bar === 5);
 check("a Fill into's scene refused settles with the reason", s.foldSceneEvent(into, { kind: s.EVENT.sceneRejected, id: 61, a: 8, b: 2 }).status === 'rejected');
+
+// ---- The host's fill folding (frontend/lib/fills.ts, Night 8) -------------------
+check('fill events are 11-15, 51 and 52, and nothing else',
+  [11, 12, 13, 14, 15, 51, 52].every(s.isFillEvent) && ![1, 5, 10, 16, 21, 41, 50, 53].some(s.isFillEvent));
+check('Fill at sends 0 for Next bar, and the phrase length for Phrase end',
+  fl.fillPhrase('bar', 8) === 0 && [2, 4, 8, 16].every((n) => fl.fillPhrase('phrase', n) === n)
+  && JSON.stringify(fl.PHRASE_BAR_CHOICES) === '[2,4,8,16]' && fl.DEFAULT_PHRASE_BARS === 4 && fl.FILL_INDEX === 0);
+// Late presses: the first step lies in a later phrase, or behind the playhead (a loop).
+check('a next-bar fill never rolls over', !fl.rolledOver(250, 0, 0) && !fl.rolledOver(47, 48, 0));
+check('4 bars: pressed in bar 1 or bar 3, it plays bar 4 of this phrase', !fl.rolledOver(0, 48, 4) && !fl.rolledOver(40, 48, 4) && !fl.rolledOver(47, 48, 4));
+check('4 bars: pressed in bar 4 (or on its line), it rolls to the next phrase', fl.rolledOver(48, 112, 4) && fl.rolledOver(50, 112, 4) && fl.rolledOver(63, 112, 4));
+check("4 bars: pressed in the song's last bar, it rolls round to bar 4", fl.rolledOver(250, 48, 4));
+check('2, 8 and 16 bars: in time for this phrase, and late', !fl.rolledOver(0, 16, 2) && fl.rolledOver(20, 48, 2)
+  && !fl.rolledOver(100, 112, 8) && fl.rolledOver(115, 240, 8) && !fl.rolledOver(200, 240, 16) && fl.rolledOver(241, 240, 16));
+check("a 2-bar loop's last bar: ahead of it plays this pass, inside it the next",
+  !fl.rolledOver(70, 80, 4) && fl.rolledOver(85, 80, 4) && fl.rolledOver(80, 80, 4));
+check('stopped (no step) is never late', !fl.rolledOver(-1, 48, 4));
+
+const job = (over = {}) => ({ requestId: 80, status: 'sending', kind: 'plain', phrase: 4, from: 10, ...over });
+const ev = (kind, a = 0, b = 0, id = 80) => ({ kind, id, a, b });
+// Next bar: exactly the Night 3 words.
+const nb = fl.foldFillJob(job({ phrase: 0 }), ev(s.EVENT.fillQueued, 9, 128), 120);
+check('Next bar: "Fill · Bar 9", "Fill queued for bar 9", and the Night 3 names',
+  !nb.late && fl.fillButtonLabel(nb) === 'Fill · Bar 9' && fl.fillQueuedStatus(nb) === 'Fill queued for bar 9'
+  && fl.fillButtonAria(nb, 'Fill', 0) === 'Cancel the queued Fill' && fl.fillButtonAria(null, 'Fill', 0) === 'Fill for one bar, from the next bar'
+  && fl.fillButtonLabel(null) === 'Drum fill' && fl.fillButtonTitle('Fill', 0) === 'Fill: one bar, from the next bar',
+  `${fl.fillButtonLabel(nb)} | ${fl.fillQueuedStatus(nb)}`);
+const onTime = fl.foldFillJob(job(), ev(s.EVENT.fillQueued, 4, 48), 30);
+check('Phrase end in time: "Fill · Bar 4", "the end of the phrase"',
+  onTime.status === 'queued' && onTime.bar === 4 && !onTime.late && onTime.from === 10
+  && fl.fillButtonLabel(onTime) === 'Fill · Bar 4' && fl.fillQueuedStatus(onTime) === 'Fill queued for bar 4, the end of the phrase'
+  && fl.fillButtonAria(onTime, 'Fill', 4) === 'Cancel the queued Fill, at the end of bar 4', fl.fillQueuedStatus(onTime));
+const late = fl.foldFillJob(job({ from: 52 }), ev(s.EVENT.fillQueued, 8, 112), 53);
+check('Phrase end, late: "Fill · Next phrase", and the status names the bar',
+  late.late && fl.fillButtonLabel(late) === 'Fill · Next phrase'
+  && fl.fillQueuedStatus(late) === 'Fill queued for bar 8, the end of the next phrase'
+  && fl.fillButtonAria(late, 'Fill', 4) === 'Cancel the queued Fill, at the end of the next phrase, bar 8', fl.fillButtonLabel(late));
+const again = fl.foldFillJob(onTime, ev(s.EVENT.fillQueued, 2, 16), 12);
+check('a re-announce (loop change) is measured from where the playhead is then', again.bar === 2 && again.from === 12 && !again.late);
+const againLate = fl.foldFillJob(onTime, ev(s.EVENT.fillQueued, 2, 16), 22);
+check('and a re-announce behind the playhead is the next pass', againLate.late === true);
+check('an idle Phrase end Fill names the phrase', fl.fillButtonAria(null, 'Fill', 8) === 'Fill for one bar, ending on the next 8-bar phrase line'
+  && fl.fillButtonTitle('Fill', 8) === 'Fill: one bar, ending on the 8-bar phrase line');
+const playingPlain = fl.foldFillJob(onTime, ev(s.EVENT.fillStarted, 48), 48);
+check('a playing fill reads "Fill playing"', fl.fillButtonLabel(playingPlain) === 'Fill playing' && fl.fillButtonAria(playingPlain, 'Fill', 4) === 'Fill is playing');
+check('a settled fill reads "Drum fill" again',
+  fl.fillButtonLabel(fl.foldFillJob(playingPlain, ev(s.EVENT.fillEnded, 64), 64)) === 'Drum fill');
+check('the same object back for an event that changes nothing', fl.foldFillJob(onTime, ev(s.EVENT.fillStarted, 0, 0, 99), 0) === onTime);
+
+// Fill → Drop: the fill half of a Fill into.
+const intoQ = fl.foldFillJob(fl.foldFillJob(job({ kind: 'into', partner: 81, from: 70 }), ev(s.EVENT.fillQueued, 8, 112), 70), ev(s.EVENT.fillLinked, 81, 128), 70);
+check('Fill → Drop queued: "Fill · Bar 8 → Drop", linked to its scene, and not the Fill button\'s',
+  fl.fillIntoLabel(intoQ, 'Drop') === 'Fill · Bar 8 → Drop' && intoQ.linkedTo === 81 && intoQ.landing === 128
+  && fl.fillButtonLabel(intoQ) === 'Drum fill' && fl.fillButtonJob(intoQ) === null && fl.fillIntoJob(intoQ) === intoQ,
+  fl.fillIntoLabel(intoQ, 'Drop'));
+check('Fill → Drop names: idle, queued, late, sending',
+  fl.fillIntoAria(null, 'Drop', 4) === 'Fill into Drop at the end of the 4-bar phrase'
+  && fl.fillIntoAria(null, 'Drop', 0) === 'Fill into Drop: a fill on the next bar, then Drop'
+  && fl.fillIntoAria(intoQ, 'Drop', 4) === 'Fill into Drop at the end of bar 8. Press again to cancel.'
+  && fl.fillIntoAria(job({ kind: 'into' }), 'Drop', 4) === 'Fill into Drop, being queued. Press again to cancel.'
+  && fl.fillIntoLabel(job({ kind: 'into' }), 'Drop') === 'Fill → Drop…' && fl.fillIntoLabel(null, 'Peak') === 'Fill → Peak');
+const intoLate = fl.foldFillJob(job({ kind: 'into', from: 60 }), ev(s.EVENT.fillQueued, 8, 112), 60);
+check('Fill → Drop, late: "Fill · Next phrase → Drop"', fl.fillIntoLabel(intoLate, 'Drop') === 'Fill · Next phrase → Drop'
+  && fl.fillIntoAria(intoLate, 'Drop', 4) === 'Fill into Drop at the end of the next phrase, bar 8. Press again to cancel.');
+const intoP = fl.foldFillJob(intoQ, ev(s.EVENT.fillStarted, 112), 112);
+check('Fill → Drop filling: "Filling → Drop", and the Fill button shows the fill playing',
+  fl.fillIntoLabel(intoP, 'Drop') === 'Filling → Drop' && fl.fillButtonLabel(intoP) === 'Fill playing'
+  && fl.fillIntoAria(intoP, 'Drop', 4) === 'Filling into Drop. Press again to cancel Drop; the fill plays out its bar.');
+const intoU = fl.foldFillJob(intoQ, ev(s.EVENT.fillUnlinked, 10), 80);
+check('unlinked (another scene launched), it is a plain fill with its bar: the Fill button shows it',
+  intoU.kind === 'plain' && intoU.partner === undefined && intoU.linkedTo === undefined && intoU.status === 'queued'
+  && fl.fillButtonLabel(intoU) === 'Fill · Bar 8' && fl.fillIntoLabel(intoU, 'Drop') === 'Fill → Drop');
+// Rise + Fill: a replaced Rise's playing fill unlinks with 11 and plays on as a plain fill.
+const riseP = fl.foldFillJob(fl.foldFillJob(job({ kind: 'rise', phrase: 0, partner: 90 }), ev(s.EVENT.fillQueued, 6, 80), 20), ev(s.EVENT.fillStarted, 80), 80);
+check("a Rise's fill never reads as late, and plays as \"Fill playing\"", !riseP.late && fl.fillButtonLabel(riseP) === 'Fill playing' && fl.fillIntoJob(riseP) === null);
+const riseU = fl.foldFillJob(riseP, ev(s.EVENT.fillUnlinked, 11), 82);
+check("a replaced Rise's playing fill plays on, plain", riseU.kind === 'plain' && riseU.status === 'playing');
+
+// The request a fill leads into is marked filling once it starts.
+const intoReq = { ...req, requestId: 81, fillInto: { fillId: 80 } };
+const marked = fl.markFilling(intoReq, 80);
+check("a Fill into's scene is marked filling by its own fill only",
+  marked.fillInto.filling === true && marked.status === intoReq.status && fl.markFilling(intoReq, 79) === intoReq && fl.markFilling(marked, 80) === marked);
+const riseReq = { ...req, requestId: 90, status: 'building', build: { bars: 4, bar: 4, fill: { fillId: 80 } } };
+const riseMarked = fl.markFilling(riseReq, 80);
+check("a Rise is marked filling by its fill, keeping its bars", riseMarked.build.fill.filling === true && riseMarked.build.bar === 4 && riseMarked.build.bars === 4);
+check('a build fold keeps the fill it waits on', s.foldSceneEvent(riseMarked, { kind: s.EVENT.buildApplied, id: 90, a: 128, b: 1 }).build.fill.filling === true);
+check('a scene fold keeps the Fill into tie', s.foldSceneEvent(intoReq, { kind: s.EVENT.sceneQueued, id: 81, a: 9, b: 128 }).fillInto.fillId === 80);
+check('pad lines: "Fill in · Bar 9", "Filling into Drop"', fl.fillInLine(9) === 'Fill in · Bar 9' && fl.fillInLine(undefined) === 'Fill in…' && fl.fillingLine('Drop') === 'Filling into Drop');
+
+// Refusals, naming the part at fault (events 15, 5 and 45).
+check('a plain fill refused says what to do', fl.fillRefusal(7) === 'press Play first' && fl.fillRefusal(8) === 'a fill is already queued or playing'
+  && fl.fillRefusal(3) === 'not while the deck is scratched or braking' && fl.fillRefusal(6) === 'not during a mix' && fl.fillRefusal(1) === "this track's fill isn't available");
+check('a Fill into refused names the part: scene, fill, lanes, or the whole request',
+  fl.fillIntoRefusal(1, 1, 'Drop') === "Drop isn't a valid mix" && fl.fillIntoRefusal(8, 2, 'Drop') === 'a fill is already queued or playing'
+  && fl.fillIntoRefusal(1, 2, 'Drop') === "this track's fill isn't available" && fl.fillIntoRefusal(1, 3, 'Drop') === "Drop's patterns were refused"
+  && fl.fillIntoRefusal(7, 0, 'Drop') === 'press Play first' && fl.fillIntoRefusal(9, 0, 'Drop') === 'the track changed');
+check('a Rise refused names the fill or the lanes, and keeps the Night 7 words otherwise',
+  fl.buildRefusal(8, 5) === 'a fill is already waiting' && fl.buildRefusal(1, 5) === "this track's fill isn't available"
+  && fl.buildRefusal(1, 4) === 'its patterns were refused' && fl.buildRefusal(7, 0) === 'press Play first'
+  && fl.buildRefusal(3, 0) === 'not while the deck is scratched or braking' && fl.buildRefusal(1, 2) === 'not a valid mix');
+check('a Fill into canceled: by the user, once filling, or by Stop (US spelling in new words)',
+  fl.fillIntoCancelled('Drop', 10, false) === 'Fill → Drop canceled' && fl.fillIntoCancelled('Drop', 10, true) === 'Drop canceled; the fill plays out its bar'
+  && fl.fillIntoCancelled('Drop', 2, false) === 'Fill → Drop canceled: playback stopped');
 
 const vec = s.sceneVector(applied);
 const back = s.mixFromVector(vec);

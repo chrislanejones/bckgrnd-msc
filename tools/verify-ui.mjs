@@ -14,6 +14,7 @@
 import { chromium } from 'playwright';
 import { existsSync } from 'node:fs';
 import { riseChecks } from './verify-ui-rise.mjs';
+import { fillChecks } from './verify-ui-fills.mjs';
 
 const baseUrl = process.argv[2] ?? 'http://127.0.0.1:8080';
 const executablePath =
@@ -1164,6 +1165,9 @@ try {
   // ---- Rise (Night 7 timed builds), the rest of the contract: tools/verify-ui-rise.mjs.
   await riseChecks({ open, check });
 
+  // ---- Fills (Night 8: Fill at, Fill → Drop, Rise + Fill, prefs): tools/verify-ui-fills.mjs.
+  await fillChecks({ open, check });
+
   // ---- Tablet: the library is an overlay opened from the transport. -----------
   {
     const { page } = await open(1024, 768);
@@ -1277,9 +1281,10 @@ try {
   }
 
   // ---- Responsive (Night 8): the narrow desktop tiers and short windows. ---------
-  // Scenes toolbar, mouse: Switch on, Rise's 2 · 4 · 8, Drum fill and Cancel share one
-  // row at every compact width, including the stacked tier around 1180px, and choosing
-  // Rise never adds a row, even with Fill's widest label.
+  // Scenes toolbar, mouse: Switch on, Rise's 2 · 4 · 8 (with Finish with Fill) and Cancel
+  // share one row at every compact width, including the stacked tier around 1180px, and
+  // choosing Rise never adds a row, even with Fill's widest label. Since Night 8 the Drum
+  // fill sits on the fill row under it (tools/verify-ui-fills.mjs measures that row).
   for (const width of [1440, 1280, 1279, 1200, 1180, 1100, 1024, 960, 900]) {
     const { page } = await open(width, 900);
     const toolbar = () => page.evaluate(() => {
@@ -1301,7 +1306,7 @@ try {
       fill.textContent = was;
       return Math.round(h * 10) / 10;
     });
-    check(`${width}px: Switch on, Rise bars, Fill and Cancel share one row`, off.oneRow && on.oneRow, `off ${off.oneRow}, on ${on.oneRow}`);
+    check(`${width}px: Switch on, Rise bars and Cancel share one row`, off.oneRow && on.oneRow, `off ${off.oneRow}, on ${on.oneRow}`);
     check(`${width}px: choosing Rise adds no row to the scenes toolbar`, on.h === off.h && widest === off.h, `${off.h}px, ${on.h}px with Rise, ${widest}px with "Fill · Bar 16"`);
     await page.close();
   }
