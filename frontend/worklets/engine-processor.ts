@@ -73,6 +73,8 @@ type Inbound =
       patterns?: Float32Array;
       /** The request id those lanes carry in events. */
       patternsId?: number;
+      /** 1: a crash on the onset it commits, during playback (docs/NIGHT8_PROTOCOL.md). */
+      accent?: number;
     }
   | { type: 'cancelScene'; requestId: number }
   | {
@@ -96,6 +98,8 @@ type Inbound =
        */
       fillId?: number;
       fillIndex?: number;
+      /** 1: a crash on the onset it lands (docs/NIGHT8_PROTOCOL.md). */
+      accent?: number;
     }
   | { type: 'cancelBuild'; requestId: number }
   | {
@@ -139,6 +143,8 @@ type Inbound =
       patterns?: Float32Array;
       /** The request id those lanes carry in events. */
       patternsId?: number;
+      /** 1: a crash on the phrase line the scene lands on. */
+      accent?: number;
     }
   | { type: 'gestureBegin'; token: number; kind: number }
   | { type: 'gestureEnd'; token: number }
@@ -214,6 +220,11 @@ function fillPhrase(phrase: number | undefined): number {
 /** A fill's length for the engine: 0 (or absent), one bar; anything else 255 (`invalid`). */
 function fillLength(length: number | undefined): number {
   return length === undefined || length === 0 ? 0 : 255;
+}
+
+/** A scene's accent for the engine: 0 (or absent) none, 1 crash; anything else 255 (`invalid`). */
+function accentCode(accent: number | undefined): number {
+  return accent === undefined || accent === 0 ? 0 : accent === 1 ? 1 : 255;
 }
 
 class EngineProcessor extends AudioWorkletProcessor {
@@ -644,7 +655,7 @@ class EngineProcessor extends AudioWorkletProcessor {
     // rather than wrapping into a valid code on the way to a u8.
     const t = message.timing;
     const timing = t === 0 || t === 1 || t === 2 ? t : 255;
-    const verdict = engine.queue_scene(requestId, timing, this.sceneIn);
+    const verdict = engine.queue_scene_with(requestId, timing, this.sceneIn, accentCode(message.accent));
     if (verdict === 0) {
       this.scenePending.set(this.sceneIn);
       this.scenePendingId = requestId;
@@ -710,6 +721,7 @@ class EngineProcessor extends AudioWorkletProcessor {
       land != null ? this.buildLand : EngineProcessor.NO_LAND,
       fillId,
       fillIndex >>> 0,
+      accentCode(message.accent),
     );
     if (verdict === 0) {
       this.buildPendingId = requestId;
@@ -824,6 +836,7 @@ class EngineProcessor extends AudioWorkletProcessor {
       fillLength(message.length),
       sceneId,
       this.sceneIn,
+      accentCode(message.accent),
     );
     if (verdict === 0) {
       // The scene is the pending one now: its `applied` carries it to the idle deck.

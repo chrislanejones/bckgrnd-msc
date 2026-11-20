@@ -214,6 +214,25 @@ pub mod event {
     /// tie broken while the fill lives on as a plain fill (`a` = the reason).
     pub const FILL_LINKED: u8 = 51;
     pub const FILL_UNLINKED: u8 = 52;
+    /// A scene's crash accent on the onset it committed (`a` = the step, -1 for Now;
+    /// `b` = [`super::accent_fired`]).
+    pub const ACCENT_FIRED: u8 = 53;
+}
+
+/// The accent a scene, a Fill into's scene or a Rise's landing carries
+/// (`docs/NIGHT8_PROTOCOL.md`). Anything else is refused as invalid.
+pub mod accent {
+    pub const NONE: u8 = 0;
+    pub const CRASH: u8 = 1;
+}
+
+/// `b` of `accent fired` (53).
+pub mod accent_fired {
+    /// Counted but not heard: a stem is soloed (the transition sounds' rule).
+    pub const SILENT: u8 = 0;
+    pub const PLAYED: u8 = 1;
+    /// The Drop's own crash fired on the same onset; one crash, not two.
+    pub const MERGED: u8 = 2;
 }
 
 /// Reason codes, carried by `cancelled` and `rejected` events and returned by
@@ -323,6 +342,8 @@ pub struct PendingScene {
     pub queued_at: u64,
     /// For [`Timing::Linked`], the onset serial it commits on. Unused otherwise.
     pub due: u64,
+    /// A crash on the onset it commits (during playback).
+    pub accent: bool,
     /// The snapshot, copied when queued.
     pub values: [f32; SCENE_LEN],
 }
@@ -391,7 +412,14 @@ impl Scheduler {
     /// A request already pending is replaced, reported as `replaced`, and its
     /// announced boundary kept unless the new request is `Now`. Then `queued` is
     /// reported with the predicted bar and step, unless the boundary is `Now`.
-    pub fn queue(&mut self, request_id: u32, timing: Timing, values: &[f32], t: &Transport) {
+    pub fn queue(
+        &mut self,
+        request_id: u32,
+        timing: Timing,
+        values: &[f32],
+        accent: bool,
+        t: &Transport,
+    ) {
         let mut copy = [0.0f32; SCENE_LEN];
         copy.copy_from_slice(&values[..SCENE_LEN]);
         let (timing, queued_at) = match self.scene.take() {
@@ -418,6 +446,7 @@ impl Scheduler {
             timing,
             queued_at,
             due: 0,
+            accent,
             values: copy,
         });
         self.announce(t);
@@ -426,7 +455,7 @@ impl Scheduler {
     /// Put `values` (already validated) in the pending slot as a Fill into's scene,
     /// committing on onset serial `due`. A scene already pending is replaced, as by
     /// [`Scheduler::queue`]. Announced with its fill, by [`Scheduler::announce_fill`].
-    pub fn queue_linked(&mut self, request_id: u32, values: &[f32], due: u64) {
+    pub fn queue_linked(&mut self, request_id: u32, values: &[f32], due: u64, accent: bool) {
         let mut copy = [0.0f32; SCENE_LEN];
         copy.copy_from_slice(&values[..SCENE_LEN]);
         self.replace_pending(request_id);
@@ -435,6 +464,7 @@ impl Scheduler {
             timing: Timing::Linked,
             queued_at: self.serial,
             due,
+            accent,
             values: copy,
         });
     }

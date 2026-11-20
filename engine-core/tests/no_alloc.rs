@@ -1,6 +1,7 @@
 //! Nothing on the audio path allocates or frees (`docs/NIGHT8_PROTOCOL.md`): a counting
-//! allocator watches every `process()` call through Night 8's requests from queue to
-//! landing or cancel, and the request calls themselves, on a real library track.
+//! allocator watches every `process()` call through Night 8's requests (phrase fills,
+//! Fill into, Rise + Fill, crash accents) from queue to landing or cancel, and the
+//! request calls themselves, on a real library track.
 //!
 //! The count is per thread and only while a closure runs, so the test harness and
 //! other tests running alongside are not counted.
@@ -193,7 +194,7 @@ fn night_8_requests_neither_allocate_nor_free_on_the_audio_path() {
     let drop = a_scene(&rig.e, 0.9);
     assert_eq!(
         rig.call("queue_fill_into", |e| e
-            .queue_fill_into(2, 0, 2, 0, 3, &drop)),
+            .queue_fill_into(2, 0, 2, 0, 3, &drop, 1)),
         0
     );
     rig.call("set_loop", |e| e.set_loop(4));
@@ -205,14 +206,14 @@ fn night_8_requests_neither_allocate_nor_free_on_the_audio_path() {
     let back = a_scene(&rig.e, 0.5);
     assert_eq!(
         rig.call("queue_fill_into", |e| e
-            .queue_fill_into(4, 0, 2, 0, 5, &back)),
+            .queue_fill_into(4, 0, 2, 0, 5, &back, 0)),
         0
     );
     rig.block();
     assert!(rig.call("cancel_fill", |e| e.cancel_fill(4)));
     assert_eq!(
         rig.call("queue_fill_into", |e| e
-            .queue_fill_into(6, 0, 2, 0, 7, &back)),
+            .queue_fill_into(6, 0, 2, 0, 7, &back, 0)),
         0
     );
     rig.until(event::FILL_STARTED);
@@ -223,7 +224,7 @@ fn night_8_requests_neither_allocate_nor_free_on_the_audio_path() {
     let rise = a_scene(&rig.e, 0.4);
     assert_eq!(
         rig.call("queue_build_with", |e| e
-            .queue_build_with(8, 2, &rise, &drop, 9, 0)),
+            .queue_build_with(8, 2, &rise, &drop, 9, 0, 1)),
         0
     );
     rig.call("set_loop", |e| e.set_loop(2));
@@ -241,6 +242,7 @@ fn night_8_requests_neither_allocate_nor_free_on_the_audio_path() {
             &rise,
             &[],
             11,
+            0,
             0
         )),
         0
@@ -255,13 +257,29 @@ fn night_8_requests_neither_allocate_nor_free_on_the_audio_path() {
             &rise,
             &[],
             13,
+            0,
             0
         )),
         0
     );
     rig.until(event::BUILD_STARTED);
-    assert_eq!(rig.call("queue_scene", |e| e.queue_scene(14, 2, &back)), 0);
+    assert_eq!(
+        rig.call("queue_scene_with", |e| e.queue_scene_with(14, 2, &back, 1)),
+        0
+    );
     rig.until(event::BUILD_REPLACED);
+
+    // Crash accents: a Now scene's fires in the render call, a Bar scene's on its onset.
+    assert_eq!(
+        rig.call("queue_scene_with", |e| e.queue_scene_with(15, 0, &drop, 1)),
+        0
+    );
+    rig.until(event::ACCENT_FIRED);
+    assert_eq!(
+        rig.call("queue_scene_with", |e| e.queue_scene_with(16, 2, &back, 1)),
+        0
+    );
+    rig.until(event::ACCENT_FIRED);
 
     assert!(rig.allocs.is_empty(), "allocated: {:?}", rig.allocs);
 }

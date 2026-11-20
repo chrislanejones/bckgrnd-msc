@@ -157,6 +157,8 @@ pub(crate) struct Build {
     keep: u64,
     /// While running: slots the user has taken back. The build leaves them alone.
     touched: u64,
+    /// A crash on the onset it lands (`docs/NIGHT8_PROTOCOL.md`).
+    accent: bool,
 }
 
 impl Build {
@@ -201,7 +203,7 @@ impl Engine {
     /// when it is refused (with its reason), cancelled (with the cancel's), or
     /// replaced (10), exactly as a scene's linked lanes are.
     pub fn queue_build(&mut self, request_id: u32, bars: u32, target: &[f32], land: &[f32]) -> u8 {
-        self.queue_build_with(request_id, bars, target, land, 0, 0)
+        self.queue_build_with(request_id, bars, target, land, 0, 0, 0)
     }
 
     /// [`Engine::queue_build`], finishing with a fill (Rise + Fill,
@@ -217,6 +219,9 @@ impl Engine {
     /// the fill plays) and `fill linked` (51: `a` = this build, `b` = the landing step).
     /// Cancelled, the fill goes with it, or runs its bar unlinked if already playing;
     /// replaced, the fill is cancelled (or unlinked) with reason 11.
+    ///
+    /// `accent` 1 plays a crash on the onset it lands (`accent fired`, 53), with or
+    /// without a landing scene; 0 none; anything else is refused as invalid, part 3.
     #[allow(clippy::too_many_arguments)]
     pub fn queue_build_with(
         &mut self,
@@ -226,6 +231,7 @@ impl Engine {
         land: &[f32],
         fill_id: u32,
         fill_index: u32,
+        accent: u8,
     ) -> u8 {
         let with_fill = fill_id != 0;
         let replacing = self.build.as_ref().map(|b| b.request_id);
@@ -233,7 +239,8 @@ impl Engine {
             (reason::INVALID, detail::BARS)
         } else if !scheduler::valid(target) {
             (reason::INVALID, detail::TARGET)
-        } else if !land.is_empty() && !scheduler::valid(land) {
+        } else if (!land.is_empty() && !scheduler::valid(land)) || accent > scheduler::accent::CRASH
+        {
             (reason::INVALID, detail::LAND)
         } else if with_fill && !self.fill_args_ok(fill_index, 0, 0) {
             (reason::INVALID, detail::FILL)
@@ -300,6 +307,7 @@ impl Engine {
             inherited,
             keep,
             touched: 0,
+            accent: accent == scheduler::accent::CRASH,
         });
         self.build_lanes = lanes;
         // Freed here, in the message handler: a replaced build's lanes, and any a scene
@@ -672,6 +680,9 @@ impl Engine {
                 if let Some(lanes) = self.build_lanes.take() {
                     debug_assert_eq!(lanes.link, b.request_id);
                     self.apply_patterns(lanes, step as i32);
+                }
+                if b.accent {
+                    self.accent_due = Some(b.request_id);
                 }
                 self.scheduler.events.push(
                     event::BUILD_APPLIED,

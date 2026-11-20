@@ -185,6 +185,10 @@ const rfill = s.foldFillEvent(s.foldFillEvent({ requestId: 70, status: 'sending'
 check("a Rise's fill links to the build and its landing", rfill.linkedTo === 71 && rfill.landing === 48 && rfill.bar === 3);
 const gone = s.foldFillEvent(rfill, { kind: s.EVENT.fillCancelled, id: 70, a: 11, b: 0 });
 check("a replaced Rise's fill settles with reason 11, in words", gone.status === 'cancelled' && gone.reason === 11 && s.REASON[11] === 'its Rise was replaced');
+// Crash accents (Night 8): 53 reports on the scene's id, and moves no request.
+check('accent fired is 53 and not a launch event', s.EVENT.accentFired === 53 && !s.isLaunchEvent(53));
+check('an accent fired leaves the scene request where it was',
+  s.foldSceneEvent(queued, { kind: s.EVENT.accentFired, id: 7, a: 128, b: 1 }) === queued);
 // The Fill into's scene is a launch like any other: queued with the landing bar, then applied.
 const into = s.foldSceneEvent({ ...req, requestId: 61 }, { kind: s.EVENT.sceneQueued, id: 61, a: 5, b: 64 });
 check("a Fill into's scene queues with its landing bar", into.status === 'queued' && into.bar === 5);

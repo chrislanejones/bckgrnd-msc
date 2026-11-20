@@ -251,3 +251,82 @@ The host API is `EngineHost.queueBuild(requestId, bars, target, generation, land
 patterns?, {fill: {requestId, index}})`, with `BUILD_REJECTED_PART.fill` (5),
 `BUILD_REJECTED_PART.lanes` (4) and `ENGINE_REASON.linked` (11). The fill folds with
 `foldFillEvent` like any other (`linkedTo` = the build's id).
+
+## Crash accents
+
+A scene can carry a **crash accent**: when it commits during playback, the transition
+crash (`engine-core/src/transition.rs`, the Drop's own voice, no new synthesis) plays
+once on that onset. Off by default and never automatic (`NIGHT8_DECISIONS.md` §7).
+Storing the flag per scene in the project format is the host's job (ADR-012/014); the
+engine only takes it on the request.
+
+### The requests
+
+| Engine | Accent argument |
+|---|---|
+| `queue_scene_with(request_id: u32, timing: u8, values: &[f32], accent: u8) -> u8` | the launch's; `queue_scene(id, timing, values)` is this with 0 |
+| `queue_fill_into(…, values, accent: u8) -> u8` | the Fill into's scene |
+| `queue_build_with(…, fill_id, fill_index, accent: u8) -> u8` | the Rise's landing |
+
+`accent` is 0 (none) or 1 (crash). Anything else is refused as invalid: `scene rejected`
+(`b` 0) for a launch, part 1 (scene) for a Fill into, part 3 (landing) for a Rise.
+
+### When it fires
+
+| Rule | Why |
+|---|---|
+| On the onset the scene commits, after that step's transition sounds have run | So it can tell whether the Drop's crash fired on the same onset |
+| A Now launch while playing: at once, on the first sample of the render call it commits in; `a` = -1 | Now has no onset |
+| Applied while stopped: nothing, no event | Nothing is playing to accent |
+| On the Drop's natural crossing (191 → 192): **one** crash, the Drop's; `b` = 2 merged | ADR-008's crash already fires there |
+| On 192 reached by a loop's wrap (not a crossing): the accent plays, `b` = 1 | There is no natural crash to merge with |
+| Under a solo, the scene's own included: counted and silent, `b` = 0 | The transition sounds' rule (ADR-008) |
+| A Rise with the accent: on its end onset, after the landing scene, its lanes and the fill's end, with or without a landing scene | The landing is a commit |
+| A Fill into with the accent: on the phrase line, after the scene and the fill's end | The same |
+| Replaced, cancelled or refused before it commits: nothing | It never landed |
+
+### Events: kind 53
+
+| kind | name | a | b |
+|---|---|---|---|
+| 53 | accent fired | the step (-1 for a Now launch) | 0 silent under solo, 1 played, 2 merged with the natural crash |
+
+`requestId` is the scene's (or the Rise's). It comes after that request's `applied`.
+
+### Worklet messages
+
+`scene`, `fillInto` and `build` gain `accent?` (1 for a crash). Absent or 0 is none;
+anything else goes in as 255 and is refused. The host API takes `SCENE_ACCENT` on
+`EngineHost.queueScene(…, patterns?, accent)`, `queueFillInto(…, {accent})` and
+`queueBuild(…, {accent})`, with `ENGINE_EVENT.accentFired` and `ACCENT_FIRED` for `b`.
+
+## Checks
+
+| Check | Covers |
+|---|---|
+| `cargo test` `fill_tests.rs` | Phrase fills for 2/4/8/16 bars on every phrase line, bad phrase or length, late presses, loop wraps, tempo and loop while waiting; Fill into landing order, the scene's kick on the line, no gap, atomic refusal per part, every cancel/replace row, interrupts; Rise + Fill at 2/4/8 bars, refusal per part, cancel from either part, interrupts, replace, loop and tempo, the held slot; accents once on commit, merged on 192, silent under solo, none stopped, on a Rise landing and a Fill into, bad codes |
+| `cargo test --test no_alloc` | A counting allocator over every `process()` call and the request calls through all of the above (drums only: see below) |
+| `cargo bench --bench render` | `fills` (back-to-back Fill into) against `night3`, the same music through Night 3 calls, and both against `plain` |
+| `pnpm check:scenes` | `foldFillEvent` for 11-15, 51, 52, reason 11 and 53 |
+
+`process()` already allocates when it triggers a tone note (the `NoteEvent` clone and
+the voicing's detune `Vec`), before and outside Night 8. The no-allocation test plays a
+track's drums alone so that it measures Night 8; the tone path is parked.
+
+## Where this departs from the spec
+
+For the ADRs (`docs/NIGHT8_SPEC.md` as amended by `NIGHT8_DECISIONS.md`):
+
+| Spec | Built | Why |
+|---|---|---|
+| `queue_fill_into(fill_id, index, length, scene_id, values)`, "`at` is always phrase end" | Takes `phrase_bars` too (0 to 16), and `accent` | Phrase 0 gives a next-bar Fill into, as the task asks; the accent rides on the request (§C) |
+| `PendingFill` gains `first_pos` | Not added | "Phrase end · Beat" was dropped (§3); `fill started` `b` stays 0 |
+| Rise + Fill: "`queue_build` gains a fill index" | A new `queue_build_with(…, fill_id, fill_index, accent)`; `queue_build` is unchanged | Keeps every Night 7 caller; the fill gets its own request id, as Fill into's does |
+| The accent travels "on `queue_scene`" | A new `queue_scene_with(…, accent)`; `queue_scene` is unchanged | The same |
+| Refusal: "both with the same reason, and `b` = the part" | As written, and `b` = 0 when the whole request is refused (stopped, scratch) | No single part is at fault |
+| Reason 11: "one part was refused or canceled because its partner was" | Used only for a Rise's fill when its Rise is **replaced** | Refusals carry the real reason on both parts (the spec's other sentence); a user cancel is 10 on both (the spec's table); only a replaced Rise's fill went for no reason of its own |
+| "Another scene launched while linked: latest wins" | The new scene keeps **its own** timing, not the Fill into's landing | Inheriting it would make it a Fill into with an unlinked fill |
+| A fill in a Rise (Rise + Fill) blocked by a fill playing now | Only a **waiting** fill blocks it | A playing fill ends before the Rise's last bar can begin; latest-wins for Rises stays intact |
+| A replaced Rise's fill | Cancelled (11) while waiting, unlinked (52, 11) if playing | A Fill into's fill outlives its scene because it was the action; a Rise's fill was a part of the Rise |
+| The accent on a Rise with no landing scene | Fires on the end onset anyway | The Rise's end is the landing |
+| Event 51's re-announce | 51 comes once; a loop change re-sends 11 and 1 (or 41) | 51 is the tie, not a prediction |

@@ -104,9 +104,9 @@ pub mod perform {
 /// `contracts/scenes.json` and `contracts/parameters.json`.
 pub mod scene {
     pub use crate::scheduler::{
-        event, reason, slot_kind, timing, valid, SlotKind, Timing, ECHO_TIME_OPTIONS,
-        EVENT_CAPACITY, EVENT_WIDTH, FILL_LENGTHS, FILL_PHRASE_BARS, FX_BASE, FX_KINDS, SCENE_LEN,
-        SCENE_PARAMS, STEM_FIELDS,
+        accent, accent_fired, event, reason, slot_kind, timing, valid, SlotKind, Timing,
+        ECHO_TIME_OPTIONS, EVENT_CAPACITY, EVENT_WIDTH, FILL_LENGTHS, FILL_PHRASE_BARS, FX_BASE,
+        FX_KINDS, SCENE_LEN, SCENE_PARAMS, STEM_FIELDS,
     };
 
     /// Timed builds (`docs/NIGHT7_PROTOCOL.md`): the lengths allowed, the codes for
@@ -542,6 +542,9 @@ pub struct Engine {
     fx_base: [f32; SCENE_LEN - scheduler::FX_BASE],
     /// The timed build, waiting for its bar line or running (`docs/NIGHT7_PROTOCOL.md`).
     build: Option<build::Build>,
+    /// A crash accent committed on this onset (the request's id), fired once the
+    /// transition sounds have had their say on it (`docs/NIGHT8_PROTOCOL.md`).
+    accent_due: Option<u32>,
     /// Samples rendered, and what happened on which of them, for the scheduling tests.
     #[cfg(test)]
     clock: u64,
@@ -619,6 +622,7 @@ impl Engine {
             retired: Vec::with_capacity(2 * patterns::LANES),
             fx_base: build::FX_DEFAULTS,
             build: None,
+            accent_due: None,
             #[cfg(test)]
             clock: 0,
             #[cfg(test)]
@@ -1224,16 +1228,34 @@ impl Engine {
     }
 
     pub fn queue_scene(&mut self, request_id: u32, timing: u8, values: &[f32]) -> u8 {
+        self.queue_scene_with(request_id, timing, values, scheduler::accent::NONE)
+    }
+
+    /// [`Engine::queue_scene`] with an accent (`docs/NIGHT8_PROTOCOL.md`): 0 none, 1 a
+    /// crash on the onset the scene commits, during playback only (none when it applies
+    /// while stopped), reported as `accent fired` (53). Any other accent is refused as
+    /// invalid (1).
+    pub fn queue_scene_with(
+        &mut self,
+        request_id: u32,
+        timing: u8,
+        values: &[f32],
+        accent: u8,
+    ) -> u8 {
         let verdict = match scheduler::Timing::from_code(timing) {
             None => reason::INVALID,
-            Some(_) if !scheduler::valid(values) => reason::INVALID,
+            Some(_) if !scheduler::valid(values) || accent > scheduler::accent::CRASH => {
+                reason::INVALID
+            }
             Some(_) if self.transport.in_gesture() => reason::TRANSPORT,
             Some(t) => {
+                let accent = accent == scheduler::accent::CRASH;
                 // Lanes go with their scene as one transaction: the ones staged for it
                 // become the scene's only now that it is accepted.
                 let lanes = self.claim_staged(request_id);
                 if self.transport.playing {
-                    self.scheduler.queue(request_id, t, values, &self.transport);
+                    self.scheduler
+                        .queue(request_id, t, values, accent, &self.transport);
                     // The scene it replaced, if one was pending, takes its lanes along.
                     self.cancel_scene_lanes(reason::USER);
                     self.scene_lanes = lanes;
@@ -1243,7 +1265,7 @@ impl Engine {
                     self.scene_lanes = lanes;
                     let mut copy = [0.0f32; SCENE_LEN];
                     copy.copy_from_slice(&values[..SCENE_LEN]);
-                    self.commit_scene(request_id, &copy, -1);
+                    self.commit_scene(request_id, &copy, -1, accent);
                 }
                 reason::OK
             }
@@ -1396,7 +1418,7 @@ impl Engine {
         // A scene queued Now lands on the first sample of the render call after it was
         // accepted, ahead of anything on that sample.
         if let Some(p) = self.scheduler.take_now() {
-            self.commit_scene(p.request_id, &p.values, -1);
+            self.commit_scene(p.request_id, &p.values, -1, p.accent);
         }
         if self
             .edit
@@ -1424,7 +1446,7 @@ impl Engine {
                     }
                 }
                 if let Some(p) = due {
-                    self.commit_scene(p.request_id, &p.values, step as i32);
+                    self.commit_scene(p.request_id, &p.values, step as i32, p.accent);
                 }
                 //    Then move a timed build on (or start it, or end it and commit its
                 //    landing scene and its lanes), after a scene that would have
@@ -1442,11 +1464,20 @@ impl Engine {
                 // The transition sounds fire only on ordinary playback. A step the
                 // spin or the brake raced through breaks the chain of crossings.
                 // Under a solo they are counted but stay quiet.
+                let accent = self.accent_due.take();
                 if self.transport.in_backspin() || self.transport.braking() {
                     self.transitions.forget();
+                    if let Some(id) = accent {
+                        self.fire_accent(id, step as f64, true, false);
+                    }
                 } else {
                     let quiet = self.any_solo();
-                    self.transitions.on_step(step, &self.transport, quiet);
+                    let crashed = self.transitions.on_step(step, &self.transport, quiet);
+                    // 4. A crash accent committed on this onset: one crash with the
+                    //    Drop's if that fired here too. NIGHT8_PROTOCOL.md.
+                    if let Some(id) = accent {
+                        self.fire_accent(id, step as f64, quiet, crashed);
+                    }
                 }
             }
             let (l, r) = self.render_sample();
@@ -1770,7 +1801,16 @@ impl Engine {
     /// Set every target a scene holds, in one place, and report `applied` on `step`
     /// (-1 for Now or stopped). Gains, sends and effects glide to the new targets with
     /// their usual smoothing (ADR-013); nothing here jumps the audio. No allocation.
-    fn commit_scene(&mut self, request_id: u32, values: &[f32; SCENE_LEN], step: i32) {
+    ///
+    /// With `accent`, during playback, the crash plays on this onset, once the
+    /// transition sounds have run on it (or at once for Now, which has no onset).
+    fn commit_scene(
+        &mut self,
+        request_id: u32,
+        values: &[f32; SCENE_LEN],
+        step: i32,
+        accent: bool,
+    ) {
         // A scene that lands over a timed build replaces it: the scene is complete, so
         // nothing is restored and nothing is left half-built.
         self.replace_build(request_id);
@@ -1792,6 +1832,32 @@ impl Engine {
         );
         #[cfg(test)]
         self.trace.push(Trace::Apply(request_id, self.clock));
+        if accent && self.transport.playing {
+            if step >= 0 {
+                self.accent_due = Some(request_id);
+            } else {
+                let quiet = self.any_solo();
+                self.fire_accent(request_id, -1.0, quiet, false);
+            }
+        }
+    }
+
+    /// A crash accent for request `id` at `at` (`docs/NIGHT8_PROTOCOL.md`): silent under
+    /// a solo, merged with the Drop's own crash when that fired on the same onset,
+    /// otherwise the transition crash, fired now. Reported as `accent fired` (53).
+    #[inline(never)]
+    fn fire_accent(&mut self, id: u32, at: f64, quiet: bool, merged: bool) {
+        let how = if quiet {
+            scheduler::accent_fired::SILENT
+        } else if merged {
+            scheduler::accent_fired::MERGED
+        } else {
+            self.transitions.accent(&self.transport);
+            scheduler::accent_fired::PLAYED
+        };
+        self.scheduler
+            .events
+            .push(scheduler::event::ACCENT_FIRED, id, at, how as f64);
     }
 
     /// The scene's targets, set without scheduling or reporting anything.

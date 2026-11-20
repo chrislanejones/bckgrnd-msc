@@ -67,7 +67,19 @@ export const ENGINE_EVENT = {
   buildProgress: 47,
   fillLinked: 51,
   fillUnlinked: 52,
+  accentFired: 53,
 } as const;
+
+/**
+ * A scene's accent (docs/NIGHT8_PROTOCOL.md): `crash` plays the transition crash once on
+ * the onset the scene (a launch, a Fill into's scene, a Rise's landing) commits, during
+ * playback. Never automatic. Where it is stored is the project format's business.
+ */
+export const SCENE_ACCENT = { none: 0, crash: 1 } as const;
+export type SceneAccent = (typeof SCENE_ACCENT)[keyof typeof SCENE_ACCENT];
+
+/** `b` of `accentFired`: silent under a solo, played, or merged with the Drop's crash. */
+export const ACCENT_FIRED = { silent: 0, played: 1, merged: 2 } as const;
 
 /** How many bars a timed build may rise over (docs/NIGHT7_PROTOCOL.md). */
 export const BUILD_BARS = [2, 4, 8] as const;
@@ -136,6 +148,7 @@ export type GestureKind = (typeof GESTURE_KIND)[keyof typeof GESTURE_KIND];
  * | buildRejected | reason (`ENGINE_REASON`) | for `invalid`, the part (`BUILD_REJECTED_PART`) |
  * | fillLinked | id of the request the fill leads into | predicted landing step |
  * | fillUnlinked | reason (`ENGINE_REASON`) its partner went (10, or 11 for a replaced Rise) | 0 |
+ * | accentFired | step the crash accent fired on (-1 for a Now launch) | `ACCENT_FIRED` |
  *
  * A phrase fill's `fillQueued` names the bar it plays (the phrase's last), and comes
  * again if a loop change moves it (docs/NIGHT8_PROTOCOL.md).
@@ -617,6 +630,7 @@ export class EngineHost {
     values: ArrayLike<number>,
     generation: number,
     patterns?: { requestId: number; data: Float32Array },
+    accent: SceneAccent = SCENE_ACCENT.none,
   ): void {
     this.post({
       type: 'scene',
@@ -625,6 +639,7 @@ export class EngineHost {
       timing,
       values: Array.from(values),
       ...(patterns ? { patterns: patterns.data, patternsId: patterns.requestId } : {}),
+      ...(accent ? { accent } : {}),
     });
   }
 
@@ -683,9 +698,9 @@ export class EngineHost {
     generation: number,
     land?: ArrayLike<number>,
     patterns?: { requestId: number; data: Float32Array },
-    extra: { fill?: { requestId: number; index: number } } = {},
+    extra: { fill?: { requestId: number; index: number }; accent?: SceneAccent } = {},
   ): void {
-    const { fill } = extra;
+    const { fill, accent = SCENE_ACCENT.none } = extra;
     this.post({
       type: 'build',
       requestId,
@@ -695,6 +710,7 @@ export class EngineHost {
       ...(land ? { land: Array.from(land) } : {}),
       ...(patterns ? { patterns: patterns.data, patternsId: patterns.requestId } : {}),
       ...(fill ? { fillId: fill.requestId, fillIndex: fill.index } : {}),
+      ...(accent ? { accent } : {}),
     });
   }
 
@@ -741,9 +757,13 @@ export class EngineHost {
     index: number,
     values: ArrayLike<number>,
     generation: number,
-    options: { phrase?: FillPhrase; patterns?: { requestId: number; data: Float32Array } } = {},
+    options: {
+      phrase?: FillPhrase;
+      patterns?: { requestId: number; data: Float32Array };
+      accent?: SceneAccent;
+    } = {},
   ): void {
-    const { phrase = 0, patterns } = options;
+    const { phrase = 0, patterns, accent = SCENE_ACCENT.none } = options;
     this.post({
       type: 'fillInto',
       fillId,
@@ -753,6 +773,7 @@ export class EngineHost {
       ...(phrase ? { phrase } : {}),
       values: Array.from(values),
       ...(patterns ? { patterns: patterns.data, patternsId: patterns.requestId } : {}),
+      ...(accent ? { accent } : {}),
     });
   }
 

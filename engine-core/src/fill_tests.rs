@@ -320,7 +320,7 @@ fn drop_lanes() -> Vec<f32> {
 fn fill_into() -> Engine {
     let mut e = playing_at(5);
     assert_eq!(e.queue_patterns(30, timing::BAR, 2, &drop_lanes()), 0);
-    assert_eq!(e.queue_fill_into(1, 0, 4, 0, 2, &scene(0.9)), reason::OK);
+    assert_eq!(e.queue_fill_into(1, 0, 4, 0, 2, &scene(0.9), 0), reason::OK);
     events(&mut e);
     e
 }
@@ -333,7 +333,7 @@ fn fill_into() -> Engine {
 fn fill_into_lands_the_scene_on_the_onset_the_fill_ends() {
     let mut e = playing_at(5);
     assert_eq!(e.queue_patterns(30, timing::BAR, 2, &drop_lanes()), 0);
-    assert_eq!(e.queue_fill_into(1, 0, 4, 0, 2, &scene(0.9)), reason::OK);
+    assert_eq!(e.queue_fill_into(1, 0, 4, 0, 2, &scene(0.9), 0), reason::OK);
     assert_eq!(
         events(&mut e),
         vec![
@@ -374,7 +374,7 @@ fn fill_into_lands_the_scene_on_the_onset_the_fill_ends() {
 #[test]
 fn fill_into_at_phrase_zero_plays_the_next_bar() {
     let mut e = playing_at(5);
-    assert_eq!(e.queue_fill_into(1, 0, 0, 0, 2, &scene(0.9)), reason::OK);
+    assert_eq!(e.queue_fill_into(1, 0, 0, 0, 2, &scene(0.9), 0), reason::OK);
     assert_eq!(
         events(&mut e),
         vec![
@@ -397,7 +397,7 @@ fn fill_into_leaves_no_gap_on_the_line() {
         let mut e = playing_at(5);
         e.queue_patterns(30, timing::BAR, 2, &drop_lanes());
         if linked {
-            assert_eq!(e.queue_fill_into(1, 0, 4, 0, 2, &scene(0.9)), 0);
+            assert_eq!(e.queue_fill_into(1, 0, 4, 0, 2, &scene(0.9), 0), 0);
             render_until_fired(&mut e, 63);
         } else {
             render_until_fired(&mut e, 50);
@@ -428,25 +428,25 @@ fn a_refused_fill_into_changes_nothing() {
     let cases: [(&str, Send, u8, u8); 5] = [
         (
             "short scene",
-            |e| e.queue_fill_into(1, 0, 4, 0, 2, &scene(0.9)[..43]),
+            |e| e.queue_fill_into(1, 0, 4, 0, 2, &scene(0.9)[..43], 0),
             reason::INVALID,
             detail::SCENE,
         ),
         (
             "no such fill",
-            |e| e.queue_fill_into(1, 3, 4, 0, 2, &scene(0.9)),
+            |e| e.queue_fill_into(1, 3, 4, 0, 2, &scene(0.9), 0),
             reason::INVALID,
             detail::FILL,
         ),
         (
             "3-bar phrase",
-            |e| e.queue_fill_into(1, 0, 3, 0, 2, &scene(0.9)),
+            |e| e.queue_fill_into(1, 0, 3, 0, 2, &scene(0.9), 0),
             reason::INVALID,
             detail::FILL,
         ),
         (
             "beat length",
-            |e| e.queue_fill_into(1, 0, 4, 1, 2, &scene(0.9)),
+            |e| e.queue_fill_into(1, 0, 4, 1, 2, &scene(0.9), 0),
             reason::INVALID,
             detail::FILL,
         ),
@@ -455,7 +455,7 @@ fn a_refused_fill_into_changes_nothing() {
             |e| {
                 assert_eq!(e.queue_fill_at(9, 0, 4, 0), 0);
                 events(e);
-                e.queue_fill_into(1, 0, 4, 0, 2, &scene(0.9))
+                e.queue_fill_into(1, 0, 4, 0, 2, &scene(0.9), 0)
             },
             reason::ALREADY_PLAYING,
             detail::FILL,
@@ -501,7 +501,7 @@ fn a_refused_fill_into_changes_nothing() {
     let mut stopped = fill_engine();
     stopped.queue_patterns(30, timing::BAR, 2, &drop_lanes());
     assert_eq!(
-        stopped.queue_fill_into(1, 0, 4, 0, 2, &scene(0.9)),
+        stopped.queue_fill_into(1, 0, 4, 0, 2, &scene(0.9), 0),
         reason::NOT_PLAYING
     );
     assert_eq!(
@@ -517,7 +517,7 @@ fn a_refused_fill_into_changes_nothing() {
     held.scratch_start();
     events(&mut held);
     assert_eq!(
-        held.queue_fill_into(1, 0, 4, 0, 2, &scene(0.9)),
+        held.queue_fill_into(1, 0, 4, 0, 2, &scene(0.9), 0),
         reason::TRANSPORT
     );
     assert_eq!(
@@ -723,7 +723,7 @@ fn fill_into_landing_on_a_running_rise_replaces_it() {
     let mut e = playing_at(5);
     let target = target_from(&e.base());
     assert_eq!(e.queue_build(3, 4, &target, &[]), 0);
-    assert_eq!(e.queue_fill_into(1, 0, 4, 0, 2, &scene(0.9)), 0);
+    assert_eq!(e.queue_fill_into(1, 0, 4, 0, 2, &scene(0.9), 0), 0);
     let seen = run_until(&mut e, event::SCENE_APPLIED, 2);
     let tail: Vec<_> = seen
         .iter()
@@ -802,7 +802,7 @@ fn rise_with_fill() -> Engine {
     let target = target_from(&e.base());
     assert_eq!(e.queue_patterns(30, timing::BAR, 2, &rise_lanes(48)), 0);
     assert_eq!(
-        e.queue_build_with(2, 2, &target, &scene(0.9), 1, 0),
+        e.queue_build_with(2, 2, &target, &scene(0.9), 1, 0, 0),
         reason::OK
     );
     events(&mut e);
@@ -821,7 +821,7 @@ fn rise_with_fill_plays_the_last_bar_and_lands_on_the_downbeat() {
         let target = target_from(&e.base());
         assert_eq!(e.queue_patterns(30, timing::BAR, 2, &rise_lanes(end)), 0);
         assert_eq!(
-            e.queue_build_with(2, bars, &target, &scene(0.9), 1, 0),
+            e.queue_build_with(2, bars, &target, &scene(0.9), 1, 0, 0),
             reason::OK
         );
         assert_eq!(
@@ -876,25 +876,25 @@ fn a_refused_rise_with_fill_changes_nothing() {
     let cases: [(&str, Send, u8, u8); 5] = [
         (
             "3 bars",
-            |e, t| e.queue_build_with(2, 3, t, &[], 1, 0),
+            |e, t| e.queue_build_with(2, 3, t, &[], 1, 0, 0),
             reason::INVALID,
             part::BARS,
         ),
         (
             "bad target",
-            |e, _| e.queue_build_with(2, 2, &scene(f32::NAN), &[], 1, 0),
+            |e, _| e.queue_build_with(2, 2, &scene(f32::NAN), &[], 1, 0, 0),
             reason::INVALID,
             part::TARGET,
         ),
         (
             "bad landing",
-            |e, t| e.queue_build_with(2, 2, t, &scene(0.9)[..9], 1, 0),
+            |e, t| e.queue_build_with(2, 2, t, &scene(0.9)[..9], 1, 0, 0),
             reason::INVALID,
             part::LAND,
         ),
         (
             "no such fill",
-            |e, t| e.queue_build_with(2, 2, t, &[], 1, 4),
+            |e, t| e.queue_build_with(2, 2, t, &[], 1, 4, 0),
             reason::INVALID,
             part::FILL,
         ),
@@ -903,7 +903,7 @@ fn a_refused_rise_with_fill_changes_nothing() {
             |e, t| {
                 assert_eq!(e.queue_fill_at(9, 0, 4, 0), 0);
                 events(e);
-                e.queue_build_with(2, 2, t, &[], 1, 0)
+                e.queue_build_with(2, 2, t, &[], 1, 0, 0)
             },
             reason::ALREADY_PLAYING,
             part::FILL,
@@ -944,7 +944,7 @@ fn a_refused_rise_with_fill_changes_nothing() {
     let mut stopped = fill_engine();
     let target = target_from(&stopped.base());
     assert_eq!(
-        stopped.queue_build_with(2, 2, &target, &[], 1, 0),
+        stopped.queue_build_with(2, 2, &target, &[], 1, 0, 0),
         reason::NOT_PLAYING
     );
     assert_eq!(
@@ -956,7 +956,7 @@ fn a_refused_rise_with_fill_changes_nothing() {
     );
     // Without a fill, a refused build reports as it always has: no fill event.
     let mut plain = playing_at(5);
-    assert_eq!(plain.queue_build_with(2, 3, &target, &[], 0, 0), 1);
+    assert_eq!(plain.queue_build_with(2, 3, &target, &[], 0, 0, 0), 1);
     assert_eq!(
         events(&mut plain),
         vec![ev(event::BUILD_REJECTED, 2, 1.0, 1.0)]
@@ -1098,7 +1098,7 @@ fn a_replaced_rise_takes_its_fill_along() {
     // A newer Rise with its own fill, while the first waits: accepted (latest wins).
     let mut e = rise_with_fill();
     let target = target_from(&e.base());
-    assert_eq!(e.queue_build_with(3, 4, &target, &[], 4, 0), reason::OK);
+    assert_eq!(e.queue_build_with(3, 4, &target, &[], 4, 0, 0), reason::OK);
     assert_eq!(
         events(&mut e),
         vec![
@@ -1168,9 +1168,180 @@ fn a_rise_with_fill_holds_the_fill_slot() {
     let mut e = rise_with_fill();
     assert_eq!(e.queue_fill(7, 0), reason::ALREADY_PLAYING);
     assert_eq!(
-        e.queue_fill_into(8, 0, 4, 0, 9, &scene(0.5)),
+        e.queue_fill_into(8, 0, 4, 0, 9, &scene(0.5), 0),
         reason::ALREADY_PLAYING
     );
     assert_eq!(e.pending_fill(), Some(1));
     assert_eq!(e.pending_build(), Some(2));
+}
+
+// -- Crash accents --------------------------------------------------------------
+
+/// A scene carrying the crash accent plays the transition crash once, on the onset it
+/// commits, for Next Bar, Next Beat and Now (which has no onset: `a` = -1); and the
+/// same scene without the accent makes no sound of its own: never automatic.
+#[test]
+fn an_accented_scene_crashes_once_on_its_commit() {
+    use crate::scene::accent;
+    for (code, step) in [
+        (timing::BAR, 16.0),
+        (timing::BEAT, 8.0),
+        (timing::NOW, -1.0),
+    ] {
+        for with in [accent::CRASH, accent::NONE] {
+            let label = format!("timing {code}, accent {with}");
+            let mut e = playing_at(5);
+            assert_eq!(e.queue_scene_with(3, code, &scene(0.5), with), 0, "{label}");
+            events(&mut e);
+            let seen = run_until(&mut e, event::SCENE_APPLIED, 3);
+            let crash = ev(event::ACCENT_FIRED, 3, step, 1.0);
+            if with == accent::CRASH {
+                let applied = seen
+                    .iter()
+                    .position(|x| x[0] == event::SCENE_APPLIED as f64);
+                let fired = seen.iter().position(|x| *x == crash);
+                assert!(applied.is_some() && applied < fired, "{label}: {seen:?}");
+                assert_eq!(e.transitions.crashes, 1, "{label}");
+                assert!(e.transitions.active(), "{label}: the crash is sounding");
+            } else {
+                assert!(!seen.iter().any(|x| x[0] == event::ACCENT_FIRED as f64));
+                assert_eq!(e.transitions.crashes, 0, "{label}");
+            }
+            // Once: nothing more over the next two bars.
+            render_until_fired(&mut e, 40);
+            assert_eq!(e.transitions.crashes, u32::from(with), "{label}");
+            assert!(!events(&mut e)
+                .iter()
+                .any(|x| x[0] == event::ACCENT_FIRED as f64));
+        }
+    }
+}
+
+/// An accented scene landing on the Drop's natural crossing (191 -> 192) crashes once,
+/// not twice: `b` = 2, merged. On 192 reached by a loop's wrap, which is not a
+/// crossing and has no crash of its own, the accent plays (`b` = 1).
+#[test]
+fn an_accent_on_the_drop_merges_with_its_crash() {
+    let mut e = playing_at(5);
+    e.jump(176);
+    render_until_fired(&mut e, 180);
+    let before = e.transitions.crashes;
+    assert_eq!(e.queue_scene_with(3, timing::BAR, &scene(0.5), 1), 0);
+    events(&mut e);
+    render_until_fired(&mut e, 193);
+    assert_eq!(e.transitions.crashes, before + 1, "one crash on 192");
+    let got = events(&mut e);
+    assert!(got.contains(&ev(event::SCENE_APPLIED, 3, 192.0, 0.0)));
+    assert!(
+        got.contains(&ev(event::ACCENT_FIRED, 3, 192.0, 2.0)),
+        "{got:?}"
+    );
+
+    // A 1-bar loop on 192: the wrap back to it is not a crossing.
+    e.set_loop(1);
+    assert_eq!(e.transport.loop_start, 192);
+    render_until_fired(&mut e, 200);
+    let before = e.transitions.crashes;
+    assert_eq!(e.queue_scene_with(4, timing::BAR, &scene(0.6), 1), 0);
+    events(&mut e);
+    let seen = run_until(&mut e, event::ACCENT_FIRED, 4);
+    assert!(
+        seen.contains(&ev(event::ACCENT_FIRED, 4, 192.0, 1.0)),
+        "{seen:?}"
+    );
+    assert_eq!(e.transitions.crashes, before + 1);
+}
+
+/// Under a solo (here the scene's own) the accent is counted and silent, as the
+/// transition sounds are; applied while stopped it does nothing at all.
+#[test]
+fn an_accent_is_silent_under_solo_and_absent_when_stopped() {
+    let mut soloed = scene(0.5);
+    soloed[Stem::Kick.index() * 4 + 3] = 1.0;
+    let mut e = playing_at(5);
+    assert_eq!(e.queue_scene_with(3, timing::BAR, &soloed, 1), 0);
+    events(&mut e);
+    let seen = run_until(&mut e, event::SCENE_APPLIED, 3);
+    assert!(
+        seen.contains(&ev(event::ACCENT_FIRED, 3, 16.0, 0.0)),
+        "{seen:?}"
+    );
+    assert_eq!(e.transitions.crashes, 0);
+    assert!(!e.transitions.active());
+
+    let mut stopped = fill_engine();
+    assert_eq!(stopped.queue_scene_with(3, timing::BAR, &scene(0.5), 1), 0);
+    assert_eq!(
+        events(&mut stopped),
+        vec![ev(event::SCENE_APPLIED, 3, -1.0, 0.0)]
+    );
+    assert_eq!(stopped.transitions.crashes, 0);
+}
+
+/// A Rise's landing and a Fill into's scene carry the accent too: a crash on the
+/// onset they land, after the commit (and the fill's end).
+#[test]
+fn an_accent_on_a_rise_landing_and_on_fill_into() {
+    for with_fill in [0u32, 1] {
+        let mut e = playing_at(5);
+        let target = target_from(&e.base());
+        assert_eq!(
+            e.queue_build_with(2, 2, &target, &scene(0.9), with_fill, 0, 1),
+            0
+        );
+        let seen = run_until(&mut e, event::BUILD_APPLIED, 2);
+        let tail: Vec<_> = seen.iter().copied().filter(|x| x[2] == 48.0).collect();
+        let mut want = vec![ev(event::BUILD_APPLIED, 2, 48.0, 1.0)];
+        if with_fill == 1 {
+            want.push(ev(event::FILL_ENDED, 1, 48.0, 0.0));
+        }
+        want.push(ev(event::ACCENT_FIRED, 2, 48.0, 1.0));
+        assert_eq!(tail, want, "fill {with_fill}");
+        assert_eq!(e.transitions.crashes, 1);
+    }
+
+    let mut e = playing_at(5);
+    assert_eq!(e.queue_fill_into(1, 0, 4, 0, 2, &scene(0.9), 1), 0);
+    let seen = run_until(&mut e, event::SCENE_APPLIED, 2);
+    let tail: Vec<_> = seen.iter().copied().filter(|x| x[2] == 64.0).collect();
+    assert_eq!(
+        tail,
+        vec![
+            ev(event::SCENE_APPLIED, 2, 64.0, 0.0),
+            ev(event::FILL_ENDED, 1, 64.0, 0.0),
+            ev(event::ACCENT_FIRED, 2, 64.0, 1.0),
+        ]
+    );
+    assert_eq!(e.transitions.crashes, 1);
+}
+
+/// An accent other than 0 or 1 is refused as invalid by all three requests (the
+/// scene's part, the landing's part); and an accented request that never lands (here
+/// replaced, then cancelled) never crashes.
+#[test]
+fn a_bad_accent_is_refused_and_an_unlanded_one_is_silent() {
+    use crate::scene::build::detail as build_part;
+    let mut e = playing_at(5);
+    let target = target_from(&e.base());
+    assert_eq!(e.queue_scene_with(3, timing::BAR, &scene(0.5), 2), 1);
+    assert_eq!(e.queue_fill_into(1, 0, 4, 0, 2, &scene(0.5), 2), 1);
+    assert_eq!(e.queue_build_with(4, 2, &target, &[], 0, 0, 7), 1);
+    assert_eq!(
+        events(&mut e),
+        vec![
+            ev(event::SCENE_REJECTED, 3, 1.0, 0.0),
+            ev(event::FILL_REJECTED, 1, 1.0, detail::SCENE as f64),
+            ev(event::SCENE_REJECTED, 2, 1.0, detail::SCENE as f64),
+            ev(event::BUILD_REJECTED, 4, 1.0, build_part::LAND as f64),
+        ]
+    );
+    assert_eq!(e.queue_scene_with(5, timing::BAR, &scene(0.5), 1), 0);
+    assert_eq!(e.queue_scene(6, timing::BAR, &scene(0.4)), 0);
+    assert_eq!(e.queue_fill_into(7, 0, 4, 0, 8, &scene(0.5), 1), 0);
+    assert!(e.cancel_fill(7));
+    render_until_fired(&mut e, 70);
+    assert!(!events(&mut e)
+        .iter()
+        .any(|x| x[0] == event::ACCENT_FIRED as f64));
+    assert_eq!(e.transitions.crashes, 0);
 }

@@ -97,6 +97,9 @@ impl Engine {
     /// Accepted, it replaces a pending scene (`scene replaced`, latest wins, and that
     /// scene's lanes go with it) and posts `fill queued`, `scene queued` (the landing
     /// bar and step) and `fill linked` (51: `a` = `scene_id`, `b` = the landing step).
+    ///
+    /// `accent` is the scene's, as [`Engine::queue_scene_with`]: 1 a crash on the
+    /// phrase line it lands on. Any other than 0 or 1 is refused, part 1.
     #[allow(clippy::too_many_arguments)]
     pub fn queue_fill_into(
         &mut self,
@@ -106,8 +109,9 @@ impl Engine {
         length: u8,
         scene_id: u32,
         values: &[f32],
+        accent: u8,
     ) -> u8 {
-        let (verdict, part) = if !scheduler::valid(values) {
+        let (verdict, part) = if !scheduler::valid(values) || accent > scheduler::accent::CRASH {
             (reason::INVALID, detail::SCENE)
         } else if !self.fill_args_ok(index, phrase_bars, length) {
             (reason::INVALID, detail::FILL)
@@ -129,8 +133,12 @@ impl Engine {
         let lanes = self.claim_staged(scene_id);
         let ahead = scheduler::fill_offset(&self.transport, phrase_bars);
         let start = self.scheduler.serial() + 1 + ahead as u64;
-        self.scheduler
-            .queue_linked(scene_id, values, start + FILL_STEPS as u64);
+        self.scheduler.queue_linked(
+            scene_id,
+            values,
+            start + FILL_STEPS as u64,
+            accent == scheduler::accent::CRASH,
+        );
         // The scene it replaced, if one was pending, takes its lanes along.
         self.cancel_scene_lanes(reason::USER);
         self.scene_lanes = lanes;

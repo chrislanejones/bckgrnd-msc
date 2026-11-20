@@ -269,6 +269,7 @@ export const EVENT = {
   buildProgress: 47,
   fillLinked: 51,
   fillUnlinked: 52,
+  accentFired: 53,
 } as const;
 
 /** Why something was refused or cancelled, in words for the status line. */

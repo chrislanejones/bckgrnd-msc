@@ -152,7 +152,7 @@ fn run(case: Case, track: &Track) -> Duration {
         if let Case::Fills = case {
             if e.pending_fill().is_none() && e.active_fill().is_none() {
                 let target: &[f32] = if next_id % 2 == 1 { &rise } else { &back };
-                let verdict = e.queue_fill_into(next_id, 0, 2, 0, next_id + 1000, target);
+                let verdict = e.queue_fill_into(next_id, 0, 2, 0, next_id + 1000, target, 0);
                 assert_eq!(verdict, 0, "fill into {next_id} refused");
                 next_id += 1;
             }
