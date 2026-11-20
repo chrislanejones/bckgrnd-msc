@@ -23,6 +23,14 @@ use crate::transport::Transport;
 /// Fills start on bar lines.
 const FILL_GRID: usize = 16;
 
+/// The phrase lengths a fill can end on, in bars (`docs/NIGHT8_PROTOCOL.md`). 0 is not
+/// a phrase: the fill plays the next bar, as it always has.
+pub const FILL_PHRASE_BARS: [u8; 5] = [0, 2, 4, 8, 16];
+
+/// The fill lengths `queue_fill_at` takes. Only 0, one bar, for now; the argument is
+/// there so more lengths fit later without changing the call.
+pub const FILL_LENGTHS: [u8; 1] = [0];
+
 /// Length of the scene vector: 8 stems x (volume, send, muted, solo), then 12 effects.
 pub const SCENE_LEN: usize = 44;
 
@@ -312,8 +320,12 @@ pub struct PendingFill {
     pub request_id: u32,
     /// Index into the track's `fills`.
     pub index: u32,
-    /// The onset serial when it was queued; only a later bar onset can start it.
-    queued_at: u64,
+    /// 0: the next bar. 2, 4, 8 or 16: the bar that ends on a phrase line of that many
+    /// bars, or on the loop's wrap.
+    pub phrase_bars: u8,
+    /// The onset serial its first step plays on: counted in onsets, so a tempo change
+    /// moves nothing. Recomputed when the loop changes under it.
+    pub start_serial: u64,
 }
 
 /// The fill playing now.
@@ -395,11 +407,15 @@ impl Scheduler {
         );
     }
 
-    /// Report `fill queued` for the pending fill with a fresh prediction.
+    /// Work out the pending fill's start onset afresh (the loop may have moved its
+    /// phrase end) and report `fill queued` with the bar and step it starts on.
     #[inline(never)]
     pub fn announce_fill(&mut self, t: &Transport) {
-        let Some(f) = self.fill.as_ref() else { return };
-        let step = predict(t, FILL_GRID);
+        let serial = self.serial;
+        let Some(f) = self.fill.as_mut() else { return };
+        let ahead = fill_offset(t, f.phrase_bars);
+        f.start_serial = serial + 1 + ahead as u64;
+        let step = walk(t, ahead);
         self.events.push(
             event::FILL_QUEUED,
             f.request_id,
@@ -421,14 +437,16 @@ impl Scheduler {
         self.active_fill.as_ref()
     }
 
-    /// Queue fill `index` (already checked against the track) for the first bar
-    /// onset after now, and report `fill queued`. The caller has already refused a
-    /// request while [`Scheduler::fill_busy`].
-    pub fn queue_fill(&mut self, request_id: u32, index: u32, t: &Transport) {
+    /// Queue fill `index` (already checked against the track) for the bar
+    /// `phrase_bars` picks ([`fill_offset`]), and report `fill queued`. The caller has
+    /// already checked the arguments and refused a request while
+    /// [`Scheduler::fill_busy`].
+    pub fn queue_fill(&mut self, request_id: u32, index: u32, phrase_bars: u8, t: &Transport) {
         self.fill = Some(PendingFill {
             request_id,
             index,
-            queued_at: self.serial,
+            phrase_bars,
+            start_serial: u64::MAX,
         });
         self.announce_fill(t);
     }
@@ -448,10 +466,12 @@ impl Scheduler {
                     .push(event::FILL_ENDED, id, step as f64, reason::OK as f64);
             }
         }
+        // Due on its own onset. The bar-line check only guards against a start that
+        // somehow fell off the grid: the fill then waits for the next bar line.
         let due = self
             .fill
             .as_ref()
-            .is_some_and(|f| self.serial > f.queued_at && step.is_multiple_of(FILL_GRID));
+            .is_some_and(|f| self.serial >= f.start_serial && step.is_multiple_of(FILL_GRID));
         if due {
             if let Some(f) = self.fill.take() {
                 self.active_fill = Some(ActiveFill {
@@ -565,6 +585,39 @@ impl Scheduler {
             None => false,
         }
     }
+}
+
+/// How many onsets from now (0: the next one) a fill asked for with `phrase_bars`
+/// starts: the first bar line, walking the clock's own advance rule from the step due
+/// next, whose bar ends on a phrase line or on the loop's wrap. Phrase lines sit on the
+/// absolute grid from step 0, so every one of 2, 4, 8 and 16 bars also falls on the
+/// song's own wrap. `phrase_bars` 0 takes the first bar line, as fills always have. A
+/// bar line already passed is never waited for: the walk only looks ahead, so a late
+/// press goes to the next phrase end. Bounded: a phrase end or the loop's last bar
+/// turns up within one pass of the song.
+pub fn fill_offset(t: &Transport, phrase_bars: u8) -> usize {
+    let phrase = phrase_bars as usize * FILL_GRID;
+    let loop_end = t.loop_start + t.loop_steps;
+    let mut step = t.step;
+    for ahead in 0..=STEPS {
+        if step.is_multiple_of(FILL_GRID) {
+            let end = step + FILL_GRID;
+            if phrase == 0 || end.is_multiple_of(phrase) || (t.loop_steps > 0 && end == loop_end) {
+                return ahead;
+            }
+        }
+        step = t.following(step);
+    }
+    0
+}
+
+/// The step the clock plays `ahead` onsets from now (0: the step due next).
+pub fn walk(t: &Transport, ahead: usize) -> usize {
+    let mut step = t.step;
+    for _ in 0..ahead {
+        step = t.following(step);
+    }
+    step
 }
 
 /// The step the next eligible onset on `grid` will fire, walking the clock's own

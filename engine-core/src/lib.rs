@@ -64,6 +64,7 @@
 mod build;
 mod drums;
 mod dsp;
+mod fills;
 mod gesture;
 mod mixer;
 mod patterns;
@@ -104,7 +105,8 @@ pub mod perform {
 pub mod scene {
     pub use crate::scheduler::{
         event, reason, slot_kind, timing, valid, SlotKind, Timing, ECHO_TIME_OPTIONS,
-        EVENT_CAPACITY, EVENT_WIDTH, FX_BASE, FX_KINDS, SCENE_LEN, SCENE_PARAMS, STEM_FIELDS,
+        EVENT_CAPACITY, EVENT_WIDTH, FILL_LENGTHS, FILL_PHRASE_BARS, FX_BASE, FX_KINDS, SCENE_LEN,
+        SCENE_PARAMS, STEM_FIELDS,
     };
 
     /// Timed builds (`docs/NIGHT7_PROTOCOL.md`): the lengths allowed, the codes for
@@ -1296,30 +1298,9 @@ impl Engine {
     ///
     /// It starts on the first bar onset after the request (the onset-serial rule
     /// scenes use), plays exactly sixteen steps, and the track's own drums carry on
-    /// from the step after.
+    /// from the step after. The same as [`Engine::queue_fill_at`] with phrase 0.
     pub fn queue_fill(&mut self, request_id: u32, index: u32) -> u8 {
-        let verdict = if index as usize >= self.track.fills.len() {
-            reason::INVALID
-        } else if !self.transport.playing {
-            reason::NOT_PLAYING
-        } else if self.transport.in_gesture() {
-            reason::TRANSPORT
-        } else if self.scheduler.fill_busy() {
-            reason::ALREADY_PLAYING
-        } else {
-            self.scheduler
-                .queue_fill(request_id, index, &self.transport);
-            reason::OK
-        };
-        if verdict != reason::OK {
-            self.scheduler.events.push(
-                scheduler::event::FILL_REJECTED,
-                request_id,
-                verdict as f64,
-                0.0,
-            );
-        }
-        verdict
+        self.queue_fill_at(request_id, index, 0, 0)
     }
 
     /// Cancel the queued fill if it is `request_id` (`fill cancelled`, reason 10).
@@ -2154,6 +2135,9 @@ mod pattern_tests;
 
 #[cfg(test)]
 mod staging_tests;
+
+#[cfg(test)]
+mod fill_tests;
 
 #[cfg(test)]
 mod tests {

@@ -101,7 +101,17 @@ type Inbound =
       deck?: DeckId;
     }
   | { type: 'cancelPatterns'; requestId: number }
-  | { type: 'fill'; requestId: number; generation: number; index: number; deck?: DeckId }
+  | {
+      type: 'fill';
+      requestId: number;
+      generation: number;
+      index: number;
+      deck?: DeckId;
+      /** 0 the next bar, or 2, 4, 8 or 16: end on that phrase line (docs/NIGHT8_PROTOCOL.md). */
+      phrase?: number;
+      /** 0, one bar. The only length so far. */
+      length?: number;
+    }
   | { type: 'cancelFill'; requestId: number }
   | { type: 'gestureBegin'; token: number; kind: number }
   | { type: 'gestureEnd'; token: number }
@@ -160,6 +170,21 @@ const REASON_TRACK = 4;
 const REASON_MIXING = 6;
 const REASON_NOT_PLAYING = 7;
 const REASON_STALE = 9;
+
+/**
+ * A fill's phrase length for the engine (docs/NIGHT8_PROTOCOL.md): 0 (or absent) the
+ * next bar, 2, 4, 8 or 16 bars. Anything else goes in as 255, which the engine refuses
+ * (`invalid`), rather than wrapping into a valid code on the way to a u8.
+ */
+function fillPhrase(phrase: number | undefined): number {
+  if (phrase === undefined) return 0;
+  return phrase === 0 || phrase === 2 || phrase === 4 || phrase === 8 || phrase === 16 ? phrase : 255;
+}
+
+/** A fill's length for the engine: 0 (or absent), one bar; anything else 255 (`invalid`). */
+function fillLength(length: number | undefined): number {
+  return length === undefined || length === 0 ? 0 : 255;
+}
 
 class EngineProcessor extends AudioWorkletProcessor {
   /** Which deck the UI is listening to. */
@@ -694,7 +719,7 @@ class EngineProcessor extends AudioWorkletProcessor {
       return;
     }
     const index = Number.isInteger(message.index) && message.index >= 0 ? message.index : 0xffffffff;
-    engine.queue_fill(requestId, index >>> 0);
+    engine.queue_fill_at(requestId, index >>> 0, fillPhrase(message.phrase), fillLength(message.length));
   }
 
   /**

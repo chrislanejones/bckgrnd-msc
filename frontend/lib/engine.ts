@@ -71,6 +71,13 @@ export const ENGINE_EVENT = {
 export const BUILD_BARS = [2, 4, 8] as const;
 export type BuildBars = (typeof BUILD_BARS)[number];
 
+/**
+ * What a fill ends on (docs/NIGHT8_PROTOCOL.md): 0 the next bar (Night 3), or a phrase
+ * of 2, 4, 8 or 16 bars on the absolute grid, where the loop's wrap also counts.
+ */
+export const FILL_PHRASE_BARS = [0, 2, 4, 8, 16] as const;
+export type FillPhrase = (typeof FILL_PHRASE_BARS)[number];
+
 /** `b` of a `buildRejected` with reason `invalid`: which part was refused. */
 export const BUILD_REJECTED_PART = { bars: 1, target: 2, land: 3 } as const;
 
@@ -116,6 +123,9 @@ export type GestureKind = (typeof GESTURE_KIND)[keyof typeof GESTURE_KIND];
  * | buildCancelled | reason (`ENGINE_REASON`) | 0 |
  * | buildReplaced | request id that replaced it (0: the idle deck's follower) | 0 |
  * | buildRejected | reason (`ENGINE_REASON`) | for `invalid`, the part (`BUILD_REJECTED_PART`) |
+ *
+ * A phrase fill's `fillQueued` names the bar it plays (the phrase's last), and comes
+ * again if a loop change moves it (docs/NIGHT8_PROTOCOL.md).
  */
 export type EngineEvent = {
   deck: Deck;
@@ -676,13 +686,16 @@ export class EngineHost {
   // -- Fills ----------------------------------------------------------------
 
   /**
-   * Ask the live deck to play fill `index` of its track (0 in Night 3) from the next
-   * bar line, for one bar. Outcomes arrive through `onSceneEvents`: `fillQueued`,
-   * `fillStarted`, `fillEnded`, or `fillRejected` (not playing, already queued or
+   * Ask the live deck to play fill `index` of its track (0 in Night 3) for one bar:
+   * from the next bar line (`phrase` 0, the default), or as the bar that ends on the
+   * next phrase line of 2, 4, 8 or 16 bars, or on the loop's wrap (docs/NIGHT8_PROTOCOL.md).
+   * A press too late for this phrase goes to the next one: `fillQueued` says which bar.
+   * Outcomes arrive through `onSceneEvents`: `fillQueued` (again if a loop change moves
+   * it), `fillStarted`, `fillEnded`, or `fillRejected` (not playing, already queued or
    * playing, mixing, stale generation, no such fill) or `fillCancelled`.
    */
-  queueFill(requestId: number, index: number, generation: number): void {
-    this.post({ type: 'fill', requestId, generation, index });
+  queueFill(requestId: number, index: number, generation: number, phrase: FillPhrase = 0): void {
+    this.post({ type: 'fill', requestId, generation, index, ...(phrase ? { phrase } : {}) });
   }
 
   /**
