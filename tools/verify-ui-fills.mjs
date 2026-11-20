@@ -525,12 +525,23 @@ export async function fillChecks({ open, check }) {
       await k.waitLine(DROP, /^Rise · Bar \d+$/);
       const waiting = { fill: await k.fillBtn.isDisabled(), fillTitle: await k.fillBtn.getAttribute('title'),
         into: await k.intoBtn.isDisabled(), intoTitle: await k.intoBtn.getAttribute('title'), status: await k.statusText() };
+      // Unavailable, not gone: still in the tab order, the reason read as a description.
+      const why = await page.evaluate(() => ['.fill-button', '.fill-into-button'].map((sel) => {
+        const el = document.querySelector(sel);
+        const ids = (el.getAttribute('aria-describedby') ?? '').split(/\s+/).filter(Boolean);
+        return { native: el.disabled, aria: el.getAttribute('aria-disabled'), tab: el.tabIndex,
+          described: ids.map((id) => document.getElementById(id)?.textContent?.trim() ?? '').join(' ') };
+      }));
       await k.waitState(DROP, ['active', 'modified']);
       await page.waitForTimeout(500);
       const log = await k.log();
       check('rise fill: the status says it ends with a fill', waiting.status === `Drop rises over 2 bars from bar ${N}, ending with a fill`, waiting.status);
       check('rise fill: Fill is disabled meanwhile, titled "The Rise ends with a fill"', waiting.fill && waiting.fillTitle === 'The Rise ends with a fill', `${waiting.fill} ${waiting.fillTitle}`);
       check('rise fill: Fill → Drop too', waiting.into && waiting.intoTitle === 'The Rise ends with a fill', `${waiting.into} ${waiting.intoTitle}`);
+      check('a11y: while the Rise ends with a fill, Fill and Fill → Drop stay focusable (aria-disabled, not disabled)',
+        why.every((b) => !b.native && b.aria === 'true' && b.tab === 0), JSON.stringify(why));
+      check('a11y: and each is described by its reason, "Unavailable: The Rise ends with a fill"',
+        why.every((b) => b.described === 'Unavailable: The Rise ends with a fill'), why.map((b) => b.described).join(' / '));
       const lines = seq(log, (e) => e.pads[DROP].line).filter((l) => l !== '');
       check('rise fill: the pad reads Rise · Bar N, Rising · 1 of 2, Filling into Drop, then Active',
         JSON.stringify(lines.slice(lines.indexOf(`Rise · Bar ${N}`))) === JSON.stringify([`Rise · Bar ${N}`, 'Rising · 1 of 2', 'Filling into Drop', 'Active']), lines.join(' > '));
@@ -539,6 +550,14 @@ export async function fillChecks({ open, check }) {
       const land = gap(log, padActive(DROP), (e) => e.bar === wrapBar(N + 2));
       check('rise fill: Drop lands on the next downbeat, N+2', land !== null && Math.abs(land) <= LAND_SLACK, `Δ${land}ms`);
       const statuses = seq(log, (e) => e.status);
+      // The polite live region speaks once per state change, never per bar: four
+      // changes while the bar readout moved on at least three times.
+      const bars = seq(log, (e) => e.bar).length;
+      check('a11y: the status line is a polite live region that changed once per state, not per bar',
+        (await page.locator('.scene-status').getAttribute('role')) === 'status'
+        && (await page.locator('.scene-status').getAttribute('aria-live')) === 'polite'
+        && statuses.slice(statuses.indexOf(waiting.status)).length === 4 && bars >= 4,
+        `${statuses.slice(statuses.indexOf(waiting.status)).length} status changes over ${bars} bar changes`);
       check('rise fill: the status says rises, rising, filling, then active',
         JSON.stringify(statuses.slice(statuses.indexOf(waiting.status))) === JSON.stringify([waiting.status, 'Drop rising over 2 bars', 'Filling into Drop', 'Drop active']),
         statuses.join(' | '));
@@ -610,11 +629,15 @@ export async function fillChecks({ open, check }) {
   }
 
   // ---- The toolbar with a mouse at 1440, 1280 and 1180 (and the other compact widths
-  // Lacey's checks use): no row added. At 375 (touch) the toolbar stacks a row per
-  // control by design, so there it is measured, and held to 44px targets and no
-  // sideways scroll. -------------------------------------------------------------
+  // Lacey's checks use): no row added, and never more than three rows of one 32px
+  // control (Switch on; Fill; Compare A/B), 108px. One row can't hold the scene and
+  // fill controls: squeezed as far as they go they need about 950px, and the panel is
+  // 798px wide at 1440. At 375 and 320 (touch) the toolbar stacks a row per control by
+  // design, so there it is measured, and held to 44px targets, labels that are never
+  // cut short, and no sideways scroll. -------------------------------------------
+  const MOUSE_TOOLBAR_MAX = 108.5;
   const widths = [[1440, 900], [1280, 800], [1279, 800], [1200, 800], [1180, 800], [1100, 800], [1024, 768], [960, 800], [900, 800],
-    [375, 812, { hasTouch: true, isMobile: true }]];
+    [375, 812, { hasTouch: true, isMobile: true }], [320, 640, { hasTouch: true, isMobile: true }]];
   for (const [w, h, extra] of widths) {
     const { page, errors } = await open(w, h, extra ?? {});
     const k = kit(page);
@@ -635,14 +658,25 @@ export async function fillChecks({ open, check }) {
         const fill = document.querySelector('.fill-button');
         const into = document.querySelector('.fill-into-button');
         const was = [fill.textContent, into.textContent];
-        const out = { h: 0, cut: false, each: [] };
+        const out = { h: 0, cut: false, each: [], lines: 1, cutWords: [] };
+        // Lines of text a button shows: its text's line boxes, by their tops.
+        const linesOf = (el) => {
+          const r = document.createRange();
+          r.selectNodeContents(el);
+          return new Set([...r.getClientRects()].map((q) => Math.round(q.top))).size;
+        };
         for (const [a, b] of [['Fill · Next phrase', 'Fill → Drop'], ['Drum fill', 'Fill · Next phrase → Drop'], ['Drum fill', 'Fill · Bar 16 → Drop'], ['Fill playing', 'Filling → Drop']]) {
           fill.textContent = a;
           into.textContent = b;
           const h = Math.round(bar.getBoundingClientRect().height * 10) / 10;
           out.each.push(h);
           out.h = Math.max(out.h, h);
-          out.cut ||= into.scrollWidth > into.clientWidth + 1;
+          for (const el of [fill, into]) {
+            const cut = el.scrollWidth > el.clientWidth + 1 || el.getBoundingClientRect().right > bar.getBoundingClientRect().right + 0.5;
+            if (cut) out.cutWords.push(el.textContent);
+            out.cut ||= cut;
+            out.lines = Math.max(out.lines, linesOf(el));
+          }
         }
         [fill.textContent, into.textContent] = was;
         return out;
@@ -658,19 +692,157 @@ export async function fillChecks({ open, check }) {
       if (w >= 900) {
         check(`${w}px: Rise, Finish with Fill, Phrase end and the widest labels add no row to the toolbar`,
           [rise.h, riseFill.h, phrase.h, widest.h].every((x) => x === base.h), `${base.h} / ${rise.h} / ${riseFill.h} / ${phrase.h} / ${widest.each.join(',')}px`);
-        check(`${w}px: Fill → Drop's widest words are not cut short`, !widest.cut);
+        check(`${w}px: the toolbar is at most three rows of 32px (${MOUSE_TOOLBAR_MAX}px), every option on`,
+          [base.h, phrase.h, widest.h].every((x) => x <= MOUSE_TOOLBAR_MAX), `${base.h} / ${phrase.h} / ${widest.h}px`);
+      }
+      check(`${w}px: the fill buttons' widest words are not cut short`, !widest.cut, widest.cutWords.join(', '));
+      if (w >= 375) {
+        check(`${w}px: and each stays on one line`, widest.lines === 1, `${widest.lines} lines`);
+      } else {
+        check(`${w}px: and the longest wraps to two lines at most`, widest.lines <= 2, `${widest.lines} lines`);
       }
       check(`${w}px: the page doesn't scroll sideways`, Object.values(all).every((m) => m.scroll <= w), Object.values(all).map((m) => m.scroll).join(','));
       if (extra?.hasTouch) {
-        const small = await page.evaluate(() => [...document.querySelectorAll('.scene-fill-tools button, .scene-build-bars button')]
-          .filter((b) => b.getClientRects().length && b.getBoundingClientRect().height < 44)
-          .map((b) => `${b.textContent.trim()} ${Math.round(b.getBoundingClientRect().height)}px`));
-        check(`${w}px touch: every fill control is at least 44px tall`, small.length === 0, small.join(', '));
+        const small = await page.evaluate(() => [...document.querySelectorAll('.scene-toolbar button')]
+          .filter((b) => b.getClientRects().length && (b.getBoundingClientRect().height < 44 || b.getBoundingClientRect().width < 44))
+          .map((b) => `${b.getAttribute('aria-label') ?? b.textContent.trim()} ${Math.round(b.getBoundingClientRect().width)}x${Math.round(b.getBoundingClientRect().height)}`));
+        check(`${w}px touch: every scenes toolbar control is at least 44 x 44px`, small.length === 0, small.join(', '));
+      }
+      if (w === 375) {
+        const shared = await page.evaluate(() => {
+          const mid = (sel) => { const b = document.querySelector(sel).getBoundingClientRect(); return b.top + b.height / 2; };
+          return Math.abs(mid('.scene-toolbar > .scene-build-bars') - mid('.scene-toolbar > .scene-rise-fill')) < 3;
+        });
+        check(`${w}px: Rise's bars and Finish with Fill share one row`, shared);
+        // One stacked row is a 44px control and a 12px gap.
+        check(`${w}px: Rise adds one row and Phrase end one more`, rise.h - base.h <= 57 && phrase.h - riseFill.h <= 57 && riseFill.h === rise.h,
+          `${base.h} > ${rise.h} > ${riseFill.h} > ${phrase.h}px`);
       }
     } catch (e) {
       check(`${w}px toolbar: the walk-through ran to the end`, false, String(e.message).split('\n')[0]);
     }
     check(`${w}px toolbar: no page errors`, errors.length === 0, errors.join('; '));
+    await page.close();
+  }
+
+  // ---- The crash mark at every pad size: a bolt and the word, never color alone, with
+  // air between the bolt, the word, the dot and the summary (Outfit's narrow word space
+  // once made it read "Crash·Kick"), and never cut short itself. ---------------------
+  for (const [w, h, extra] of [[1440, 900], [1280, 800], [1180, 800], [1024, 768],
+    [375, 812, { hasTouch: true, isMobile: true }], [320, 640, { hasTouch: true, isMobile: true }]]) {
+    const { page, errors } = await open(w, h, extra ?? {});
+    const k = kit(page);
+    try {
+      await page.waitForSelector('.scene-pads');
+      for (const i of [0, DROP]) {
+        await k.slot(i).locator('.scene-menu-button').click();
+        await page.getByRole('checkbox', { name: 'Crash on launch', exact: true }).check();
+        await page.keyboard.press('Escape');
+      }
+      const marks = await page.evaluate(() => [...document.querySelectorAll('.scene-summary')].filter((s) => s.querySelector('.scene-crash-mark')).map((s) => {
+        const mark = s.querySelector('.scene-crash-mark');
+        const svg = mark.querySelector('svg').getBoundingClientRect();
+        const word = document.createRange();
+        word.selectNodeContents([...mark.childNodes].find((n) => n.nodeType === 3));
+        const wordBox = word.getBoundingClientRect();
+        const sep = s.querySelector('.scene-crash-sep').getBoundingClientRect();
+        const rest = document.createRange();
+        rest.selectNodeContents(s.lastChild);
+        const restBox = rest.getClientRects()[0];
+        const box = s.getBoundingClientRect();
+        const m = mark.getBoundingClientRect();
+        return {
+          text: mark.textContent,
+          inside: m.left >= box.left - 0.5 && m.right <= box.right + 0.5,
+          icon: Math.round(svg.width),
+          iconGap: Math.round((wordBox.left - svg.right) * 10) / 10,
+          sepBefore: Math.round((sep.left - m.right) * 10) / 10,
+          // The summary after the dot may be cut short on a small pad; only measured when shown.
+          sepAfter: restBox && restBox.left < box.right ? Math.round((restBox.left - sep.right) * 10) / 10 : null,
+          pad: Math.round(s.closest('.scene-pad').getBoundingClientRect().width),
+        };
+      }));
+      const detail = marks.map((m) => `pad ${m.pad}px: icon ${m.icon}, gaps ${m.iconGap}/${m.sepBefore}/${m.sepAfter ?? '-'}`).join('; ');
+      check(`${w}px crash mark: two pads show it, as a bolt and the words "Crash on launch"`,
+        marks.length === 2 && marks.every((m) => m.text === 'Crash on launch' && m.icon >= 10), detail);
+      check(`${w}px crash mark: never cut short itself`, marks.every((m) => m.inside), detail);
+      check(`${w}px crash mark: at least 3px from bolt to word, and 4px either side of the dot`,
+        marks.every((m) => m.iconGap >= 3 && m.sepBefore >= 4 && (m.sepAfter === null || m.sepAfter >= 4)), detail);
+    } catch (e) {
+      check(`${w}px crash mark: the walk-through ran to the end`, false, String(e.message).split('\n')[0]);
+    }
+    check(`${w}px crash mark: no page errors`, errors.length === 0, errors.join('; '));
+    await page.close();
+  }
+
+  // ---- Accessibility: roles, keyboard, focus and reasons for the Night 8 controls. ----
+  {
+    const { page, errors } = await open(1440, 900);
+    const k = kit(page);
+    try {
+      await page.waitForSelector('.scene-fill-tools');
+      await k.switchOn('Rise into the scene over several bars');
+      await k.fillAt('phrase');
+      for (const [name, n, picked] of [['Switch on', 4, 'Rise into the scene over several bars'], ['Rise over', 3, 'Rise over 4 bars'],
+        ['Fill at', 2, 'Fill at the phrase end'], ['Phrase length', 4, 'Phrases of 4 bars']]) {
+        const group = page.getByRole('radiogroup', { name, exact: true });
+        const radios = group.getByRole('radio');
+        const st = await radios.evaluateAll((els) => els.map((e) => ({ name: e.getAttribute('aria-label'), on: e.getAttribute('aria-checked'), tab: e.tabIndex })));
+        const on = st.filter((r) => r.on === 'true');
+        const stops = st.filter((r) => r.tab === 0);
+        check(`a11y: ${name} is a radio group of ${n}, one checked, and one tab stop on it`,
+          (await group.count()) === 1 && st.length === n && on.length === 1 && on[0].name === picked && stops.length === 1 && stops[0].name === picked,
+          JSON.stringify(st));
+      }
+      // Arrow keys move and pick, wrapping; Home and End go to the ends.
+      await page.getByRole('radio', { name: 'Phrases of 4 bars', exact: true }).focus();
+      const focused = () => page.evaluate(() => [document.activeElement?.getAttribute('aria-label'), document.activeElement?.getAttribute('aria-checked')].join(':'));
+      const walk = [];
+      for (const key of ['ArrowRight', 'End', 'ArrowRight', 'ArrowLeft', 'Home']) {
+        await page.keyboard.press(key);
+        walk.push(await focused());
+      }
+      check('a11y: in a radio group, arrows move and pick (wrapping), Home and End go to the ends',
+        JSON.stringify(walk) === JSON.stringify(['Phrases of 8 bars:true', 'Phrases of 16 bars:true', 'Phrases of 2 bars:true', 'Phrases of 16 bars:true', 'Phrases of 2 bars:true']),
+        walk.join(' > '));
+      const ring = await page.evaluate(() => {
+        const cs = getComputedStyle(document.activeElement);
+        return { style: cs.outlineStyle, width: parseFloat(cs.outlineWidth), color: cs.outlineColor };
+      });
+      check('a11y: a radio reached by keyboard shows the 2px focus ring', ring.style === 'solid' && ring.width >= 2, JSON.stringify(ring));
+      const toggle = page.getByRole('switch', { name: RISE_FILL_NAME, exact: true });
+      const before = await toggle.getAttribute('aria-checked');
+      await toggle.click();
+      check('a11y: Finish with Fill is a switch whose aria-checked follows it', before === 'false' && (await toggle.getAttribute('aria-checked')) === 'true');
+      // Before Play the fill buttons can't be pressed: they say why and keep focus.
+      const why = await page.evaluate(() => ['.fill-button', '.fill-into-button'].map((sel) => {
+        const el = document.querySelector(sel);
+        const id = el.getAttribute('aria-describedby');
+        return { native: el.disabled, aria: el.getAttribute('aria-disabled'), tab: el.tabIndex, title: el.title,
+          described: id ? document.getElementById(id)?.textContent?.trim() : null };
+      }));
+      check('a11y: before Play, Fill and Fill → Drop are aria-disabled, focusable, and described by their reason',
+        why.every((b) => !b.native && b.aria === 'true' && b.tab === 0 && b.described === `Unavailable: ${b.title}`), JSON.stringify(why));
+      const was = { fill: await k.fillBtn.getAttribute('data-state'), status: await k.statusText() };
+      await k.fillBtn.click({ force: true });
+      await k.intoBtn.click({ force: true });
+      await page.waitForTimeout(200);
+      check('a11y: and pressing them does nothing', (await k.fillBtn.getAttribute('data-state')) === was.fill && (await k.statusText()) === was.status
+        && (await k.intoBtn.getAttribute('data-state')) === 'idle');
+      // Crash on launch: a real checkbox in the pad's menu, with a visible focus ring.
+      await k.slot(DROP).locator('.scene-menu-button').click();
+      const box = page.getByRole('checkbox', { name: 'Crash on launch', exact: true });
+      for (let i = 0; i < 8 && !(await box.evaluate((el) => el === document.activeElement)); i += 1) await page.keyboard.press('Tab');
+      const boxRing = await box.evaluate((el) => {
+        const cs = getComputedStyle(el);
+        return { focused: el === document.activeElement, style: cs.outlineStyle, width: parseFloat(cs.outlineWidth) };
+      });
+      check('a11y: Crash on launch is a checkbox reached by Tab, with the focus ring', boxRing.focused && boxRing.style === 'solid' && boxRing.width >= 2,
+        JSON.stringify(boxRing));
+    } catch (e) {
+      check('a11y: the walk-through ran to the end', false, String(e.message).split('\n')[0]);
+    }
+    check('a11y: no page errors', errors.length === 0, errors.join('; '));
     await page.close();
   }
 }
