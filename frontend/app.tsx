@@ -414,6 +414,7 @@ export function App() {
                 onRename={inst.renameSceneSlot}
                 onDuplicate={inst.duplicateSceneSlot}
                 onReset={inst.resetSceneSlot}
+                onCrash={inst.setSceneCrashSlot}
                 {...(inst.hasFill
                   ? {
                       fill: inst.fill.status,

@@ -14,8 +14,8 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { engine, GESTURE_KIND, SCENE_TIMING } from './engine';
-import type { Deck as DeckId, EngineEvent as WireEvent } from './engine';
+import { engine, GESTURE_KIND, SCENE_ACCENT, SCENE_TIMING } from './engine';
+import type { Deck as DeckId, EngineEvent as WireEvent, SceneAccent } from './engine';
 import { emptyFlags, fetchLibrary, fetchTrack } from './api';
 import {
   defaultSend,
@@ -30,6 +30,7 @@ import {
   EVENT,
   BUILD_REFUSAL,
   REASON,
+  accentStatus,
   captureScene,
   copyMix,
   duplicateScene,
@@ -43,6 +44,7 @@ import {
   resetScene,
   sameMix,
   sceneVector,
+  setSceneCrash,
   type BuildBars,
   type Compare,
   type SceneMix,
@@ -735,6 +737,14 @@ export function useInstrument() {
     () =>
       engine.onSceneEvents((events: readonly WireEvent[]) => {
         for (const e of events) {
+          if (e.kind === EVENT.accentFired) {
+            // After the launch's `applied` (docs/NIGHT8_PROTOCOL.md): say the crash if it
+            // was heard; one silent under a solo leaves "<name> active" as it is.
+            const r = sceneRequestRef.current;
+            const said = r?.requestId === e.requestId ? accentStatus(sceneNameRef.current(r.target), e.b) : null;
+            if (said) setSceneStatus(said);
+            continue;
+          }
           if (!isLaunchEvent(e.kind)) continue;
           // The interrupted rise's last base came ahead of its outcome; nothing follows.
           if (e.requestId === abandonedBuild.current && e.kind >= EVENT.buildApplied && e.kind <= EVENT.buildRejected) {
@@ -899,6 +909,7 @@ export function useInstrument() {
     mix: SceneMix,
     lanes?: ScenePatterns,
     timing: Timing = sceneTiming,
+    accent: SceneAccent = SCENE_ACCENT.none,
   ) {
     const sets = lanes && Object.keys(lanes).length ? lanes : undefined;
     if (!engine.booted) {
@@ -945,6 +956,7 @@ export function useInstrument() {
       sceneVector(request.mix),
       request.generation,
       data ? { requestId: nextRequestId.current++, data } : undefined,
+      accent,
     );
   }
 
@@ -978,8 +990,10 @@ export function useInstrument() {
     if (!beforeScenes.current || (!activeScene && !(pending && isSceneSlot(pending.target)))) {
       beforeScenes.current = { mix: workingMix(), patterns: patterns.sceneLanes(), changedLanes: new Set() };
     }
-    if (buildBars !== null) requestBuild(slot, scene.revision, scene, buildBars, scene.patterns);
-    else requestLaunch(slot, scene.revision, scene, scene.patterns);
+    // Crash on launch rides on the request, so it lands on the scene's own commit onset.
+    const accent = scene.crash ? SCENE_ACCENT.crash : SCENE_ACCENT.none;
+    if (buildBars !== null) requestBuild(slot, scene.revision, scene, buildBars, scene.patterns, accent);
+    else requestLaunch(slot, scene.revision, scene, scene.patterns, sceneTiming, accent);
   }
 
   /**
@@ -993,6 +1007,7 @@ export function useInstrument() {
     mix: SceneMix,
     bars: BuildBars,
     lanes?: ScenePatterns,
+    accent: SceneAccent = SCENE_ACCENT.none,
   ) {
     const sets = lanes && Object.keys(lanes).length ? lanes : undefined;
     const requestId = nextRequestId.current++;
@@ -1020,6 +1035,7 @@ export function useInstrument() {
       request.generation,
       undefined,
       data ? { requestId: nextRequestId.current++, data } : undefined,
+      { accent },
     );
   }
 
@@ -1147,6 +1163,15 @@ export function useInstrument() {
     if (!scenes) return;
     setScenes(duplicateScene(scenes, from, to));
     setSceneStatus(`Copied ${sceneName(from)} into the ${sceneName(to)} slot`);
+  }
+
+  /** Crash on launch, on or off, for one slot: a project edit (one undo step), never automatic. */
+  function setSceneCrashSlot(slot: SceneSlotId, crash: boolean) {
+    if (!scenes) return;
+    const next = setSceneCrash(scenes, slot, crash);
+    if (next === scenes) return;
+    setScenes(next);
+    setSceneStatus(crash ? `${sceneName(slot)} crashes on launch` : `${sceneName(slot)} launches without a crash`);
   }
 
   function resetSceneSlot(slot: SceneSlotId) {
@@ -1470,6 +1495,7 @@ export function useInstrument() {
     renameSceneSlot,
     duplicateSceneSlot,
     resetSceneSlot,
+    setSceneCrashSlot,
     captureCompare,
     listenCompare,
     updateCompare,
