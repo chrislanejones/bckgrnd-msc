@@ -359,8 +359,8 @@ try {
     const RT = { timeout: 20000 };
     const lastPatterns = () => page.evaluate(() => window.__BCKGRND_SENT__().patterns?.requestId ?? null);
     await page.keyboard.press('Escape');
-    await page.getByRole('button', { name: 'Rise into the scene over several bars' }).click();
-    await page.getByRole('button', { name: 'Rise over 2 bars' }).click();
+    await page.getByRole('radio', { name: 'Rise into the scene over several bars' }).click();
+    await page.getByRole('radio', { name: 'Rise over 2 bars' }).click();
     const sentBefore = await lastPatterns();
     await page.locator('.scene-slot').nth(3).locator('.scene-pad').click();
     await page.waitForFunction(() => document.querySelectorAll('.scene-slot')[3]?.getAttribute('data-state') === 'active', null, RT);
@@ -374,7 +374,7 @@ try {
     check('rise: the lanes went with the build, so nothing is sent after it lands',
       sentAfter === sentBefore && riseStatus === 'Drop active', `patterns request ${sentBefore} -> ${sentAfter}; status "${riseStatus}"`);
     await page.keyboard.press('Escape');
-    await page.getByRole('button', { name: 'Launch on the next bar' }).click();
+    await page.getByRole('radio', { name: 'Launch on the next bar' }).click();
     await page.getByRole('button', { name: 'Cancel scene', exact: true }).click();
     await page.waitForFunction(() => document.querySelector('.scene-status')?.textContent === 'Scene cleared; previous mix restored', null, T);
     await openEditor();
@@ -416,7 +416,7 @@ try {
   } catch (e) {
     read = { error: e.message };
   }
-  check('project: version 3 with the edited lanes', project.version === 3 && Object.keys(project.patterns).includes('hat'));
+  check('project: version 4 with the edited lanes', project.version === 4 && Object.keys(project.patterns).includes('hat'));
   check('project: serializes and reads back unchanged', isDeepStrictEqual(read, project), read.error ?? '');
   check('project: the captured scene keeps its lanes', Boolean(project.scenes.slots[3].patterns.hat));
 

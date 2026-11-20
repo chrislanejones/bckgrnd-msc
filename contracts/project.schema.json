@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://bckgrnd-msc.netlify.app/contracts/project.v3.schema.json",
-  "title": "bckgrnd-msc project, version 3",
-  "description": "Saved musical data only. Playback telemetry (meters, playhead, live deck) is never part of a project. Parameter ids and ranges come from contracts/parameters.json; scene slots and the scene parameters from contracts/scenes.json; lanes, the musical unit and pattern limits from contracts/patterns.json. Version 2 is the same without `locks` and with no patterns anywhere; version 1 is version 2 without `scenes`. Readers migrate both forward without changing anything that plays. Beyond this schema, readers also refuse a pattern whose events repeat an id or a step, or whose lane key and `lane` disagree.",
+  "$id": "https://bckgrnd-msc.netlify.app/contracts/project.v4.schema.json",
+  "title": "bckgrnd-msc project, version 4",
+  "description": "Saved musical data only. Playback telemetry (meters, playhead, live deck) is never part of a project. Parameter ids and ranges come from contracts/parameters.json; scene slots and the scene parameters from contracts/scenes.json; lanes, the musical unit and pattern limits from contracts/patterns.json. Version 3 is the same without each scene's `crash`; version 2 is version 3 without `locks` and with no patterns anywhere; version 1 is version 2 without `scenes`. Readers migrate all three forward without changing anything that plays (v3 to v4 writes `crash: false` on every scene). Beyond this schema, readers also refuse a pattern whose events repeat an id or a step, or whose lane key and `lane` disagree.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -21,7 +21,7 @@
       "const": "bckgrnd-msc/project"
     },
     "version": {
-      "const": 3
+      "const": 4
     },
     "id": {
       "type": "string",
@@ -175,7 +175,8 @@
         "revision",
         "params",
         "stems",
-        "patterns"
+        "patterns",
+        "crash"
       ],
       "properties": {
         "slot": {
@@ -327,6 +328,10 @@
               }
             ]
           }
+        },
+        "crash": {
+          "type": "boolean",
+          "description": "Crash on launch (ADR-022): when the scene commits during playback, by a pad, a Rise's landing or a Fill into, the track's transition crash plays once on that onset. Always stated, never filled from a default; set only by the user."
         }
       }
     },

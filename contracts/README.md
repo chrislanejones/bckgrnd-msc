@@ -7,8 +7,8 @@ should all agree on these files. None of them should keep a private copy.
 | File | What it is | Read by |
 |---|---|---|
 | [`parameters.json`](parameters.json) | Every engine parameter: id, range, default, unit, scope, and the worklet message that sets it. | `frontend/lib/contract.ts`, `App\Support\Project\Contract`, and the MCP from Night 6 |
-| [`project.schema.json`](project.schema.json) | A saved project, version 3. | The same, plus anything that writes a project file |
-| [`snapshot.schema.json`](snapshot.schema.json) | Portable snapshot v1: project identity/revision, renderer version, source dependency SHA256 and complete project v3. | Browser, native storage and MCP shared runtime |
+| [`project.schema.json`](project.schema.json) | A saved project, version 4. | The same, plus anything that writes a project file |
+| [`snapshot.schema.json`](snapshot.schema.json) | Portable snapshot v1: project identity/revision, renderer version, source dependency SHA256 and complete project v4 (v3 inside is migrated on read). | Browser, native storage and MCP shared runtime |
 | [`patterns.json`](patterns.json) | The nine lanes a project may override (kind, stem, engine index, id prefix, editable or not), the musical unit, and pattern limits. | `frontend/lib/patterns.ts`, `App\Support\Project\Patterns`, the engine's tests |
 | [`scenes.json`](scenes.json) | The four scene slots, the parameters a scene holds (`sceneVector`, also the engine's vector order) and the factory recipes. | The same, plus `engine-core/tests` |
 
@@ -51,8 +51,14 @@ Ids never change meaning. To change a parameter's meaning, add a new id and migr
 ## Projects
 
 Night 6 portable files use `bckgrnd-msc/snapshot` version 1 and renderer
-`project-renderer-1`. Its `project` is a complete canonical v3 document. Unlike
+`project-renderer-1`. Its `project` is a complete canonical v4 document. Unlike
 legacy import, reading a current snapshot refuses repaired/clamped/unknown data.
+Every snapshot written before Night 8 holds a v3 project: readers migrate it on
+read (each scene gains `crash: false`) and hold it to the same canonical check after
+that one step. The envelope stays version 1. Nothing rewrites the stored copy until
+the user saves; the native store keeps older revisions byte for byte, and Save over a
+project file keeps the old file as `.bak`. A snapshot can't hold a v1 or v2 project:
+none was ever written.
 The source hash identifies the original arrangement, not the resolved edited one.
 Readers validate it before changing memory or rendering. A source-root kick stays
 tuned to that original arrangement; moving a bass note does not retune the kick.
@@ -130,6 +136,12 @@ complete.)
   humanize, that's the generator and its version, the seed, the settings and the
   source revision. The resulting events are stored too, so a later generator update
   never changes a saved pattern.
+- **Crash on launch (version 4).** Every scene states `crash`, `true` or `false`.
+  When a scene with `crash: true` commits during playback (a pad, a Rise's landing,
+  a Fill into), the track's transition crash plays once on that onset (ADR-022,
+  [`docs/NIGHT8_PROTOCOL.md`](../docs/NIGHT8_PROTOCOL.md)). Off by default, set only
+  by the user. A capture or a reset keeps it. The name is `crash`, not `accent`:
+  `accent` already means a louder note in a pattern.
 - **Scenes pin patterns.** A v3 scene's `patterns` maps the lanes it sets to a copy
   of the pattern as captured, or to `{"factory": true}`. A lane the scene leaves out
   is left alone when it launches. Editing the working pattern never rewrites a
@@ -140,6 +152,7 @@ complete.)
 
 | From | To | How |
 |---|---|---|
+| v3 | v4 | Every scene gains `crash: false`, stated, not left to a default. Nothing that plays changes. A v3 scene that already carries `crash` is refused, and so is a v4 scene without it. |
 | Legacy preset (`PresetController`, no `format`) | v1 | `trackId`, `bpm`, `swing` → `transport.*`; `mix`/`muted`/`solo` → `stems`. Effects take their defaults, because legacy presets never stored them. |
 | v2 | v3 | Adds empty `locks`. Patterns stay empty and scenes set no lanes, so nothing that plays changes. A v1 or v2 document carrying patterns or locks is refused rather than silently dropped. |
 | v1 | v2 | Adds the track's four factory scenes. Nothing else changes, and no scene is applied: the working mix stays what was saved. A v1 document that already carries `scenes` is refused. |

@@ -1,6 +1,8 @@
 # ADR-012: One parameter registry and a versioned project format, shared by UI, PHP and MCP
 Date: 2026-11-03   Status: draft
 
+> Amendment proposed 11-19-2026. ADR-023 (draft) would bump the project format to version 4 for a per-scene accent, with a v3 → v4 migration.
+
 ## Context
 Three programs describe the same mix: the React UI (its own ranges and defaults),
 Laravel presets (`PresetController`, no version) and the MCP companion (its own

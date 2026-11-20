@@ -14,6 +14,7 @@
 import { chromium } from 'playwright';
 import { existsSync } from 'node:fs';
 import { riseChecks } from './verify-ui-rise.mjs';
+import { fillChecks } from './verify-ui-fills.mjs';
 
 const baseUrl = process.argv[2] ?? 'http://127.0.0.1:8080';
 const executablePath =
@@ -634,7 +635,7 @@ try {
       check('scenes: four pads, named Full, Sparse, Build, Drop',
         JSON.stringify(await names()) === '["Full","Sparse","Build","Drop"]', (await names()).join(', '));
       check('scenes: Bar is the default timing',
-        (await page.getByRole('button', { name: 'Launch on the next bar' }).getAttribute('aria-pressed')) === 'true');
+        (await page.getByRole('radio', { name: 'Launch on the next bar' }).getAttribute('aria-checked')) === 'true');
       check('scenes: Cancel is disabled with no selection or queue', await cancelScene.isDisabled());
       const fillTitle = await fillButton.getAttribute('title');
       check('fill: disabled while stopped, and the title says why',
@@ -769,14 +770,14 @@ try {
       {
         const RT = { timeout: 20000 };
         const filterNow = () => page.evaluate(() => window.__BCKGRND_PROJECT__().params['fx.filter']);
-        const rise = page.getByRole('button', { name: 'Rise into the scene over several bars' });
-        const barsPicked = () => page.locator('.scene-build-bars .segment[aria-pressed="true"]').textContent();
+        const rise = page.getByRole('radio', { name: 'Rise into the scene over several bars' });
+        const barsPicked = () => page.locator('.scene-build-bars .segment[aria-checked="true"]').textContent();
         check('rise: the bar picker is hidden until Rise is chosen', (await page.locator('.scene-build-bars').count()) === 0);
         await rise.click();
         check('rise: choosing Rise shows 2 · 4 · 8 bars, 4 picked',
           (await page.locator('.scene-build-bars .segment').count()) === 3 && (await barsPicked())?.trim() === '4', await barsPicked());
-        await page.getByRole('button', { name: 'Rise over 2 bars' }).click();
-        check('rise: Rise stays on with 2 picked', (await rise.getAttribute('aria-pressed')) === 'true' && (await barsPicked())?.trim() === '2');
+        await page.getByRole('radio', { name: 'Rise over 2 bars' }).click();
+        check('rise: Rise stays on with 2 picked', (await rise.getAttribute('aria-checked')) === 'true' && (await barsPicked())?.trim() === '2');
 
         // Two bars into Drop from a closed filter: the cutoff opens gradually.
         await page.getByRole('slider', { name: 'Cutoff' }).fill('500');
@@ -803,7 +804,7 @@ try {
         check("rise: it ends on Drop's open filter", (await shown('Cutoff')) === 'Open' && (await statusText()) === 'Drop active', `${await shown('Cutoff')}; ${await statusText()}`);
 
         // Pressing a rising pad again cancels it, and the knobs glide back.
-        await page.getByRole('button', { name: 'Rise over 4 bars' }).click();
+        await page.getByRole('radio', { name: 'Rise over 4 bars' }).click();
         await page.getByRole('slider', { name: 'Cutoff' }).fill('500');
         const before = await filterNow();
         await nextBar();
@@ -820,7 +821,7 @@ try {
         check('rise: the pad drops its line once cancelled', (await lineOf(3)) !== '' ? (await stateOf(3)) !== 'building' : true, `${await stateOf(3)} "${await lineOf(3)}"`);
 
         // A knob moved during a rise is the user's: the rise stops driving it.
-        await page.getByRole('button', { name: 'Rise over 2 bars' }).click();
+        await page.getByRole('radio', { name: 'Rise over 2 bars' }).click();
         await nextBar();
         await pad(3).click();
         await page.waitForFunction((src) => new RegExp(src).test(document.querySelectorAll('.scene-slot')[3]?.querySelector('.scene-line')?.textContent?.trim() ?? ''), /^Rising · 1 of 2$/.source, RT);
@@ -833,7 +834,7 @@ try {
         check('rise: and the scene reads Active · Modified', (await lineOf(3)) === 'Active · Modified', await lineOf(3));
 
         // Back to Next bar: the bar picker goes away and pads switch on one bar again.
-        await page.getByRole('button', { name: 'Launch on the next bar' }).click();
+        await page.getByRole('radio', { name: 'Launch on the next bar' }).click();
         check('rise: leaving Rise hides the bar picker', (await page.locator('.scene-build-bars').count()) === 0);
         await cancelScene.click();
         await waitStatus(/^Scene cleared; previous mix restored$/);
@@ -998,14 +999,14 @@ try {
       await page.evaluate((y) => window.scrollTo(0, y), heldScroll);
       await touch('touchEnd', finger);
       await page.getByRole('button', { name: 'Reset cutoff' }).click();
-      await page.getByRole('button', { name: 'Launch now' }).click();
+      await page.getByRole('radio', { name: 'Launch now' }).click();
       await pad(0).click();
       await waitState(0, 'active');
       check('held: a capture during a held Filter stores the base Cutoff',
         heldAtCapture === 'true' && (await shown('Cutoff')) === baseCutoff, `held ${heldAtCapture}; launched Full shows ${await shown('Cutoff')}, base ${baseCutoff}`);
 
       // Compare A/B on the bar: capture A, change, capture B, hear each, Exit.
-      await page.getByRole('button', { name: 'Launch on the next bar' }).click();
+      await page.getByRole('radio', { name: 'Launch on the next bar' }).click();
       const chip = (i) => page.locator('.compare-chip').nth(i);
       const chipText = async (i) => (await chip(i).textContent())?.trim();
       const waitChip = (i, text) =>
@@ -1164,6 +1165,9 @@ try {
   // ---- Rise (Night 7 timed builds), the rest of the contract: tools/verify-ui-rise.mjs.
   await riseChecks({ open, check });
 
+  // ---- Fills (Night 8: Fill at, Fill → Drop, Rise + Fill, prefs): tools/verify-ui-fills.mjs.
+  await fillChecks({ open, check });
+
   // ---- Tablet: the library is an overlay opened from the transport. -----------
   {
     const { page } = await open(1024, 768);
@@ -1277,9 +1281,10 @@ try {
   }
 
   // ---- Responsive (Night 8): the narrow desktop tiers and short windows. ---------
-  // Scenes toolbar, mouse: Switch on, Rise's 2 · 4 · 8, Drum fill and Cancel share one
-  // row at every compact width, including the stacked tier around 1180px, and choosing
-  // Rise never adds a row, even with Fill's widest label.
+  // Scenes toolbar, mouse: Switch on, Rise's 2 · 4 · 8 (with Finish with Fill) and Cancel
+  // share one row at every compact width, including the stacked tier around 1180px, and
+  // choosing Rise never adds a row, even with Fill's widest label. Since Night 8 the Drum
+  // fill sits on the fill row under it (tools/verify-ui-fills.mjs measures that row).
   for (const width of [1440, 1280, 1279, 1200, 1180, 1100, 1024, 960, 900]) {
     const { page } = await open(width, 900);
     const toolbar = () => page.evaluate(() => {
@@ -1290,7 +1295,7 @@ try {
       return { h: Math.round(bar.getBoundingClientRect().height * 10) / 10, oneRow: rows.every((t) => Math.abs(t - switchOn) < 3) };
     });
     const off = await toolbar();
-    await page.getByRole('button', { name: 'Rise into the scene over several bars' }).click();
+    await page.getByRole('radio', { name: 'Rise into the scene over several bars' }).click();
     const on = await toolbar();
     const widest = await page.evaluate(() => {
       const fill = document.querySelector('.fill-button');
@@ -1301,7 +1306,7 @@ try {
       fill.textContent = was;
       return Math.round(h * 10) / 10;
     });
-    check(`${width}px: Switch on, Rise bars, Fill and Cancel share one row`, off.oneRow && on.oneRow, `off ${off.oneRow}, on ${on.oneRow}`);
+    check(`${width}px: Switch on, Rise bars and Cancel share one row`, off.oneRow && on.oneRow, `off ${off.oneRow}, on ${on.oneRow}`);
     check(`${width}px: choosing Rise adds no row to the scenes toolbar`, on.h === off.h && widest === off.h, `${off.h}px, ${on.h}px with Rise, ${widest}px with "Fill · Bar 16"`);
     await page.close();
   }
@@ -1393,7 +1398,7 @@ try {
       }
     }
     await page.getByRole('button', { name: 'Perform', exact: true }).click();
-    await page.getByRole('button', { name: 'Rise into the scene over several bars' }).click();
+    await page.getByRole('radio', { name: 'Rise into the scene over several bars' }).click();
     check(`375x${h}: Rise on, no horizontal scroll`, (await wide()) <= 375, `${await wide()}px`);
     await page.getByRole('button', { name: 'Show the inspector' }).click();
     await page.waitForTimeout(300);

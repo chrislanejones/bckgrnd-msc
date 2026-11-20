@@ -173,19 +173,29 @@ Scenes and comparison follow in a separate panel. The four scene cards share one
 on desktop and lead with their name, then a short sound cue, then a miniature preview
 of their eight stored levels beside the card's state. Preview bars respect cuts and
 solos; custom captures never keep a misleading factory description. The panel
-header holds the scene status line and a small Shift 1–4 tag. Under the cards, one
-toolbar row holds Switch on (Now, Next beat, Next bar, Rise as one segmented control,
-with a 2 · 4 · 8 bars picker beside it while Rise is on), Drum fill and Cancel, and
-Compare A/B joins that row when it fits. Compare A/B is one strip set off by a rule:
-dashed capture buttons become listening buttons with headphone icons, and a single
-short hint gives the next comparison step. Current, modified, and queued states use
-both text and visual treatment.
+header holds the scene status line and a small Shift 1–4 tag. Under the cards the
+toolbar has three rows, each one control high (32 px with a mouse): Switch on (Now,
+Next beat, Next bar, Rise, with 2 · 4 · 8 bars and Finish with Fill beside it while
+Rise is on) and Cancel; then Fill at (Next bar, Phrase end, with 2 · 4 · 8 · 16 bars
+for Phrase end), Drum fill and Fill → Drop; then Compare A/B. The scene and fill
+controls can't share one row: squeezed as far as they go they need about 950 px, and
+the panel is 798 px wide at 1440. Choosing an option never adds a row, so the toolbar
+is 108 px at every mouse width from 900 to 1440. Compare A/B is one strip set off by a
+rule: dashed capture buttons become listening buttons with headphone icons, and a
+single short hint gives the next comparison step. Current, modified, and queued states
+use both text and visual treatment.
 Once the scenes panel is 45rem or narrower, Switch on uses its short names (Now, Beat,
 Bar, Rise), as the phone does, so Rise never wraps the row; the full names stay the
 accessible names. With a mouse, below 38rem (the 1180–1279 px three-column layout, and
-900–1000 px with the inspector docked) the pills tighten and the word "bars" goes, so
-Switch on, 2 · 4 · 8, Drum fill and Cancel still share one row; the stacked,
-thumb-sized toolbar below 34rem is for touch only.
+900–1000 px with the inspector docked) the pills tighten, the word "bars" goes and
+Fill at's word is hidden (kept as the group's name), so every row still holds; the
+stacked, thumb-sized toolbar below 34rem is for touch only. On a phone, Rise's bars
+and Finish with Fill share a row, and Drum fill and Fill → Drop split theirs by their
+words, so "Fill · Next phrase → Drop" is never cut short.
+The pickers (Switch on, Rise over, Fill at, the phrase length) are radio groups: one
+tab stop each, arrow keys move and pick. Finish with Fill is a switch and Crash on
+launch a checkbox. A fill button that can't be pressed is aria-disabled, not
+disabled, so it keeps focus and its reason is read as its description.
 
 The inspector fits 1280 × 800 and 1024 × 768 without scrolling. Its one preference
 (how knobs turn by dragging) sits beside the Master/stem tabs as an icon pair, a note

@@ -394,3 +394,31 @@ not. Things to settle before or while building it:
   file check would fail. (Phase 5 audit)
 - **The Linux candidate needs a rebuild** before the .deb checks count: rc.3 (`19c93c5`)
   predates Night 7. Checklist: `docs/releases/RC_MANUAL_CHECKLIST_11-19-2026.md`.
+
+## Found building Night 8 transitions (11-19-2026)
+
+- **`process()` already allocates on every tone note** (`trigger` clones the note's pitch
+  `Vec`; voicing builds a detune `Vec`): 374 alloc/free per 2,000 blocks of Warehouse.
+  Predates Night 8; the no-alloc test plays drums only for now. (Silas)
+- **The MCP refuses every v4 project** until it vendors the v4 contracts. Ship the MCP
+  resync with the desktop build: `scripts/sync-engine.mjs:27` hard-codes
+  `projectVersion: 3`; `src/projects.ts:87` `schema_version` and `project_sha256` change
+  for migrated v3 files; recorded hashes need regenerating. npm publish is Chris's. (Vivek)
+- **Touch users can't see why Fill is unavailable** (mouse gets a tooltip, screen readers
+  a description). Needs a row or status-line change. (Lacey)
+- **The scenes toolbar is three 32 px rows (108 px) on desktop.** One control row needs
+  950 px; getting there means moving Compare A/B out of the toolbar. At 1440×900 the
+  scenes panel starts around y 785, set by the panels above. (Lacey)
+- **Phone sheet targets still under 44 px:** knob value (26 px tall), knob Reset (20 px),
+  inspector pills (32 px). Not cheap: the knob column is 98 px at 375. (Lacey)
+- **Scene pads and Cancel still use native `disabled`**; the fill buttons moved to
+  `aria-disabled` so keyboard users can reach the reason. (Lacey)
+- **Mixed "cancelled" / "canceled"** can now appear in one status line. (fill UI)
+- **Crash level** when it plays alone and when it merges with step 192 is for Chris's ears. (Vivek)
+- **ADR-008 says solo doesn't affect transition sounds, but since Night 3 none start under
+  a solo.** The code is right; the ADR is stale. **ADR-015 says the latest fill wins, but the
+  engine refuses a second one (8).** (Dara)
+- **Judgment calls made in the build, for Chris to confirm by use:** Reset to factory keeps
+  a scene's crash; Duplicate keeps the target's own; a Rise + Fill withdraws a waiting
+  plain Fill or Fill → Drop first; Fill → Drop still fires when Drop is already active; a
+  scene launched over a pending Fill → Drop keeps its own timing and the fill plays on plain.

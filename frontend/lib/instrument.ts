@@ -14,8 +14,8 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { engine, GESTURE_KIND, SCENE_TIMING } from './engine';
-import type { Deck as DeckId, EngineEvent as WireEvent } from './engine';
+import { engine, GESTURE_KIND, SCENE_ACCENT, SCENE_TIMING } from './engine';
+import type { Deck as DeckId, EngineEvent as WireEvent, SceneAccent } from './engine';
 import { emptyFlags, fetchLibrary, fetchTrack } from './api';
 import {
   defaultSend,
@@ -28,13 +28,16 @@ import {
 } from './contract';
 import {
   EVENT,
-  BUILD_REFUSAL,
   REASON,
+  BUILD_BAR_CHOICES,
+  accentStatus,
   captureScene,
   copyMix,
   duplicateScene,
   factoryScenes,
   foldSceneEvent,
+  isFillEvent,
+  isFillPending,
   isLaunchEvent,
   isPending,
   isSceneSlot,
@@ -43,17 +46,38 @@ import {
   resetScene,
   sameMix,
   sceneVector,
+  setSceneCrash,
   type BuildBars,
   type Compare,
   type SceneMix,
   type SceneRequest,
   type Timing,
 } from './scenes';
+import {
+  DEFAULT_PHRASE_BARS,
+  FILL_INDEX,
+  PHRASE_BAR_CHOICES,
+  buildRefusal,
+  fillIntoCancelled,
+  fillIntoRefusal,
+  fillPhrase,
+  fillQueuedStatus,
+  fillRefusal,
+  foldFillJob,
+  markFilling,
+  type FillAt,
+  type FillJob,
+  type PhraseBars,
+} from './fills';
+import { PREF, readChoice, writeChoice } from './prefs';
 import { STEM_ORDER, STEPS } from './stems';
 import { LANE_IDS, type LaneId, type ScenePatterns } from './patterns';
 import { usePatternWorkspace } from './workspace';
 import { useProjectHistory } from './project-history';
 import type { LibraryResponse, Mix, StemId, TrackArrangement, TrackSummary } from './types';
+
+/** The scene slot Fill → Drop leads into: the fourth, whatever it is named now. */
+const FILL_INTO_SLOT: SceneSlotId = 'drop';
 
 /** Master level a fresh session starts at, and what its reset returns to. */
 export const MASTER_DEFAULT = fixedDefault('master.level');
@@ -154,6 +178,8 @@ export function useInstrument() {
 
   const [playing, setPlaying] = useState(false);
   const [step, setStep] = useState(-1);
+  /** The song step as last reported, for event handlers that run between renders. */
+  const songStepRef = useRef(-1);
   const [bpm, setBpmState] = useState(126);
   const [swing, setSwingState] = useState(0.22);
   const [master, setMasterState] = useState(MASTER_DEFAULT);
@@ -236,8 +262,11 @@ export function useInstrument() {
    * of switching on one onset. Null when Switch on is Now, Next beat or Next bar.
    */
   const [buildBars, setBuildBarsState] = useState<BuildBars | null>(null);
-  /** The bar count Build mode comes back with, so 2 or 8 sticks once chosen. */
-  const lastBuildBars = useRef<BuildBars>(4);
+  /** The bar count Build mode comes back with, so 2 or 8 sticks once chosen, and is remembered. */
+  const [savedBuildBars] = useState<BuildBars>(() => readChoice(PREF.riseBars, BUILD_BAR_CHOICES, 4));
+  const lastBuildBars = useRef<BuildBars>(savedBuildBars);
+  /** Finish with Fill: a Rise ends with the track's fill on its last bar (Night 8). */
+  const [riseFill, setRiseFillState] = useState(() => readChoice(PREF.riseFill, ['on', 'off'], 'off') === 'on');
   /**
    * What the knobs were last moved to by the running build, and the scene-vector slots
    * the user has moved since (theirs from then on, as in the engine).
@@ -265,13 +294,20 @@ export function useInstrument() {
   const [compare, setCompare] = useState<Compare | null>(null);
 
   // ---- Fill and held effects ----------------------------------------------
-  /** The one-bar fill: idle, sent, queued for a bar, or playing its bar. */
-  const [fill, setFill] = useState<{ status: 'idle' | 'sending' | 'queued' | 'playing'; id: number; bar?: number }>({
-    status: 'idle',
-    id: 0,
-  });
-  const fillRef = useRef(fill);
-  fillRef.current = fill;
+  /**
+   * The one fill the engine holds (Night 3's one-bar fill, Night 8's phrase fills): a
+   * plain fill, a Fill into's, or a Rise's, folded from its events. Null before any.
+   */
+  const [fill, setFillState] = useState<FillJob | null>(null);
+  const fillRef = useRef<FillJob | null>(null);
+  const setFill = (next: FillJob | null) => {
+    fillRef.current = next;
+    setFillState(next);
+  };
+  /** Fill at, and the phrase length a Phrase end fill ends on: app preferences. */
+  const [fillAt, setFillAtState] = useState<FillAt>(() => readChoice(PREF.fillAt, ['bar', 'phrase'] as const, 'bar'));
+  const [phraseBars, setPhraseBarsState] = useState<PhraseBars>(() =>
+    readChoice(PREF.phraseBars, PHRASE_BAR_CHOICES, DEFAULT_PHRASE_BARS));
   /**
    * Held effects, by kind, with the token the engine knows them by. Temporary
    * overrides only: none of this is part of the working mix or the project.
@@ -360,6 +396,7 @@ export function useInstrument() {
       engine.subscribe((t) => {
         setPlaying(t.playing && engine.running);
         setStep(t.step);
+        songStepRef.current = t.step < 0 ? -1 : t.step % STEPS;
       }),
     [],
   );
@@ -730,11 +767,21 @@ export function useInstrument() {
   }
 
   // Engine outcomes. Only `applied` changes what is active; everything else updates
-  // the request's status and the one-line announcement.
+  // the request's status and the one-line announcement. A fill's events are folded here
+  // too, after the batch's launch events, as they were when Fill had a listener of its
+  // own: a Stop's "Drop cancelled" comes first and the fill's "Fill cancelled" joins it.
   useEffect(
     () =>
       engine.onSceneEvents((events: readonly WireEvent[]) => {
         for (const e of events) {
+          if (e.kind === EVENT.accentFired) {
+            // After the launch's `applied` (docs/NIGHT8_PROTOCOL.md): say the crash if it
+            // was heard; one silent under a solo leaves "<name> active" as it is.
+            const r = sceneRequestRef.current;
+            const said = r?.requestId === e.requestId ? accentStatus(sceneNameRef.current(r.target), e.b) : null;
+            if (said) setSceneStatus(said);
+            continue;
+          }
           if (!isLaunchEvent(e.kind)) continue;
           // The interrupted rise's last base came ahead of its outcome; nothing follows.
           if (e.requestId === abandonedBuild.current && e.kind >= EVENT.buildApplied && e.kind <= EVENT.buildRejected) {
@@ -748,7 +795,11 @@ export function useInstrument() {
           setSceneRequest(next);
           const name = sceneNameRef.current(next.target);
           if (next.build) {
-            buildOutcomeRef.current(next, current);
+            buildOutcomeRef.current(next, current, e.b);
+            continue;
+          }
+          if (next.fillInto) {
+            fillIntoOutcomeRef.current(next, current, e.b);
             continue;
           }
           if (next.status === 'queued') {
@@ -767,6 +818,7 @@ export function useInstrument() {
             setSceneStatus(`${name} not launched: ${REASON[next.reason ?? 1] ?? 'refused'}`);
           }
         }
+        for (const e of events) if (isFillEvent(e.kind)) fillEventRef.current(e);
       }),
     [],
   );
@@ -819,12 +871,17 @@ export function useInstrument() {
   const followBuildRef = useRef(followBuild);
   followBuildRef.current = followBuild;
 
-  /** One build outcome: the pad line comes from the request, the status line from here. */
-  function buildOutcome(next: SceneRequest, prev: SceneRequest) {
+  /**
+   * One build outcome: the pad line comes from the request, the status line from here.
+   * `part` is the event's `b`: for a refusal, the part at fault.
+   */
+  function buildOutcome(next: SceneRequest, prev: SceneRequest, part: number) {
     const name = sceneName(next.target);
     const bars = next.build!.bars;
     if (next.status === 'queued') {
-      setSceneStatus(`${name} rises over ${bars} bars from bar ${next.bar}`);
+      setSceneStatus(next.build!.fill
+        ? `${name} rises over ${bars} bars from bar ${next.bar}, ending with a fill`
+        : `${name} rises over ${bars} bars from bar ${next.bar}`);
     } else if (next.status === 'building' && prev.status !== 'building') {
       setSceneStatus(`${name} rising over ${bars} bars`);
     } else if (next.status === 'applied') {
@@ -837,11 +894,33 @@ export function useInstrument() {
       const why = next.reason === undefined || next.reason === 10 ? '' : `: ${REASON[next.reason] ?? ''}`;
       setSceneStatus(`${name} rise cancelled${why}`);
     } else if (next.status === 'rejected') {
-      setSceneStatus(`${name} rise not started: ${BUILD_REFUSAL[next.reason ?? 1] ?? REASON[next.reason ?? 1] ?? 'refused'}`);
+      setSceneStatus(`${name} rise not started: ${buildRefusal(next.reason ?? 1, part)}`);
     }
   }
   const buildOutcomeRef = useRef(buildOutcome);
   buildOutcomeRef.current = buildOutcome;
+
+  /**
+   * One outcome for the scene half of a Fill into (docs/NIGHT8_PROTOCOL.md). The fill's
+   * own events say nothing on the status line while it is linked, so this is the one
+   * voice for the pair: "Drop lands on bar 9 after a fill", then "Drop active".
+   */
+  function fillIntoOutcome(next: SceneRequest, prev: SceneRequest, part: number) {
+    const name = sceneName(next.target);
+    if (next.status === 'queued') {
+      setSceneStatus(`${name} lands on bar ${next.bar} after a fill`);
+    } else if (next.status === 'applied') {
+      landed(next);
+      showMix(next.mix);
+      setSceneStatus(`${name} active`);
+    } else if (next.status === 'cancelled') {
+      setSceneStatus(fillIntoCancelled(name, next.reason, Boolean(prev.fillInto?.filling)));
+    } else if (next.status === 'rejected') {
+      setSceneStatus(`Fill → ${name} not started: ${fillIntoRefusal(next.reason ?? 1, part, name)}`);
+    }
+  }
+  const fillIntoOutcomeRef = useRef(fillIntoOutcome);
+  fillIntoOutcomeRef.current = fillIntoOutcome;
 
   /** What an applied launch means for the active scene and the comparison. */
   function landed(request: SceneRequest) {
@@ -899,6 +978,7 @@ export function useInstrument() {
     mix: SceneMix,
     lanes?: ScenePatterns,
     timing: Timing = sceneTiming,
+    accent: SceneAccent = SCENE_ACCENT.none,
   ) {
     const sets = lanes && Object.keys(lanes).length ? lanes : undefined;
     if (!engine.booted) {
@@ -945,6 +1025,7 @@ export function useInstrument() {
       sceneVector(request.mix),
       request.generation,
       data ? { requestId: nextRequestId.current++, data } : undefined,
+      accent,
     );
   }
 
@@ -978,8 +1059,10 @@ export function useInstrument() {
     if (!beforeScenes.current || (!activeScene && !(pending && isSceneSlot(pending.target)))) {
       beforeScenes.current = { mix: workingMix(), patterns: patterns.sceneLanes(), changedLanes: new Set() };
     }
-    if (buildBars !== null) requestBuild(slot, scene.revision, scene, buildBars, scene.patterns);
-    else requestLaunch(slot, scene.revision, scene, scene.patterns);
+    // Crash on launch rides on the request, so it lands on the scene's own commit onset.
+    const accent = scene.crash ? SCENE_ACCENT.crash : SCENE_ACCENT.none;
+    if (buildBars !== null) requestBuild(slot, scene.revision, scene, buildBars, scene.patterns, accent);
+    else requestLaunch(slot, scene.revision, scene, scene.patterns, sceneTiming, accent);
   }
 
   /**
@@ -993,9 +1076,23 @@ export function useInstrument() {
     mix: SceneMix,
     bars: BuildBars,
     lanes?: ScenePatterns,
+    accent: SceneAccent = SCENE_ACCENT.none,
   ) {
     const sets = lanes && Object.keys(lanes).length ? lanes : undefined;
     const requestId = nextRequestId.current++;
+    // Finish with Fill (Night 8): the track's fill plays the Rise's last bar, as part of
+    // the same request. A plain fill or a Fill into still waiting would hold the one fill
+    // slot and refuse the Rise, so it is withdrawn first (a fill already playing ends
+    // within its bar and does not block it). A replaced Rise's fill goes with that Rise.
+    const withFill = riseFill && Boolean(track?.fills?.length);
+    const fillId = withFill ? nextRequestId.current++ : 0;
+    if (withFill) {
+      const waiting = fillRef.current;
+      if (isFillPending(waiting) && waiting.kind !== 'rise' && waiting.status !== 'playing') {
+        void engine.cancelFill(waiting.requestId);
+      }
+      setFill({ requestId: fillId, status: 'sending', kind: 'rise', phrase: 0, from: songStepRef.current, partner: requestId });
+    }
     const request: SceneRequest = {
       requestId,
       target,
@@ -1004,7 +1101,7 @@ export function useInstrument() {
       timing: 'bar',
       status: 'sending',
       mix: copyMix(mix),
-      build: { bars },
+      build: { bars, ...(withFill ? { fill: { fillId } } : {}) },
       ...(sets ? { lanes: sets } : {}),
     };
     buildShown.current = { requestId, last: null, touched: new Set(), shownAt: 0 };
@@ -1020,6 +1117,7 @@ export function useInstrument() {
       request.generation,
       undefined,
       data ? { requestId: nextRequestId.current++, data } : undefined,
+      { accent, ...(withFill ? { fill: { requestId: fillId, index: FILL_INDEX } } : {}) },
     );
   }
 
@@ -1035,6 +1133,13 @@ export function useInstrument() {
     }
     const restore: ScenePatterns = {};
     for (const lane of lanes) restore[lane] = before.patterns[lane] ?? { factory: true };
+    // A Fill into still waiting goes as a whole: its fill too, never just its scene
+    // (NIGHT8_DECISIONS §5). Once its fill plays, the restore replaces the scene and
+    // the fill plays out its bar.
+    const waiting = fillRef.current;
+    if (isFillPending(waiting) && waiting.kind === 'into' && waiting.status !== 'playing') {
+      void engine.cancelFill(waiting.requestId);
+    }
     // Undo the scene immediately, through the same engine scheduler and smoothing
     // as a launch. A previous queued scene is replaced, so it cannot land later.
     requestLaunch('restoreScene', 0, before.mix, restore, 'now');
@@ -1050,10 +1155,17 @@ export function useInstrument() {
     setSceneTimingState(value);
   }
 
-  /** How many bars a build rises over; picking one also switches Build on. */
+  /** How many bars a build rises over; picking one also switches Build on. Remembered. */
   function setBuildBars(bars: BuildBars) {
     lastBuildBars.current = bars;
     setBuildBarsState(bars);
+    writeChoice(PREF.riseBars, bars);
+  }
+
+  /** Finish with Fill: the next Rise ends with the track's fill. Remembered. */
+  function setRiseFill(on: boolean) {
+    setRiseFillState(on);
+    writeChoice(PREF.riseFill, on ? 'on' : 'off');
   }
 
   /** Withdraw the queued launch. Says so if it had already landed. */
@@ -1147,6 +1259,15 @@ export function useInstrument() {
     if (!scenes) return;
     setScenes(duplicateScene(scenes, from, to));
     setSceneStatus(`Copied ${sceneName(from)} into the ${sceneName(to)} slot`);
+  }
+
+  /** Crash on launch, on or off, for one slot: a project edit (one undo step), never automatic. */
+  function setSceneCrashSlot(slot: SceneSlotId, crash: boolean) {
+    if (!scenes) return;
+    const next = setSceneCrash(scenes, slot, crash);
+    if (next === scenes) return;
+    setScenes(next);
+    setSceneStatus(crash ? `${sceneName(slot)} crashes on launch` : `${sceneName(slot)} launches without a crash`);
   }
 
   function resetSceneSlot(slot: SceneSlotId) {
@@ -1317,47 +1438,130 @@ export function useInstrument() {
 
   // ---- Fill ------------------------------------------------------------------
 
+  /** Fill at: the next bar, or the phrase's last bar. Remembered. */
+  function setFillAt(at: FillAt) {
+    setFillAtState(at);
+    writeChoice(PREF.fillAt, at);
+  }
+
+  /** The phrase length a Phrase end fill ends on. Remembered. */
+  function setPhraseBars(bars: PhraseBars) {
+    setPhraseBarsState(bars);
+    writeChoice(PREF.phraseBars, bars);
+  }
+
   /**
-   * The Fill button. First press queues the track's fill for the next bar; a second
-   * press before it starts cancels it; a press while it plays does nothing.
+   * The Fill button. First press queues the track's fill, for the next bar or the end of
+   * the phrase (Fill at); a second press before it starts cancels it; a press while it
+   * plays does nothing. A Fill into's or a Rise's fill is canceled from its own control.
    */
   function toggleFill() {
     const f = fillRef.current;
-    if (f.status === 'playing') return;
-    if (f.status === 'sending' || f.status === 'queued') {
-      void engine.cancelFill(f.id);
+    if (isFillPending(f)) {
+      if (f.kind === 'plain' && f.status !== 'playing') void engine.cancelFill(f.requestId);
       return;
     }
     if (!playing || mixing || !track?.fills?.length) return;
     const id = nextRequestId.current++;
-    setFill({ status: 'sending', id });
-    engine.queueFill(id, 0, generations.current[liveDeck]);
+    const phrase = fillPhrase(fillAt, phraseBars);
+    setFill({ requestId: id, status: 'sending', kind: 'plain', phrase, from: songStepRef.current });
+    engine.queueFill(id, FILL_INDEX, generations.current[liveDeck], phrase);
   }
 
-  useEffect(
-    () =>
-      engine.onSceneEvents((events) => {
-        for (const e of events) {
-          if (e.kind < EVENT.fillQueued || e.kind > EVENT.fillRejected) continue;
-          const f = fillRef.current;
-          if (e.requestId !== f.id) continue;
-          let next: typeof f;
-          if (e.kind === EVENT.fillQueued) next = { ...f, status: 'queued', bar: e.a };
-          else if (e.kind === EVENT.fillStarted) next = { ...f, status: 'playing' };
-          else next = { status: 'idle', id: f.id };
-          fillRef.current = next;
-          setFill(next);
-          if (e.kind === EVENT.fillQueued) setSceneStatus(`Fill queued for bar ${e.a}`);
-          if (e.kind === EVENT.fillStarted) setSceneStatus('Fill playing');
-          if (e.kind === EVENT.fillCancelled) {
-            const message = e.a === 10 ? 'Fill cancelled' : `Fill cancelled: ${REASON[e.a] ?? ''}`;
-            setSceneStatus((previous) => previous.includes('cancelled') ? `${previous} · ${message}` : message);
-          }
-          if (e.kind === EVENT.fillRejected) setSceneStatus(`Fill not started: ${REASON[e.a] ?? 'refused'}`);
+  /**
+   * Fill → Drop (docs/NIGHT8_PROTOCOL.md, Fill into): the fill at the current Fill at,
+   * and the fourth scene slot landing on the onset it ends, as one request. Its lanes
+   * ride along as a launch's do. Pressing it again cancels the whole request (or, once
+   * the fill plays, the scene; the fill plays out its bar). A plain fill still waiting is
+   * upgraded: withdrawn, and this queued in its place.
+   */
+  function toggleFillInto() {
+    if (!scenes || mixing || !track?.fills?.length) return;
+    const f = fillRef.current;
+    if (isFillPending(f)) {
+      if (f.kind === 'into') {
+        void engine.cancelFill(f.requestId);
+        return;
+      }
+      // A Rise's fill, or any fill already playing, holds the one slot until it ends.
+      if (f.kind === 'rise' || f.status === 'playing') return;
+    }
+    const pending = isPending(sceneRequest) ? sceneRequest : null;
+    if (pending?.target === 'restoreScene') return;
+    const scene = scenes.slots.find((s) => s.slot === FILL_INTO_SLOT);
+    if (!scene) return;
+    if (!(engine.booted && playing)) {
+      setSceneStatus(`Fill → ${scene.name} needs playback: press Play first`);
+      return;
+    }
+    // The upgrade: the waiting plain fill goes first. The worklet takes messages in
+    // order, so its slot is free by the time the Fill into arrives.
+    if (isFillPending(f) && f.kind === 'plain') void engine.cancelFill(f.requestId);
+    if (!beforeScenes.current || (!activeScene && !(pending && isSceneSlot(pending.target)))) {
+      beforeScenes.current = { mix: workingMix(), patterns: patterns.sceneLanes(), changedLanes: new Set() };
+    }
+    const sets = Object.keys(scene.patterns).length ? scene.patterns : undefined;
+    const fillId = nextRequestId.current++;
+    const sceneId = nextRequestId.current++;
+    const phrase = fillPhrase(fillAt, phraseBars);
+    const request: SceneRequest = {
+      requestId: sceneId,
+      target: FILL_INTO_SLOT,
+      revision: scene.revision,
+      generation: generations.current[liveDeck],
+      timing: 'bar',
+      status: 'sending',
+      mix: copyMix(scene),
+      fillInto: { fillId },
+      ...(sets ? { lanes: sets } : {}),
+    };
+    sceneRequestRef.current = request;
+    setSceneRequest(request);
+    setFill({ requestId: fillId, status: 'sending', kind: 'into', phrase, from: songStepRef.current, partner: sceneId });
+    // Compiled now, as for a launch, so the lanes that land are the ones pressed for.
+    const data = sets ? patterns.scenePayload(sets) : undefined;
+    engine.queueFillInto(fillId, sceneId, FILL_INDEX, sceneVector(request.mix), request.generation, {
+      phrase,
+      accent: scene.crash ? SCENE_ACCENT.crash : SCENE_ACCENT.none,
+      ...(data ? { patterns: { requestId: nextRequestId.current++, data } } : {}),
+    });
+  }
+
+  /**
+   * One fill event (kinds 11-15, 51, 52) for the fill the host follows. A plain fill
+   * speaks on the status line for itself; a linked one only says when it starts
+   * ("Filling into Drop"), and its scene or Rise says the rest. Unlinked, it is a plain
+   * fill from then on.
+   */
+  function onFillEvent(e: WireEvent) {
+    const f = fillRef.current;
+    if (!f || e.requestId !== f.requestId) return;
+    const next = foldFillJob(f, { kind: e.kind, id: e.requestId, a: e.a, b: e.b }, songStepRef.current);
+    if (next === f) return;
+    setFill(next);
+    const linked = f.kind !== 'plain' && e.kind !== EVENT.fillUnlinked;
+    if (linked) {
+      const r = sceneRequestRef.current;
+      if (e.kind === EVENT.fillStarted && r && r.requestId === next.partner && isPending(r)) {
+        const filling = markFilling(r, next.requestId);
+        if (filling !== r) {
+          sceneRequestRef.current = filling;
+          setSceneRequest(filling);
+          setSceneStatus(`Filling into ${sceneName(r.target)}`);
         }
-      }),
-    [],
-  );
+      }
+      return;
+    }
+    if (e.kind === EVENT.fillQueued) setSceneStatus(fillQueuedStatus(next));
+    if (e.kind === EVENT.fillStarted) setSceneStatus('Fill playing');
+    if (e.kind === EVENT.fillCancelled) {
+      const message = e.a === 10 ? 'Fill cancelled' : `Fill cancelled: ${REASON[e.a] ?? ''}`;
+      setSceneStatus((previous) => previous.includes('cancelled') ? `${previous} · ${message}` : message);
+    }
+    if (e.kind === EVENT.fillRejected) setSceneStatus(`Fill not started: ${fillRefusal(e.a)}`);
+  }
+  const fillEventRef = useRef(onFillEvent);
+  fillEventRef.current = onFillEvent;
 
   // ---- Panic -----------------------------------------------------------------
 
@@ -1371,7 +1575,7 @@ export function useInstrument() {
     cancelTempoGlide();
     clearHeld('echo');
     clearHeld('filter');
-    setFill({ status: 'idle', id: fillRef.current.id });
+    setFill(null);
     setSceneRequest((r) => (isPending(r) ? { ...r, status: 'cancelled', reason: 5 } : r));
     setPlaying(false);
     setMixing(null);
@@ -1430,6 +1634,26 @@ export function useInstrument() {
     (!sameMix({ params: project.params, stems: project.stems }, activeScene.mix) ||
       (activeLanes !== undefined && patterns.differsFrom(activeLanes)));
 
+  // Why Fill or Fill → Drop can't be pressed now, or null. The one fill slot is the
+  // engine's: a Rise's fill holds it until it has played, and so does any fill playing.
+  const fillIntoName = sceneName(FILL_INTO_SLOT);
+  const busyFill = isFillPending(fill) ? fill : null;
+  const needsPlay = mixing ? 'Available after mix' : !playing ? 'Press play first: a fill needs playback' : null;
+  const riseHoldsFill = busyFill?.kind === 'rise' ? 'The Rise ends with a fill' : null;
+  const fillUnavailable =
+    needsPlay ??
+    riseHoldsFill ??
+    (busyFill?.kind === 'into'
+      ? busyFill.status === 'playing'
+        ? `Filling into ${fillIntoName}`
+        : `Fill → ${fillIntoName} is queued: press it again to cancel`
+      : null);
+  const fillIntoUnavailable =
+    needsPlay ??
+    (isPending(sceneRequest) && sceneRequest.target === 'restoreScene' ? 'Restoring previous mix' : null) ??
+    riseHoldsFill ??
+    (busyFill && busyFill.kind === 'plain' && busyFill.status === 'playing' ? 'Available when the fill ends' : null);
+
   const actions = useStable({
     togglePlay,
     selectTrack,
@@ -1457,6 +1681,10 @@ export function useInstrument() {
     releaseEffect,
     releaseAllEffects,
     toggleFill,
+    toggleFillInto,
+    setFillAt,
+    setPhraseBars,
+    setRiseFill,
     panic,
     brake,
     backspin,
@@ -1470,6 +1698,7 @@ export function useInstrument() {
     renameSceneSlot,
     duplicateSceneSlot,
     resetSceneSlot,
+    setSceneCrashSlot,
     captureCompare,
     listenCompare,
     updateCompare,
@@ -1525,9 +1754,18 @@ export function useInstrument() {
     /** Build mode's bar count, or null when a pad press switches on one onset. */
     buildBars,
     sceneStatus,
+    /** The fill the engine holds (plain, a Fill into's or a Rise's), or null. */
     fill,
-    fillName: track?.fills?.[0]?.name ?? 'Fill',
+    fillName: track?.fills?.[FILL_INDEX]?.name ?? 'Fill',
     hasFill: Boolean(track?.fills?.length),
+    /** Fill at, the phrase length and Finish with Fill: app preferences. */
+    fillAt,
+    phraseBars,
+    riseFill,
+    /** The name of the scene Fill → Drop leads into (the fourth slot, as named now). */
+    fillIntoName,
+    fillUnavailable,
+    fillIntoUnavailable,
     compare,
     compareModified:
       compare?.listening != null &&
