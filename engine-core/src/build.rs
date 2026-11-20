@@ -560,7 +560,12 @@ impl Engine {
             .pending_fill()
             .filter(|f| f.link == Link::Build(b.request_id))?;
         let ahead = if b.started && f.start_serial != u64::MAX {
-            (f.start_serial - self.scheduler.serial() - 1) as usize
+            // Saturating: the fill is always still ahead here (it starts on its own
+            // onset, and this runs between render calls), but nothing on this path may
+            // panic or wrap into a walk of 2^64 steps.
+            f.start_serial
+                .saturating_sub(self.scheduler.serial() + 1)
+                .min(crate::track::STEPS as u64 * 8) as usize
         } else {
             // Starts on the next bar line; its last bar begins `bars - 1` bars later.
             scheduler::fill_offset(&self.transport, 0) + ((b.bars - 1) * BAR) as usize
