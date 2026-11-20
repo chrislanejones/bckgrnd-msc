@@ -19,7 +19,7 @@ pub(crate) fn drum(index: usize, hits: &[(usize, f32)]) -> Vec<f32> {
 }
 
 /// A payload replacing note lane `index` with `notes` (step, len, pitch).
-fn notes(index: usize, notes: &[(usize, f32, f32)]) -> Vec<f32> {
+pub(crate) fn notes(index: usize, notes: &[(usize, f32, f32)]) -> Vec<f32> {
     let mut out = vec![1.0, index as f32, 1.0, notes.len() as f32];
     for (step, len, pitch) in notes {
         out.extend([*step as f32, *len, 0.8, 0.0, 1.0, *pitch]);

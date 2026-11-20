@@ -234,3 +234,56 @@ both kept), 11-17-2026. Protocol: `docs/NIGHT7_PROTOCOL.md`, "The UI: Rise".
 | 1440 × 900 scene toolbar | 74 px with Rise off and with Rise on (no growth) |
 | 1280 × 800 | +38 px while Rise is on (parked) |
 | 390 phone | Switch on uses Beat / Bar short labels; the bars row adds 56 px while Rise is on |
+
+# Night 8 session log: stabilize Night 7 (11-19-2026)
+
+Branch `night8/stabilize`, worktree `~/ai-repo/bckgrnd-night8`, from main `fdfcdf8`
+(PRs #5–#9 merged). Three agents worked in their own worktrees and branches, merged
+here without conflicts: `night8/staging` (Silas), `night8/responsive` (Lacey),
+`night8/rise-tests` (Tara). Phase 5–6 docs written here.
+
+## Baseline
+
+`main` at `fdfcdf8`: `build:netlify`, `verify:web` and `verify:desktop` all pass (682 ok).
+
+## What changed
+
+| Area | Change | Commit |
+|---|---|---|
+| Engine | Linked lanes wait in a `staged` slot until their scene or build is accepted; a refusal withdraws only its own lanes | `2e29170` |
+| Engine tests | `staging_tests.rs` (refuse, replace, cancel, interrupt); Rise gaps: cancel at half for 2/4/8 bars, tempo change, `end_score`, lanes at 2/4/8 | `2e29170`, `6bf6852` |
+| Host | A track load mid-Rise restores the effect knobs from the engine's last base; a re-announced Rise moves its bar | `56c5fc2` |
+| Host/UI tests | `verify-ui-rise.mjs`: bar counts, cancel, ownership, lanes, Stop/seek/Panic/load, tempo, not playing, loop; `check-scenes` 36 → 52 | `2e42e6e` |
+| Layout | 1180–1279 mouse tier, inspector fits 1280×800 and 1024×768, 1366×640 drawer, Output fold remembered | `ccf3ece` |
+| Layout tests | Viewport checks for all of the above, plus 375 px no sideways scroll and 44 px targets | `11b4944` |
+| Docs | `docs/releases/RC_MANUAL_CHECKLIST_11-19-2026.md`, `docs/NIGHT8_SPEC.md` | `fa682c9`, `566d477` |
+
+## Decisions
+
+| Decision | Why |
+|---|---|
+| Three lane slots (`staged`, `scene_lanes`, `build_lanes`) moved by value | Accept-then-claim makes staging transactional with no allocation on the audio path |
+| No DSP change for slow Rise | Measured a staircase at 70 bpm (up to 141 ms flat per 16th); Chris listens first |
+| Output fold saved like the knob-drag preference | Same localStorage pattern as `knobPrefs.tsx`; default folded |
+| Knob-drag preference moved into the inspector tab row | Recovers the height that let 1024×768 fit, knobs stay 48 px |
+
+## Gates (integrated branch)
+
+| Gate | Result |
+|---|---|
+| `cargo fmt --check`, `clippy --all-targets -D warnings` | clean |
+| `cargo test --release` | 292 pass, 1 ignored (filter-step measurement) |
+| wasm | 240,185 → 240,448 B (+263) |
+| bench (same run) | build +0.3%, lanes +0.4% vs plain |
+| typecheck, lint, check:scenes | pass (lint: the 5 known hook warnings) |
+| `verify:web` | pass |
+| `verify:desktop` | pass, 10/10 steps |
+
+Agents' runs: Silas's first `verify:desktop` failed the known "held arrow" editor flake
+under load, then passed 10/10; Lacey's first run failed 4 of her own new checks (hidden
+Output knobs counted), fixed in `11b4944`.
+
+## Not done here (needs Chris)
+
+Listening (Rise at 70–140 bpm, filter stepping, live vs WAV), the Linux candidate rebuild
+and .deb checks, MCP resync before rc.2, and the 7 open questions in `NIGHT8_SPEC.md`.

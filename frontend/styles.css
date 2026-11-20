@@ -925,6 +925,14 @@ body {
   display: none;
 }
 
+/* A pill that is an icon: square, the icon centered. Its name is its tooltip. */
+.segment-icon {
+  display: inline-grid;
+  place-items: center;
+  min-width: var(--control-sm);
+  padding-inline: 0.5rem;
+}
+
 /* Pads: raised, pressable, lit when latched. */
 .pad {
   display: grid;
@@ -1970,7 +1978,42 @@ body {
 
 .inspector-body {
   display: grid;
-  gap: calc(var(--section-gap) + var(--space-1));
+  gap: var(--section-gap);
+}
+
+/* The tabs, and the knob drag setting beside them as the panel's header action. */
+.inspector-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.inspector-head > .segmented-block:first-child {
+  flex: 1 1 auto;
+}
+
+/* A short word beside its pills, one row high. */
+.inspector-setting {
+  flex: none;
+}
+
+.inspector-setting > .segmented-block {
+  grid-template-columns: auto auto;
+  align-items: center;
+  column-gap: var(--space-2);
+}
+
+/* A knob row's spare third column carries the group's note (Resonance: "Heard as it
+   closes"), level with the dials, so the note costs no height. */
+.knob-row-note {
+  align-self: center;
+  margin: 0;
+  font-size: var(--text-label);
+  font-weight: 600;
+  line-height: 1.2;
+  color: var(--color-muted);
+  text-align: center;
+  text-wrap: balance;
 }
 
 .inspector-group {
@@ -2058,6 +2101,14 @@ body {
 @media (pointer: coarse), (max-width: 899.98px) {
   .inspector-fold-toggle {
     min-height: var(--control-md);
+  }
+
+  .inspector-head .segment {
+    min-height: var(--control-md);
+  }
+
+  .inspector-head .segment-icon {
+    min-width: var(--control-md);
   }
 }
 
@@ -2177,6 +2228,13 @@ body {
    preview scroll inside it. Where the actions wrap, a lane reserves both rows, and the
    selection row a second one for a selected note's fields. */
 @media (min-width: 900px) {
+  /* A short window (1366 x 640) gives the drawer the room its body needs rather than
+     scrolling it at rest: up to all but the transport and a 3rem strip of the decks,
+     so it still reads as a drawer over the page. Taller windows keep 78dvh. */
+  .drawer.editor.is-open {
+    max-height: min(44rem, max(78dvh, calc(100dvh - var(--transport-h) - 3rem)));
+  }
+
   .editor-body {
     --editor-rows: 1;
     height: calc(
@@ -3537,10 +3595,6 @@ html[data-control-drag="yes"] * {
   text-wrap: balance;
 }
 
-.inspector-setting {
-  padding-top: var(--section-gap);
-  border-top: 1px solid var(--color-line);
-}
 
 /* Focused: the ring goes round the dial, where the eye is. */
 .knob-dial:has(.knob-input:focus-visible) {
@@ -4313,6 +4367,43 @@ html[data-control-drag="yes"] * {
     flex: 1 1 100%;
     justify-content: flex-start;
     margin-inline-start: 0;
+  }
+}
+
+/* A mouse on a narrow desktop panel (the 1180-1279px three-column layout, and 900-1000px
+   with the inspector docked) keeps the desktop toolbar. Switch on, Rise's 2 · 4 · 8,
+   Drum fill and Cancel need about 37.4rem in one row; below 38rem the pills tighten,
+   the gaps close to 8px and the word "bars" goes (each pill is still named "Rise over
+   N bars"), so the row holds about 33rem even with "Fill · Bar 16" and choosing Rise
+   never adds a row. The stacked, thumb-sized rows below 34rem stay for touch. */
+@media (pointer: fine) and (min-width: 900px) {
+  @container scenes (max-width: 38rem) {
+    .scene-toolbar {
+      column-gap: var(--space-2);
+    }
+
+    .scene-toolbar .segment {
+      padding-inline: 0.5rem;
+    }
+
+    .scene-build-unit {
+      display: none;
+    }
+  }
+
+  @container scenes (max-width: 34rem) {
+    .scene-toolbar {
+      display: flex;
+      gap: var(--group-gap) var(--space-2);
+    }
+
+    .scene-toolbar > .segmented-block {
+      grid-template-columns: auto auto;
+    }
+
+    .scene-strip-actions > button {
+      flex: none;
+    }
   }
 }
 
