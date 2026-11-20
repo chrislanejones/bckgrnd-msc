@@ -25,7 +25,7 @@ import {
 import type { StemId, TrackArrangement, TrackSummary } from './types';
 
 export const PROJECT_FORMAT = 'bckgrnd-msc/project';
-export const PROJECT_VERSION = 3;
+export const PROJECT_VERSION = 4;
 
 type Option = { value: number; label: string };
 
@@ -157,6 +157,12 @@ export type Scene = {
    * left alone by a launch. Version 2 scenes have none.
    */
   patterns: ScenePatterns;
+  /**
+   * Crash on launch (version 4, ADR-022): the launch, Rise landing or Fill into that
+   * commits this scene during playback carries the engine's crash accent. Always
+   * stated on disk; only the user turns it on.
+   */
+  crash: boolean;
 };
 
 export type Scenes = { slots: Scene[] };
@@ -207,7 +213,7 @@ export function factoryScene(
       solo: false,
     };
   }
-  return { slot, name: recipe.name, factory: recipeId, revision, params, stems, patterns: {} };
+  return { slot, name: recipe.name, factory: recipeId, revision, params, stems, patterns: {}, crash: false };
 }
 
 /** The four factory scenes for a track: each slot gets the recipe of the same name. */
@@ -253,10 +259,11 @@ const sameKeySet = (o: Loose, keys: readonly string[]) => {
 };
 
 /**
- * Read version 2 scenes strictly. Every slot present, in order, complete; any
- * unknown key, wrong type, out-of-range value or pattern reference refuses the whole
- * set. Nothing is clamped or filled. Mirrors `Contract::readScenes()`, error text
- * included.
+ * Read stored scenes strictly. Every slot present, in order, complete; any unknown
+ * key, wrong type, out-of-range value or pattern reference refuses the whole set.
+ * Nothing is clamped or filled, except what a migration states: a scene older than
+ * version 4 has no `crash` key and reads as `crash: false`. Mirrors
+ * `Contract::readScenes()`, error text included.
  */
 export function readScenes(raw: unknown, version: number = PROJECT_VERSION): Scenes {
   const fail = (why: string): never => {
@@ -265,7 +272,7 @@ export function readScenes(raw: unknown, version: number = PROJECT_VERSION): Sce
   if (!isObj(raw) || !sameKeys(raw, ['slots'])) fail('expected an object with only "slots"');
   const slots = (raw as Loose).slots;
   if (!Array.isArray(slots) || slots.length !== SCENE_SLOTS.length) fail(`expected ${SCENE_SLOTS.length} slots`);
-  const keys = ['slot', 'name', 'factory', 'revision', 'params', 'stems', 'patterns'];
+  const keys = ['slot', 'name', 'factory', 'revision', 'params', 'stems', 'patterns', ...(version >= 4 ? ['crash'] : [])];
   const factoryIds = FACTORY_SCENES.map((r) => r.id);
   return {
     slots: (slots as unknown[]).map((scene, i) => {
@@ -294,6 +301,10 @@ export function readScenes(raw: unknown, version: number = PROJECT_VERSION): Sce
       const emptyPatterns = (isObj(pats) && Object.keys(pats).length === 0) || (Array.isArray(pats) && pats.length === 0);
       if (version < 3 && !emptyPatterns) fail(`slot ${slot} refers to patterns, which this version does not support`);
       const patterns = version < 3 ? {} : readScenePatterns(pats, slot);
+      // Version 4 states the accent on every scene; v3 → v4 writes it off, so nothing
+      // that plays changes.
+      if (version >= 4 && typeof sc.crash !== 'boolean') fail(`slot ${slot} crash must be true or false`);
+      const crash = version >= 4 ? (sc.crash as boolean) : false;
 
       if (!isObj(sc.params) || !sameKeySet(sc.params, SCENE_PARAMS)) {
         fail(`slot ${slot} must hold exactly the scene parameters`);
@@ -332,6 +343,7 @@ export function readScenes(raw: unknown, version: number = PROJECT_VERSION): Sce
         params,
         stems,
         patterns,
+        crash,
       };
     }),
   };
@@ -353,10 +365,11 @@ const isObj = (v: unknown): v is Loose => typeof v === 'object' && v !== null &&
 const isEmptyMap = (v: unknown) => (isObj(v) && Object.keys(v).length === 0) || (Array.isArray(v) && v.length === 0);
 
 /**
- * Read any supported document into a complete version 2 project.
+ * Read any supported document into a complete current-version project.
  *
- * Accepts version 2, version 1 (migrated by adding the track's factory scenes and
- * changing nothing else), and a legacy preset (no `format`). Refuses an unknown
+ * Accepts version 4; version 3 (every scene gains `crash: false`); version 2 (adds
+ * empty `locks`); version 1 (adds the track's factory scenes, changing nothing else);
+ * and a legacy preset (no `format`). Refuses an unknown
  * format or a newer version rather than half-reading it, and refuses a version 2
  * document whose scenes do not read cleanly. `lookup` resolves the track, so a
  * project for a track this build does not have is refused too.

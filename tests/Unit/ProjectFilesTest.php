@@ -122,4 +122,72 @@ final class ProjectFilesTest extends TestCase
             catch (\RuntimeException) { $this->assertSame([], $store->records()); }
         }
     }
+    /** A snapshot saved before Night 8: the same shape with a version 3 project. */
+    private function v3Snapshot(int $revision): array
+    {
+        $s = $this->snapshot($revision);
+        $s['project']['version'] = 3;
+        foreach ($s['project']['scenes']['slots'] as $i => $scene) unset($s['project']['scenes']['slots'][$i]['crash']);
+        return $s;
+    }
+    public function test_a_version_3_snapshot_still_validates_and_saves_as_version_4(): void
+    {
+        $old = $this->v3Snapshot(1);
+        ProjectFiles::validate($old);
+        $store = new ProjectFiles($this->dir); $store->write($old, 0);
+        $current = $store->records()[0]->current->project;
+        $this->assertSame(4, $current->version, 'writers always write v4');
+        foreach ($current->scenes->slots as $scene) $this->assertFalse($scene->crash);
+    }
+    public function test_saving_keeps_the_older_v3_revision_byte_for_byte(): void
+    {
+        // A v3 record written by the previous app, exactly as it wrote it.
+        $old = $this->v3Snapshot(1);
+        $legacy = json_encode(['current' => $old], JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
+        // `{}` the way the old writer stored it, not PHP's `[]`.
+        $legacy = str_replace(['"patterns": []', '"events": []'], ['"patterns": {}', '"events": {}'], $legacy);
+        file_put_contents($this->dir.'/release-test.json', $legacy);
+        $before = json_decode($legacy);
+
+        // A recovery copy (written while editing, before any Save) leaves it alone.
+        $store = new ProjectFiles($this->dir); $store->write($this->snapshot(2), null);
+        $record = $store->records()[0];
+        $this->assertEquals($before->current, $record->current, 'the saved v3 revision is untouched by a recovery write');
+        $this->assertSame(3, $record->current->project->version);
+        $this->assertSame(4, $record->recovery->project->version);
+
+        // Save: the new revision is v4 and the v3 one becomes `previous`, still v3.
+        $with = $this->snapshot(2); $with['project']['scenes']['slots'][3]['crash'] = true;
+        $store->write($with, 1);
+        $record = $store->records()[0];
+        $this->assertEquals($before->current, $record->previous);
+        $this->assertSame(3, $record->previous->project->version);
+        $this->assertSame(4, $record->current->project->version);
+        $this->assertTrue($record->current->project->scenes->slots[3]->crash, 'the crash round-trips through the store');
+        $this->assertInstanceOf(\stdClass::class, $record->previous->project->patterns, 'empty maps stay maps');
+    }
+    public function test_saving_over_a_v3_file_keeps_it_as_bak_and_writes_v4(): void
+    {
+        $file = $this->dir.'/older.bckgrnd.json';
+        file_put_contents($file, json_encode($this->v3Snapshot(1), JSON_PRETTY_PRINT));
+        $original = file_get_contents($file);
+        ProjectFiles::saveFile($file, $this->snapshot(2));
+        $this->assertSame($original, file_get_contents($file.'.bak'), 'the original v3 file is kept, byte for byte');
+        $this->assertSame(4, json_decode(file_get_contents($file))->project->version);
+    }
+    public function test_a_future_project_version_is_refused_by_name(): void
+    {
+        $future = $this->snapshot(1); $future['project']['version'] = 5;
+        try { ProjectFiles::validate($future); $this->fail('A version 5 project was accepted'); }
+        catch (\RuntimeException $e) { $this->assertStringContainsString('Project version 5 is newer than this app understands (4)', $e->getMessage()); }
+    }
+    public function test_a_v3_snapshot_that_carries_crash_or_was_repaired_is_refused(): void
+    {
+        $carrying = $this->v3Snapshot(1); $carrying['project']['scenes']['slots'][0]['crash'] = false;
+        $clamped = $this->v3Snapshot(1); $clamped['project']['params']['fx.filter'] = 9;
+        foreach ([$carrying, $clamped] as $bad) {
+            try { ProjectFiles::validate($bad); $this->fail('A non-canonical v3 snapshot was accepted'); }
+            catch (\InvalidArgumentException|\RuntimeException $e) { $this->assertNotEmpty($e->getMessage()); }
+        }
+    }
 }

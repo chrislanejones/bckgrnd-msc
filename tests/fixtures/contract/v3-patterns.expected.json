@@ -1,6 +1,6 @@
 {
     "format": "bckgrnd-msc/project",
-    "version": 3,
+    "version": 4,
     "name": "Warehouse, scenes",
     "trackId": "warehouse",
     "params": {
@@ -265,7 +265,8 @@
                             "sourceRevision": 2
                         }
                     }
-                }
+                },
+                "crash": false
             },
             {
                 "slot": "sparse",
@@ -336,7 +337,8 @@
                         "solo": false
                     }
                 },
-                "patterns": {}
+                "patterns": {},
+                "crash": false
             },
             {
                 "slot": "build",
@@ -407,7 +409,8 @@
                         "solo": false
                     }
                 },
-                "patterns": {}
+                "patterns": {},
+                "crash": false
             },
             {
                 "slot": "drop",
@@ -478,7 +481,8 @@
                         "solo": false
                     }
                 },
-                "patterns": {}
+                "patterns": {},
+                "crash": false
             }
         ]
     }

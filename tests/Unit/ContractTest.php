@@ -175,7 +175,7 @@ final class ContractTest extends TestCase
     {
         $v2 = json_decode((string) file_get_contents(dirname(__DIR__).'/fixtures/contract/v2-captured.input.json'), true);
         $v3 = json_decode((string) json_encode(Contract::migrate($v2)), true);
-        $this->assertSame(3, $v3['version']);
+        $this->assertSame(Contract::VERSION, $v3['version'], 'carried all the way to the current version');
         $this->assertSame([], $v3['patterns'], 'no lane is overridden: every lane plays the factory pattern');
         $this->assertSame(['lanes' => [], 'events' => []], $v3['locks']);
         foreach (['params', 'stems'] as $key) {
@@ -184,6 +184,64 @@ final class ContractTest extends TestCase
         foreach ($v3['scenes']['slots'] as $i => $scene) {
             $this->assertSame([], $scene['patterns'], 'a migrated scene sets no lanes, so launching it leaves patterns alone');
             $this->assertEquals($v2['scenes']['slots'][$i]['stems'], $scene['stems']);
+        }
+    }
+
+    public function test_migrating_version_3_to_4_states_crash_off_and_changes_nothing_else(): void
+    {
+        $path = dirname(__DIR__).'/fixtures/contract/v3-patterns.input.json';
+        $before = (string) file_get_contents($path);
+        $v3 = json_decode($before, true);
+        $v4 = json_decode((string) json_encode(Contract::migrate($v3)), true);
+        $this->assertSame(4, $v4['version']);
+        foreach ($v4['scenes']['slots'] as $scene) {
+            $this->assertArrayHasKey('crash', $scene, 'stated on every scene, not left to a default');
+            $this->assertFalse($scene['crash'], 'a migrated scene never crashes until the user says so');
+        }
+        // Everything else is exactly what the v3 reader read: nothing that plays changes.
+        $strip = static function (array $p): array {
+            unset($p['version']);
+            foreach ($p['scenes']['slots'] as $i => $scene) {
+                unset($p['scenes']['slots'][$i]['crash']);
+            }
+
+            return $p;
+        };
+        $expectedV3 = json_decode((string) file_get_contents(dirname(__DIR__).'/fixtures/contract/v3-patterns.expected.json'), true);
+        $this->assertEquals($strip($expectedV3), $strip($v4));
+        $this->assertSame($before, (string) file_get_contents($path), 'reading never rewrites the original');
+    }
+
+    public function test_a_crash_round_trips_on_the_scene_it_was_set_on(): void
+    {
+        $doc = json_decode((string) file_get_contents(dirname(__DIR__).'/fixtures/contract/v4-crash.input.json'), true);
+        $once = json_decode((string) json_encode(Contract::migrate($doc)), true);
+        $twice = json_decode((string) json_encode(Contract::migrate($once)), true);
+        $this->assertSame($once, $twice, 'reading what was written gives it back unchanged');
+        $this->assertSame(
+            ['full' => false, 'sparse' => false, 'build' => false, 'drop' => true],
+            array_column($once['scenes']['slots'], 'crash', 'slot'),
+        );
+    }
+
+    public function test_a_fresh_project_and_a_reset_scene_have_no_crash(): void
+    {
+        $fresh = Contract::fromTrack(Library::findOrFail('warehouse'));
+        $this->assertSame(4, $fresh['version']);
+        foreach ($fresh['scenes']['slots'] as $scene) {
+            $this->assertFalse($scene['crash']);
+        }
+    }
+
+    public function test_an_unknown_future_version_is_refused_not_half_read(): void
+    {
+        $doc = json_decode((string) file_get_contents(dirname(__DIR__).'/fixtures/contract/v4-crash.input.json'), true);
+        $doc['version'] = 5;
+        try {
+            Contract::migrate($doc);
+            $this->fail('A version 5 project was read');
+        } catch (\InvalidArgumentException $e) {
+            $this->assertSame('Project version 5 is newer than this app understands (4).', $e->getMessage());
         }
     }
 
