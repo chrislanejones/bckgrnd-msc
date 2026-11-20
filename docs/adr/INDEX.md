@@ -33,3 +33,11 @@ and is marked `(backfilled)`.
 | [017](017-php-writes-variations-static-build-uses-a-hash-matched-catalog.md) | PHP writes variations; the static build serves a catalog matched by source hash and never substitutes | draft | 2026-11-04 |
 | [018](018-library-updates-warn-and-save-as-links-the-file.md) | A library update warns instead of locking a project out (no-callback readers still refuse); desktop Save As ties a project to its file | accepted | 2026-11-07 |
 | [019](019-timed-builds-are-engine-requests-over-2-4-or-8-bars.md) | A timed build is one engine request that moves the base over 2, 4 or 8 bars from the next bar line, lands exactly with its linked lanes, and restores the starting base on cancel; the UI calls it Rise | draft | 2026-11-17 |
+| [020](020-fills-can-end-on-a-phrase-line-passed-per-request.md) | A fill can end on a phrase line of 2, 4, 8 or 16 bars from step 0, passed with each request; the loop wrap counts and a late press rolls to the next phrase; phrase length is an app preference, not project data | draft | 2026-11-19 |
+| [021](021-a-fill-and-its-landing-are-one-atomic-linked-request.md) | A fill and the scene or Rise it leads into are one atomic request with a shared deadline: both queued or neither, and a cancel never leaves half | draft | 2026-11-19 |
+| [022](022-a-scene-may-carry-an-explicit-crash-accent.md) | A scene may carry a crash accent, off by default and never automatic, fired when it commits during playback (amends ADR-008) | draft | 2026-11-19 |
+| [023](023-scene-accents-bump-the-project-to-version-4.md) | The scene accent bumps the project to version 4 with a v3 → v4 migration, not an optional v3 field | draft | 2026-11-19 |
+
+Night 8's new event numbers (51 and up) and reason 11 (`linked`) are protocol, not
+decisions. They belong in a Night 8 protocol doc, alongside `docs/NIGHT7_PROTOCOL.md`,
+not in an ADR.
