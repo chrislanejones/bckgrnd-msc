@@ -173,3 +173,81 @@ The host API is `EngineHost.queueFillInto(fillId, sceneId, index, values, genera
 events with `foldFillEvent` (`FillRequest`: status, bar, `linkedTo`, `landing`); the
 scene part is an ordinary launch for `foldSceneEvent`. When the scene is applied the
 worklet carries it to the idle deck, as for a launch.
+
+## Rise + Fill
+
+A Rise (Night 7 build) can **finish with a fill**: "Finish with Fill" on Rise, off by
+default (`NIGHT8_DECISIONS.md` §6). The fill plays the Rise's last bar; the landing scene
+and its lanes commit on the next downbeat, which is the existing build landing.
+
+### The request
+
+| Engine (`engine-core/src/build.rs`) | Returns |
+|---|---|
+| `queue_build_with(request_id: u32, bars: u32, target: &[f32], land: &[f32], fill_id: u32, fill_index: u32) -> u8` | 0 accepted, else the reason |
+| `queue_build(request_id, bars, target, land) -> u8` | Unchanged: `queue_build_with(…, 0, 0)` |
+| `cancel_build(request_id) -> bool`, `cancel_fill(fill_id) -> bool` | Either cancels the whole request (below) |
+
+- `fill_id` 0 means no fill. Otherwise it is the fill's own request id, and `fill_index`
+  the track's fill to play.
+- Lanes are staged before it with `link` = the build's id, as in Night 7.
+
+### One transaction
+
+Everything is checked before anything changes, and a refusal of any part refuses all of
+it. With a fill, the refusal posts `fill rejected` (15) and `build rejected` (45), in
+that order, with the same reason and the same `b` (`build::detail`), and the build's
+staged lanes are withdrawn with that reason. Without a fill nothing changes from Night 7.
+
+| Refused for | Reason | `b` (part) |
+|---|---|---|
+| Bars, target, landing (Night 7) | 1 | 1, 2, 3 |
+| Lanes (worklet) | 1 | 4 |
+| **No such fill** | 1 | **5 fill** |
+| **A fill already waiting** (a plain fill, a Fill into, another Rise's) | 8 | **5 fill** |
+| Stopped, scratch/brake/backspin (Night 7) | 7, 3 | 0 |
+
+A fill **playing** now does not block it: that fill ends within a bar, and the Rise's
+fill plays its last bar, at least a bar after the Rise starts. A waiting fill does
+block it, except the fill of the Rise this one replaces, which goes with that Rise.
+
+Accepted with a fill, the events are `build queued`, `fill queued` (the bar the fill
+plays: the Rise's last) and `fill linked` (51: `a` = the build's id, `b` = the landing
+step).
+
+### Timing
+
+- The fill waits, unarmed, in the one pending fill slot. When the build starts (its bar
+  line, onset serial S) the fill is armed for S + bars × 16 − 16: the build's last bar,
+  counted in onsets like the build, so tempo changes and loops move neither.
+- On the landing onset the Night 7 order stands: pattern edit → a scene due there →
+  **the build writes its target, commits the landing scene and swaps in its lanes** →
+  `fill_onset` (**the fill ends**) → that step's notes.
+- A loop change re-announces the waiting Rise (`build queued`) and its fill (`fill
+  queued`). While the Rise runs, the fill's onset is fixed, but the step it falls on may
+  move, so `fill queued` is posted again with the new bar.
+- While a Rise + Fill waits or runs, the fill slot is taken: Fill and Fill into are
+  refused (8) until its fill has started.
+
+### Cancel and replace
+
+| Situation | Outcome |
+|---|---|
+| `cancel_build(id)` or `cancel_fill(fill_id)` before the fill starts | Build cancelled (10) and restored, its lanes withdrawn (10), the fill cancelled (10). Events in that order |
+| Either during the fill's bar | The same for the build; the fill runs its bar (Night 3) and is unlinked (52, 10) |
+| Stop, seek, scratch, brake, backspin, Play while playing, track load, panic, the host's `cancel_pending` | Both cancelled, or the fill cut short, with that reason (as Night 7 and Night 3) |
+| A scene commits over the Rise (Night 7), or a newer Rise replaces it, or the idle deck's follower | `build replaced`; the waiting fill is cancelled with **reason 11 (linked)**, or, if it is already playing, unlinked (52, 11) and played out |
+
+Reason 11 is used only here: the fill did nothing wrong and nobody cancelled it; it went
+because the Rise it belonged to was replaced.
+
+### Worklet messages
+
+| Host → worklet | Engine call |
+|---|---|
+| `build` gains `fillId?, fillIndex?` | `queue_build_with(requestId, bars, target, land, fillId ?? 0, fillIndex ?? 0)`. Refusals made in the worklet post `fill rejected` for the fill too |
+
+The host API is `EngineHost.queueBuild(requestId, bars, target, generation, land?,
+patterns?, {fill: {requestId, index}})`, with `BUILD_REJECTED_PART.fill` (5),
+`BUILD_REJECTED_PART.lanes` (4) and `ENGINE_REASON.linked` (11). The fill folds with
+`foldFillEvent` like any other (`linkedTo` = the build's id).

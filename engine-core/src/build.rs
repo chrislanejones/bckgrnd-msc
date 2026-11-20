@@ -27,7 +27,9 @@
 //! lanes are parsed in the message handler, swapped in by pointer, and if withdrawn
 //! on the audio path, parked until the next message rather than freed.
 
-use crate::scheduler::{self, event, reason, slot_kind, SlotKind, FX_BASE, SCENE_LEN, STEM_FIELDS};
+use crate::scheduler::{
+    self, event, reason, slot_kind, walk, Link, SlotKind, FX_BASE, SCENE_LEN, STEM_FIELDS,
+};
 use crate::{band_db, Engine};
 
 #[cfg(target_arch = "wasm32")]
@@ -50,6 +52,9 @@ pub mod detail {
     /// and the engine refuses a bad payload as `patterns rejected` before the build is
     /// asked for.
     pub const LANES: u8 = 4;
+    /// The fill it finishes with (Rise + Fill, `docs/NIGHT8_PROTOCOL.md`): no such fill
+    /// (reason 1), or the fill slot already taken (reason 8).
+    pub const FILL: u8 = 5;
 }
 
 /// The fx slots, as engine indices into [`Engine::fx_base`].
@@ -196,29 +201,56 @@ impl Engine {
     /// when it is refused (with its reason), cancelled (with the cancel's), or
     /// replaced (10), exactly as a scene's linked lanes are.
     pub fn queue_build(&mut self, request_id: u32, bars: u32, target: &[f32], land: &[f32]) -> u8 {
+        self.queue_build_with(request_id, bars, target, land, 0, 0)
+    }
+
+    /// [`Engine::queue_build`], finishing with a fill (Rise + Fill,
+    /// `docs/NIGHT8_PROTOCOL.md`) when `fill_id` is not 0: fill `fill_index` of the track
+    /// plays the build's last bar, and the landing scene and lanes commit on the next
+    /// downbeat, the onset the build ends on, as without one.
+    ///
+    /// One transaction: everything is checked before anything changes, and a refusal of
+    /// any part refuses all of it. It posts `build rejected` (45) and, with a fill,
+    /// `fill rejected` (15) for `fill_id`, both with the reason and `b` = the part
+    /// ([`detail`]; 5 the fill: no such fill, reason 1, or a fill already waiting,
+    /// reason 8). Accepted with a fill, it posts `build queued`, `fill queued` (the bar
+    /// the fill plays) and `fill linked` (51: `a` = this build, `b` = the landing step).
+    /// Cancelled, the fill goes with it, or runs its bar unlinked if already playing;
+    /// replaced, the fill is cancelled (or unlinked) with reason 11.
+    #[allow(clippy::too_many_arguments)]
+    pub fn queue_build_with(
+        &mut self,
+        request_id: u32,
+        bars: u32,
+        target: &[f32],
+        land: &[f32],
+        fill_id: u32,
+        fill_index: u32,
+    ) -> u8 {
+        let with_fill = fill_id != 0;
+        let replacing = self.build.as_ref().map(|b| b.request_id);
         let (verdict, part) = if !BUILD_BARS.contains(&bars) {
             (reason::INVALID, detail::BARS)
         } else if !scheduler::valid(target) {
             (reason::INVALID, detail::TARGET)
         } else if !land.is_empty() && !scheduler::valid(land) {
             (reason::INVALID, detail::LAND)
+        } else if with_fill && !self.fill_args_ok(fill_index, 0, 0) {
+            (reason::INVALID, detail::FILL)
         } else if !self.transport.playing {
             (reason::NOT_PLAYING, detail::NONE)
         } else if self.transport.in_gesture() {
             (reason::TRANSPORT, detail::NONE)
+        } else if with_fill && self.scheduler.fill_busy_for_build(replacing) {
+            (reason::ALREADY_PLAYING, detail::FILL)
         } else {
             (reason::OK, detail::NONE)
         };
         if verdict != reason::OK {
-            self.scheduler.events.push(
-                event::BUILD_REJECTED,
-                request_id,
-                verdict as f64,
-                part as f64,
-            );
-            // A refused build's staged lanes are withdrawn; anything else stays as it
-            // was, including the lanes a pending scene or build was accepted with.
-            self.refuse_staged(request_id, verdict);
+            // Both parts are refused, and the build's staged lanes are withdrawn;
+            // anything else stays as it was, including the lanes a pending scene or
+            // build was accepted with.
+            self.refuse_linked(fill_id, request_id, event::BUILD_REJECTED, verdict, part);
             return verdict;
         }
 
@@ -238,6 +270,9 @@ impl Engine {
                     0.0,
                 );
                 self.withdraw_build_lanes(reason::USER);
+                // Its fill was its last bar: it goes with it.
+                self.scheduler
+                    .drop_fill(Link::Build(old.request_id), reason::LINKED);
                 if old.started {
                     // Hand over mid-build: the mix stays where the old one left it until
                     // this one starts, and a cancel still goes back to before the old one.
@@ -270,7 +305,22 @@ impl Engine {
         // Freed here, in the message handler: a replaced build's lanes, and any a scene
         // withdrew on the audio path since the last message.
         self.parked = None;
+        if with_fill {
+            // Unarmed until the build starts: the build times it.
+            self.scheduler.queue_fill(
+                fill_id,
+                fill_index,
+                0,
+                Link::Build(request_id),
+                &self.transport,
+            );
+        }
         self.announce_build();
+        if let Some(land) = self.announce_build_fill() {
+            self.scheduler
+                .events
+                .push(event::FILL_LINKED, fill_id, request_id as f64, land as f64);
+        }
         reason::OK
     }
 
@@ -491,6 +541,32 @@ impl Engine {
             .push(event::BUILD_QUEUED, id, (step / 16 + 1) as f64, step as f64);
     }
 
+    /// Report `fill queued` for the build's fill (Rise + Fill), waiting or running,
+    /// with the bar it plays: the build's last. Returns the predicted landing step, or
+    /// `None` when the build has no fill waiting. Called when it is queued and whenever
+    /// the loop changes. The fill's onset count is the build's, so only the step moves.
+    pub(crate) fn announce_build_fill(&mut self) -> Option<usize> {
+        let b = self.build.as_ref()?;
+        let f = *self
+            .scheduler
+            .pending_fill()
+            .filter(|f| f.link == Link::Build(b.request_id))?;
+        let ahead = if b.started && f.start_serial != u64::MAX {
+            (f.start_serial - self.scheduler.serial() - 1) as usize
+        } else {
+            // Starts on the next bar line; its last bar begins `bars - 1` bars later.
+            scheduler::fill_offset(&self.transport, 0) + ((b.bars - 1) * BAR) as usize
+        };
+        let step = walk(&self.transport, ahead);
+        self.scheduler.events.push(
+            event::FILL_QUEUED,
+            f.request_id,
+            (step / 16 + 1) as f64,
+            step as f64,
+        );
+        Some(walk(&self.transport, ahead + BAR as usize))
+    }
+
     /// Cancel the build, queued or running, reporting `why`, and put back the base it
     /// started from (except the slots the user took back). True if there was one.
     #[inline(never)]
@@ -509,6 +585,8 @@ impl Engine {
             .events
             .push(event::BUILD_CANCELLED, b.request_id, why as f64, 0.0);
         self.withdraw_build_lanes(why);
+        // One transaction: its fill goes with it (an interrupt has already ended it).
+        self.scheduler.drop_fill(Link::Build(b.request_id), why);
         true
     }
 
@@ -521,6 +599,8 @@ impl Engine {
                 .events
                 .push(event::BUILD_REPLACED, b.request_id, by as f64, 0.0);
             self.withdraw_build_lanes(reason::USER);
+            self.scheduler
+                .drop_fill(Link::Build(b.request_id), reason::LINKED);
         }
     }
 
@@ -566,6 +646,9 @@ impl Engine {
             }
             b.keep = 0;
             b.touched = 0;
+            // Its fill plays the last bar, ending on the onset the build lands.
+            let last_bar = self.scheduler.serial() + (b.total() - BAR) as u64;
+            self.scheduler.arm_fill(Link::Build(b.request_id), last_bar);
             self.scheduler.events.push(
                 event::BUILD_STARTED,
                 b.request_id,

@@ -787,3 +787,390 @@ fn loop_and_tempo_changes_while_linked() {
     assert!(seen.contains(&ev(event::SCENE_APPLIED, 2, 64.0, 0.0)));
     assert_eq!(e.scheduler.serial(), due, "landed on its onset");
 }
+
+// -- Rise + Fill ----------------------------------------------------------------
+
+/// The lanes a Rise lands with: a kick lane whose only hit is a 0.55 on `step`.
+fn rise_lanes(step: usize) -> Vec<f32> {
+    drum(0, &[(step, 0.55)])
+}
+
+/// Playing with step 5 just fired; a 2-bar Rise (build 2, lanes 30) into scene(0.9)
+/// finishing with fill 1: it starts on 16, the fill plays 32..47, and it lands on 48.
+fn rise_with_fill() -> Engine {
+    let mut e = playing_at(5);
+    let target = target_from(&e.base());
+    assert_eq!(e.queue_patterns(30, timing::BAR, 2, &rise_lanes(48)), 0);
+    assert_eq!(
+        e.queue_build_with(2, 2, &target, &scene(0.9), 1, 0),
+        reason::OK
+    );
+    events(&mut e);
+    e
+}
+
+/// For 2, 4 and 8 bars: the fill plays the Rise's last bar, and the landing scene and
+/// its lanes commit on the next downbeat, the onset the build ends, before that step's
+/// notes, as the fill ends. The landing kick is the scene's lanes'.
+#[test]
+fn rise_with_fill_plays_the_last_bar_and_lands_on_the_downbeat() {
+    for bars in [2u32, 4, 8] {
+        let end = 16 + bars as usize * 16;
+        let fill = end - 16;
+        let mut e = playing_at(5);
+        let target = target_from(&e.base());
+        assert_eq!(e.queue_patterns(30, timing::BAR, 2, &rise_lanes(end)), 0);
+        assert_eq!(
+            e.queue_build_with(2, bars, &target, &scene(0.9), 1, 0),
+            reason::OK
+        );
+        assert_eq!(
+            events(&mut e),
+            vec![
+                ev(event::BUILD_QUEUED, 2, 2.0, 16.0),
+                ev(event::FILL_QUEUED, 1, (fill / 16 + 1) as f64, fill as f64),
+                ev(event::FILL_LINKED, 1, 2.0, end as f64),
+            ],
+            "{bars} bars"
+        );
+        assert_eq!(e.pending_fill(), Some(1));
+        render_until_fired(&mut e, end as i32 + 1);
+        let at = trigger_sample(&e, end);
+        assert!(committed_before_notes(&e, 2, at), "{bars} bars");
+        for step in fill..end {
+            assert_eq!(drums_on(&e, step), vec![(CLAP, 0.7)], "{bars} bars, {step}");
+        }
+        assert_eq!(
+            drums_on(&e, fill - 1),
+            vec![(HATS, 0.4)],
+            "{bars} bars: no fill before the last bar"
+        );
+        assert_eq!(
+            drums_on(&e, end),
+            vec![(KICK, 0.55), (HATS, 0.4)],
+            "{bars} bars"
+        );
+        assert_eq!(e.channels[KICK].vol, 0.9, "{bars} bars: the landing scene");
+        let got = events(&mut e);
+        assert!(got.contains(&ev(event::FILL_STARTED, 1, fill as f64, 0.0)));
+        let landing: Vec<_> = got.iter().copied().filter(|x| x[2] == end as f64).collect();
+        assert_eq!(
+            landing,
+            vec![
+                ev(event::PATTERNS_APPLIED, 30, end as f64, 0.0),
+                ev(event::BUILD_APPLIED, 2, end as f64, 1.0),
+                ev(event::FILL_ENDED, 1, end as f64, 0.0),
+            ],
+            "{bars} bars"
+        );
+    }
+}
+
+/// Every part a Rise + Fill can be refused for refuses all of it: `fill rejected` and
+/// `build rejected` with the same reason and part, its own lanes withdrawn, and a scene,
+/// its lanes and a fill already pending left exactly as they were.
+#[test]
+fn a_refused_rise_with_fill_changes_nothing() {
+    use crate::scene::build::detail as part;
+    type Send = fn(&mut Engine, &[f32; SCENE_LEN]) -> u8;
+    let cases: [(&str, Send, u8, u8); 5] = [
+        (
+            "3 bars",
+            |e, t| e.queue_build_with(2, 3, t, &[], 1, 0),
+            reason::INVALID,
+            part::BARS,
+        ),
+        (
+            "bad target",
+            |e, _| e.queue_build_with(2, 2, &scene(f32::NAN), &[], 1, 0),
+            reason::INVALID,
+            part::TARGET,
+        ),
+        (
+            "bad landing",
+            |e, t| e.queue_build_with(2, 2, t, &scene(0.9)[..9], 1, 0),
+            reason::INVALID,
+            part::LAND,
+        ),
+        (
+            "no such fill",
+            |e, t| e.queue_build_with(2, 2, t, &[], 1, 4),
+            reason::INVALID,
+            part::FILL,
+        ),
+        (
+            "a fill already queued",
+            |e, t| {
+                assert_eq!(e.queue_fill_at(9, 0, 4, 0), 0);
+                events(e);
+                e.queue_build_with(2, 2, t, &[], 1, 0)
+            },
+            reason::ALREADY_PLAYING,
+            part::FILL,
+        ),
+    ];
+    for (name, send, why, at) in cases {
+        let mut e = playing_at(5);
+        let target = target_from(&e.base());
+        e.queue_patterns(50, timing::BAR, 5, &drum(2, &[(16, 0.9)]));
+        assert_eq!(e.queue_scene(5, timing::BAR, &scene(0.3)), 0);
+        events(&mut e);
+        e.queue_patterns(30, timing::BAR, 2, &rise_lanes(48));
+        assert_eq!(send(&mut e, &target), why, "{name}");
+        assert_eq!(
+            events(&mut e),
+            vec![
+                ev(event::FILL_REJECTED, 1, why as f64, at as f64),
+                ev(event::BUILD_REJECTED, 2, why as f64, at as f64),
+                ev(event::PATTERNS_CANCELLED, 30, why as f64, 0.0),
+            ],
+            "{name}"
+        );
+        assert_eq!(
+            (e.pending_build(), e.pending_scene()),
+            (None, Some(5)),
+            "{name}"
+        );
+        let busy = why == reason::ALREADY_PLAYING;
+        assert_eq!(e.pending_fill(), busy.then_some(9), "{name}");
+        let seen = run_until(&mut e, event::SCENE_APPLIED, 5);
+        assert!(
+            seen.contains(&ev(event::SCENE_APPLIED, 5, 16.0, 0.0)),
+            "{name}"
+        );
+        assert_eq!(lane_ids(&e), vec![50], "{name}");
+    }
+
+    let mut stopped = fill_engine();
+    let target = target_from(&stopped.base());
+    assert_eq!(
+        stopped.queue_build_with(2, 2, &target, &[], 1, 0),
+        reason::NOT_PLAYING
+    );
+    assert_eq!(
+        events(&mut stopped),
+        vec![
+            ev(event::FILL_REJECTED, 1, 7.0, 0.0),
+            ev(event::BUILD_REJECTED, 2, 7.0, 0.0),
+        ]
+    );
+    // Without a fill, a refused build reports as it always has: no fill event.
+    let mut plain = playing_at(5);
+    assert_eq!(plain.queue_build_with(2, 3, &target, &[], 0, 0), 1);
+    assert_eq!(
+        events(&mut plain),
+        vec![ev(event::BUILD_REJECTED, 2, 1.0, 1.0)]
+    );
+}
+
+/// Cancel ends both. Before the fill starts, from either part, the build is cancelled
+/// (and restored), its lanes withdrawn and the fill cancelled, all with 10. In the last
+/// bar the same, except that the fill runs its bar, unlinked.
+#[test]
+fn cancelling_a_rise_with_fill_ends_both() {
+    for by_fill in [false, true] {
+        for in_last_bar in [false, true] {
+            let label = format!("by fill {by_fill}, in the last bar {in_last_bar}");
+            let mut e = rise_with_fill();
+            let before = e.base();
+            render_until_fired(&mut e, if in_last_bar { 36 } else { 20 });
+            events(&mut e);
+            let cancelled = if by_fill {
+                e.cancel_fill(1)
+            } else {
+                e.cancel_build(2)
+            };
+            assert!(cancelled, "{label}");
+            let fill = if in_last_bar {
+                ev(event::FILL_UNLINKED, 1, 10.0, 0.0)
+            } else {
+                ev(event::FILL_CANCELLED, 1, 10.0, 0.0)
+            };
+            assert_eq!(
+                events(&mut e),
+                vec![
+                    ev(event::BUILD_CANCELLED, 2, 10.0, 0.0),
+                    ev(event::PATTERNS_CANCELLED, 30, 10.0, 0.0),
+                    fill,
+                ],
+                "{label}"
+            );
+            render_until_fired(&mut e, 49);
+            let got = events(&mut e);
+            if in_last_bar {
+                assert_eq!(got, vec![ev(event::FILL_ENDED, 1, 48.0, 0.0)], "{label}");
+            } else {
+                assert!(got.is_empty(), "{label}: {got:?}");
+            }
+            assert_eq!(e.base(), before, "{label}: restored");
+            assert!(applies(&e).is_empty() && lane_ids(&e).is_empty(), "{label}");
+            assert_eq!(drums_on(&e, 48), vec![(KICK, 1.0), (HATS, 0.4)], "{label}");
+        }
+    }
+}
+
+/// Stop, seek, scratch, brake, backspin, a track load, panic and the host's cancel end
+/// both parts with their reason, waiting, running, or in the fill's bar.
+#[test]
+fn interruptions_end_a_rise_with_fill() {
+    type Action = fn(&mut Engine);
+    let cases: [(&str, Action, u8); 6] = [
+        ("stop", |e| e.stop(), reason::STOPPED),
+        ("seek", |e| e.jump(0), reason::TRANSPORT),
+        ("scratch", |e| e.scratch_start(), reason::TRANSPORT),
+        ("brake", |e| e.brake(), reason::TRANSPORT),
+        ("load", |e| e.load_track(fill_track()), reason::TRACK),
+        ("panic", |e| e.panic(), reason::PANIC),
+    ];
+    for at in [10, 20, 40] {
+        for (name, action, why) in cases {
+            let label = format!("{name} after step {at}");
+            let mut e = rise_with_fill();
+            render_until_fired(&mut e, at);
+            events(&mut e);
+            action(&mut e);
+            let got = events(&mut e);
+            let fill = if at == 40 {
+                ev(event::FILL_ENDED, 1, -1.0, why as f64)
+            } else {
+                ev(event::FILL_CANCELLED, 1, why as f64, 0.0)
+            };
+            for want in [
+                ev(event::BUILD_CANCELLED, 2, why as f64, 0.0),
+                ev(event::PATTERNS_CANCELLED, 30, why as f64, 0.0),
+                fill,
+            ] {
+                assert!(
+                    got.contains(&want),
+                    "{label}: {want:?} missing from {got:?}"
+                );
+            }
+            assert_eq!(
+                (
+                    e.pending_build(),
+                    e.active_build(),
+                    e.pending_fill(),
+                    e.active_fill()
+                ),
+                (None, None, None, None),
+                "{label}"
+            );
+        }
+    }
+}
+
+/// Replaced, the Rise's fill goes with it, reason 11 (linked): cancelled while it
+/// waits, unlinked and played out if it is already playing. A scene committing over the
+/// Rise, and a newer Rise (which may finish with a fill of its own), both replace it.
+#[test]
+fn a_replaced_rise_takes_its_fill_along() {
+    // A Bar scene committing on 32, the first step of the fill's bar.
+    let mut e = rise_with_fill();
+    render_until_fired(&mut e, 20);
+    assert_eq!(e.queue_scene(3, timing::BAR, &scene(0.2)), 0);
+    events(&mut e);
+    let seen = run_until(&mut e, event::SCENE_APPLIED, 3);
+    for want in [
+        ev(event::BUILD_REPLACED, 2, 3.0, 0.0),
+        ev(event::PATTERNS_CANCELLED, 30, 10.0, 0.0),
+        ev(event::FILL_CANCELLED, 1, 11.0, 0.0),
+        ev(event::SCENE_APPLIED, 3, 32.0, 0.0),
+    ] {
+        assert!(seen.contains(&want), "{want:?} missing from {seen:?}");
+    }
+    assert!(!seen.iter().any(|x| x[0] == event::FILL_STARTED as f64));
+
+    // A Beat scene committing on 36, inside the fill's bar: the fill runs on, unlinked.
+    let mut e = rise_with_fill();
+    render_until_fired(&mut e, 33);
+    assert_eq!(e.queue_scene(3, timing::BEAT, &scene(0.2)), 0);
+    events(&mut e);
+    let seen = run_until(&mut e, event::FILL_ENDED, 1);
+    for want in [
+        ev(event::BUILD_REPLACED, 2, 3.0, 0.0),
+        ev(event::FILL_UNLINKED, 1, 11.0, 0.0),
+        ev(event::SCENE_APPLIED, 3, 36.0, 0.0),
+        ev(event::FILL_ENDED, 1, 48.0, 0.0),
+    ] {
+        assert!(seen.contains(&want), "{want:?} missing from {seen:?}");
+    }
+
+    // A newer Rise with its own fill, while the first waits: accepted (latest wins).
+    let mut e = rise_with_fill();
+    let target = target_from(&e.base());
+    assert_eq!(e.queue_build_with(3, 4, &target, &[], 4, 0), reason::OK);
+    assert_eq!(
+        events(&mut e),
+        vec![
+            ev(event::BUILD_REPLACED, 2, 3.0, 0.0),
+            ev(event::PATTERNS_CANCELLED, 30, 10.0, 0.0),
+            ev(event::FILL_CANCELLED, 1, 11.0, 0.0),
+            ev(event::BUILD_QUEUED, 3, 2.0, 16.0),
+            ev(event::FILL_QUEUED, 4, 5.0, 64.0),
+            ev(event::FILL_LINKED, 4, 3.0, 80.0),
+        ]
+    );
+    let seen = run_until(&mut e, event::BUILD_APPLIED, 3);
+    assert!(seen.contains(&ev(event::FILL_STARTED, 4, 64.0, 0.0)));
+    assert!(seen.contains(&ev(event::FILL_ENDED, 4, 80.0, 0.0)));
+    assert!(seen.contains(&ev(event::BUILD_APPLIED, 3, 80.0, 0.0)));
+}
+
+/// A loop change while the Rise waits re-announces both parts; the build's count is in
+/// onsets, so in a 1-bar loop a 2-bar Rise starts on the loop's bar line, the fill plays
+/// the second pass, and the landing is the third. A tempo change moves nothing.
+#[test]
+fn loop_and_tempo_changes_under_a_rise_with_fill() {
+    let mut e = rise_with_fill();
+    e.set_loop(1);
+    assert_eq!(
+        events(&mut e),
+        vec![
+            ev(event::BUILD_QUEUED, 2, 1.0, 0.0),
+            ev(event::FILL_QUEUED, 1, 1.0, 0.0),
+        ]
+    );
+    let seen = run_until(&mut e, event::BUILD_APPLIED, 2);
+    let at: Vec<_> = seen
+        .iter()
+        .copied()
+        .filter(|x| x[1] == 1.0 || x[1] == 2.0)
+        .filter(|x| x[0] != event::BUILD_PROGRESS as f64)
+        .collect();
+    assert_eq!(
+        at,
+        vec![
+            ev(event::BUILD_STARTED, 2, 0.0, 2.0),
+            ev(event::FILL_STARTED, 1, 0.0, 0.0),
+            ev(event::BUILD_APPLIED, 2, 0.0, 1.0),
+            ev(event::FILL_ENDED, 1, 0.0, 0.0),
+        ]
+    );
+
+    // Running: the loop moves where the fill's onset falls, so it is re-announced; the
+    // onset itself stays put.
+    let mut e = rise_with_fill();
+    render_until_fired(&mut e, 20);
+    let due = e.scheduler.serial() + 12;
+    events(&mut e);
+    e.set_bpm(120.0);
+    e.set_loop(1);
+    assert_eq!(events(&mut e), vec![ev(event::FILL_QUEUED, 1, 2.0, 16.0)]);
+    let seen = run_until(&mut e, event::FILL_STARTED, 1);
+    assert!(seen.contains(&ev(event::FILL_STARTED, 1, 16.0, 0.0)));
+    assert_eq!(e.scheduler.serial(), due, "started on its counted onset");
+}
+
+/// While a Rise holds the fill slot for its last bar, a plain fill or a Fill into is
+/// refused (8): one waiting fill, no stacking.
+#[test]
+fn a_rise_with_fill_holds_the_fill_slot() {
+    let mut e = rise_with_fill();
+    assert_eq!(e.queue_fill(7, 0), reason::ALREADY_PLAYING);
+    assert_eq!(
+        e.queue_fill_into(8, 0, 4, 0, 9, &scene(0.5)),
+        reason::ALREADY_PLAYING
+    );
+    assert_eq!(e.pending_fill(), Some(1));
+    assert_eq!(e.pending_build(), Some(2));
+}

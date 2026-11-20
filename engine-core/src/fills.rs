@@ -152,13 +152,15 @@ impl Engine {
     /// neither queued nor playing, or is a plain fill already playing (it runs its bar).
     ///
     /// - A plain fill waiting for its bar: `fill cancelled`, reason 10.
-    /// - Tied to a scene (Fill into): the whole request is cancelled, as
-    ///   [`Engine::cancel_scene`] on the scene would. A waiting fill is cancelled with
-    ///   it; one already playing runs its bar and is unlinked (52).
+    /// - Tied to a scene (Fill into) or a build (Rise + Fill): the whole request is
+    ///   cancelled, as [`Engine::cancel_scene`] or [`Engine::cancel_build`] on its
+    ///   partner would. A waiting fill is cancelled with it; one already playing runs
+    ///   its bar and is unlinked (52).
     pub fn cancel_fill(&mut self, request_id: u32) -> bool {
         match self.scheduler.fill_state(request_id) {
             Some((true, Link::None)) => self.scheduler.cancel_fill(request_id),
             Some((_, Link::Scene(scene))) => self.cancel_scene(scene),
+            Some((_, Link::Build(build))) => self.cancel_build(build),
             _ => false,
         }
     }

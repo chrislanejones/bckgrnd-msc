@@ -283,6 +283,7 @@ export const REASON: Record<number, string> = {
   8: 'already playing',
   9: 'the track changed',
   10: 'cancelled',
+  11: 'its Rise was replaced',
 };
 
 /**

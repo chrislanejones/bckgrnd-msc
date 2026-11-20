@@ -90,6 +90,12 @@ type Inbound =
       patterns?: Float32Array;
       /** The request id those lanes carry in events. */
       patternsId?: number;
+      /**
+       * Rise + Fill (docs/NIGHT8_PROTOCOL.md): the fill that plays the build's last bar,
+       * with its own request id. Absent (or 0): no fill.
+       */
+      fillId?: number;
+      fillIndex?: number;
     }
   | { type: 'cancelBuild'; requestId: number }
   | {
@@ -654,6 +660,14 @@ class EngineProcessor extends AudioWorkletProcessor {
    */
   private queueBuild(message: Extract<Inbound, { type: 'build' }>): void {
     const requestId = message.requestId >>> 0;
+    const fillId = (message.fillId ?? 0) >>> 0;
+    // A Rise + Fill is one request: a refusal made here refuses its fill too, in the
+    // engine's own shape (`fill rejected` first, with the same reason and part).
+    const refuse = (reason: number, part: number) =>
+      this.postSceneEvents(this.live, [
+        ...(fillId !== 0 ? [EVENT_FILL_REJECTED, fillId, reason, part] : []),
+        EVENT_BUILD_REJECTED, requestId, reason, part,
+      ]);
     const { target, land } = message;
     let refusal = 0;
     if (target == null || target.length !== SCENE_LEN) refusal = REASON_INVALID;
@@ -667,7 +681,7 @@ class EngineProcessor extends AudioWorkletProcessor {
     const engine = this.engines[this.live];
     if (refusal === 0 && !engine) refusal = REASON_NOT_PLAYING;
     if (refusal !== 0 || !engine) {
-      this.postSceneEvents(this.live, [EVENT_BUILD_REJECTED, requestId, refusal, 0]);
+      refuse(refusal, 0);
       return;
     }
     // The lanes the build sets go in first, linked to it, exactly as a scene's do: the
@@ -677,7 +691,7 @@ class EngineProcessor extends AudioWorkletProcessor {
     if (message.patterns && message.patterns.length > 0) {
       const linkId = (message.patternsId ?? 0) >>> 0;
       if (engine.queue_patterns(linkId, 2, requestId, message.patterns) !== 0) {
-        this.postSceneEvents(this.live, [EVENT_BUILD_REJECTED, requestId, REASON_INVALID, BUILD_PART_LANES]);
+        refuse(REASON_INVALID, BUILD_PART_LANES);
         return;
       }
     }
@@ -687,11 +701,15 @@ class EngineProcessor extends AudioWorkletProcessor {
     // than wrapping into a valid length on the way to a u32.
     const b = message.bars;
     const bars = b === 2 || b === 4 || b === 8 ? b : 0;
-    const verdict = engine.queue_build(
+    const fi = message.fillIndex ?? 0;
+    const fillIndex = Number.isInteger(fi) && fi >= 0 ? fi : 0xffffffff;
+    const verdict = engine.queue_build_with(
       requestId,
       bars,
       this.buildTarget,
       land != null ? this.buildLand : EngineProcessor.NO_LAND,
+      fillId,
+      fillIndex >>> 0,
     );
     if (verdict === 0) {
       this.buildPendingId = requestId;

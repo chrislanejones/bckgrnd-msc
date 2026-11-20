@@ -695,6 +695,7 @@ impl Engine {
         self.scheduler.announce(&self.transport);
         self.scheduler.announce_fill(&self.transport);
         self.announce_build();
+        self.announce_build_fill();
     }
 
     /// Cue or seek. Cancels a pending scene and fill and ends an active fill

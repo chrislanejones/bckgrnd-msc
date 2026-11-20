@@ -343,12 +343,13 @@ pub struct PendingFill {
     pub link: Link,
 }
 
-/// What a fill is tied to (`docs/NIGHT8_PROTOCOL.md`): nothing, or the scene it leads
-/// into (Fill into).
+/// What a fill is tied to (`docs/NIGHT8_PROTOCOL.md`): nothing, the scene it leads
+/// into (Fill into), or the build whose last bar it plays (Rise + Fill).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Link {
     None,
     Scene(u32),
+    Build(u32),
 }
 
 /// The fill playing now.
@@ -456,11 +457,15 @@ impl Scheduler {
     /// phrase end) and report `fill queued` with the bar and step it starts on.
     ///
     /// A Fill into's scene moves with it, to the onset the fill ends on, and is
-    /// re-announced (`scene queued`) with its landing.
+    /// re-announced (`scene queued`) with its landing. A build's fill is the build's to
+    /// time and announce (`Engine::announce_build_fill`), so it is left alone here.
     #[inline(never)]
     pub fn announce_fill(&mut self, t: &Transport) {
         let serial = self.serial;
         let Some(f) = self.fill.as_mut() else { return };
+        if matches!(f.link, Link::Build(_)) {
+            return;
+        }
         let ahead = fill_offset(t, f.phrase_bars);
         f.start_serial = serial + 1 + ahead as u64;
         let (id, start_serial, link) = (f.request_id, f.start_serial, f.link);
@@ -499,7 +504,8 @@ impl Scheduler {
     /// already checked the arguments and refused a request while
     /// [`Scheduler::fill_busy`].
     ///
-    /// `link` ties it to the request it leads into.
+    /// `link` ties it to the request it leads into. A build's fill is not timed here:
+    /// it waits, unarmed, until the build starts and [`Scheduler::arm_fill`] sets it.
     pub fn queue_fill(
         &mut self,
         request_id: u32,
@@ -516,6 +522,22 @@ impl Scheduler {
             link,
         });
         self.announce_fill(t);
+    }
+
+    /// Time the waiting fill tied to `partner` to start on onset serial `start`.
+    pub fn arm_fill(&mut self, partner: Link, start: u64) {
+        if let Some(f) = self.fill.as_mut().filter(|f| f.link == partner) {
+            f.start_serial = start;
+        }
+    }
+
+    /// Whether the fill slot is taken for a build's fill: a fill is waiting that is not
+    /// `replacing`'s (the build the new one replaces, whose fill goes with it). A fill
+    /// playing now does not count: it ends within a bar, and a build's fill plays the
+    /// build's last bar, at least a bar after the build starts.
+    pub fn fill_busy_for_build(&self, replacing: Option<u32>) -> bool {
+        self.fill
+            .is_some_and(|f| replacing.is_none_or(|id| f.link != Link::Build(id)))
     }
 
     /// The pending fill's id and link, and whether it is pending (true) or playing

@@ -219,5 +219,49 @@ fn night_8_requests_neither_allocate_nor_free_on_the_audio_path() {
     assert!(rig.call("cancel_scene", |e| e.cancel_scene(7)));
     rig.until(event::FILL_ENDED);
 
+    // Rise + Fill: queued, started, the fill on its last bar, landed.
+    let rise = a_scene(&rig.e, 0.4);
+    assert_eq!(
+        rig.call("queue_build_with", |e| e
+            .queue_build_with(8, 2, &rise, &drop, 9, 0)),
+        0
+    );
+    rig.call("set_loop", |e| e.set_loop(2));
+    rig.until(event::BUILD_STARTED);
+    rig.until(event::FILL_STARTED);
+    rig.until(event::BUILD_APPLIED);
+    rig.call("set_loop", |e| e.set_loop(0));
+
+    // Cancelled in its last bar (the fill runs on, unlinked), and replaced by a scene
+    // committing over it on the audio path (its fill cancelled there).
+    assert_eq!(
+        rig.call("queue_build_with", |e| e.queue_build_with(
+            10,
+            2,
+            &rise,
+            &[],
+            11,
+            0
+        )),
+        0
+    );
+    rig.until(event::FILL_STARTED);
+    assert!(rig.call("cancel_build", |e| e.cancel_build(10)));
+    rig.until(event::FILL_ENDED);
+    assert_eq!(
+        rig.call("queue_build_with", |e| e.queue_build_with(
+            12,
+            4,
+            &rise,
+            &[],
+            13,
+            0
+        )),
+        0
+    );
+    rig.until(event::BUILD_STARTED);
+    assert_eq!(rig.call("queue_scene", |e| e.queue_scene(14, 2, &back)), 0);
+    rig.until(event::BUILD_REPLACED);
+
     assert!(rig.allocs.is_empty(), "allocated: {:?}", rig.allocs);
 }
