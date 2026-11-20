@@ -1,8 +1,8 @@
 /**
- * The scene strip: four scene pads after the stem mixer, then one toolbar row with the
- * shared timing selector, the one-bar Fill, Cancel (restores the mix from before scene
- * choices) and Compare A/B. The status line and the Shift+1–4 hint sit in the panel
- * header (`SceneHeader`), so they cost no rows of their own.
+ * The scene strip: four scene pads after the stem mixer, then the toolbar: the shared
+ * timing selector and Cancel (restores the mix from before scene choices), the fill
+ * row, and Compare A/B, a row each. The status line and the Shift+1–4 hint sit in the
+ * panel header (`SceneHeader`), so they cost no rows of their own.
  *
  * A pad press only ever *launches*. Saving, renaming, duplicating, resetting and Crash
  * on launch live in each pad's own menu, so a performance click can never overwrite a
@@ -116,6 +116,7 @@ export function SceneStrip(props: Props) {
   const riseFill = Boolean(fill?.riseFill);
   const pending = isPending(request) && isSceneSlot(request.target) ? request : null;
   const [menuFor, setMenuFor] = useState<SceneSlotId | null>(null);
+  const reasonIds = { fill: useId(), into: useId() };
 
   return (
     <section className="scene-strip" aria-label="Scenes">
@@ -187,10 +188,11 @@ export function SceneStrip(props: Props) {
                   {scene.crash ? (
                     <>
                       <span className="scene-crash-mark">
-                        <Zap aria-hidden="true" size={10} strokeWidth={2.5} />
+                        <Zap aria-hidden="true" size={11} strokeWidth={2.5} />
                         Crash<span className="sr-only"> on launch</span>
                       </span>
-                      <span aria-hidden="true"> · </span>
+                      <span className="scene-crash-sep" aria-hidden="true">·</span>
+                      <span className="sr-only">, </span>
                     </>
                   ) : null}
                   {preview.summary}
@@ -250,6 +252,7 @@ export function SceneStrip(props: Props) {
       </div>
       <div className="scene-toolbar">
         <Segmented<Timing | 'build'>
+          radio
           label="Switch on"
           value={buildBars !== null ? 'build' : timing}
           onPick={props.onTiming}
@@ -264,6 +267,7 @@ export function SceneStrip(props: Props) {
           <>
             <div className="scene-build-bars">
               <Segmented<BuildBars>
+                radio
                 label="Rise over"
                 hideLabel
                 value={buildBars}
@@ -287,9 +291,10 @@ export function SceneStrip(props: Props) {
             <X size={12} aria-hidden="true" /> Cancel
           </button>
         </div>
-        {fill ? <FillTools fill={fill} /> : null}
+        {fill ? <FillTools fill={fill} ids={reasonIds} /> : null}
         {props.children}
       </div>
+      {fill ? <FillReasons fill={fill} ids={reasonIds} /> : null}
     </section>
   );
 }
@@ -335,8 +340,9 @@ function RiseFillToggle({ fill }: { fill: FillControls }) {
     <div className="segmented scene-rise-fill">
       <button
         type="button"
+        role="switch"
         className="segment tap"
-        aria-pressed={fill.riseFill}
+        aria-checked={fill.riseFill}
         aria-label="Finish with Fill: the fill plays the Rise's last bar"
         title="Finish with Fill: the fill plays the Rise's last bar, and the scene lands on the next downbeat"
         onClick={() => fill.onRiseFill(!fill.riseFill)}
@@ -348,11 +354,32 @@ function RiseFillToggle({ fill }: { fill: FillControls }) {
   );
 }
 
+/** Why the Fill button can't be pressed now, when it is waiting to be (not while playing). */
+const fillReason = (fill: FillControls): string | null => (fillButtonJob(fill.job) ? null : fill.unavailable);
+/** Why Fill → Drop can't be pressed now; never while it is its own to cancel. */
+const fillIntoReason = (fill: FillControls): string | null => (fillIntoJob(fill.job) ? null : fill.intoUnavailable);
+
+/**
+ * The fill buttons' reasons, outside the toolbar so they take no room and stay out of
+ * the buttons' own words: hidden, and read as each button's description.
+ */
+function FillReasons({ fill, ids }: { fill: FillControls; ids: { fill: string; into: string } }) {
+  const a = fillReason(fill);
+  const b = fillIntoReason(fill);
+  return (
+    <>
+      {a ? <span id={ids.fill} hidden>Unavailable: {a}</span> : null}
+      {b ? <span id={ids.into} hidden>Unavailable: {b}</span> : null}
+    </>
+  );
+}
+
 /** Fill's own row: Fill at, the phrase length (Phrase end only), Fill and Fill → Drop. */
-function FillTools({ fill }: { fill: FillControls }) {
+function FillTools({ fill, ids }: { fill: FillControls; ids: { fill: string; into: string } }) {
   return (
     <div className="scene-fill-tools" role="group" aria-label="Fill">
       <Segmented<FillAt>
+        radio
         label="Fill at"
         value={fill.at}
         onPick={fill.onAt}
@@ -364,6 +391,7 @@ function FillTools({ fill }: { fill: FillControls }) {
       {fill.at === 'phrase' ? (
         <div className="scene-phrase-bars">
           <Segmented<PhraseBars>
+            radio
             label="Phrase length"
             hideLabel
             value={fill.phraseBars}
@@ -373,8 +401,8 @@ function FillTools({ fill }: { fill: FillControls }) {
           <span className="scene-build-unit" aria-hidden="true">bars</span>
         </div>
       ) : null}
-      <FillButton fill={fill} />
-      <FillIntoButton fill={fill} />
+      <FillButton fill={fill} reasonId={ids.fill} />
+      <FillIntoButton fill={fill} reasonId={ids.into} />
     </div>
   );
 }
@@ -382,20 +410,27 @@ function FillTools({ fill }: { fill: FillControls }) {
 /**
  * The Fill button: the track's fill, at the Fill at timing. Shows where a queued fill
  * plays ("Fill · Bar 8", "Fill · Next phrase") and any fill playing.
+ *
+ * Unavailable is aria-disabled, not disabled: it stays in the tab order, so focus is
+ * not dropped to the page when a queued fill starts playing under it, and the reason
+ * (a Rise ending with the fill, say) is read as its description.
  */
-function FillButton({ fill }: { fill: FillControls }) {
+function FillButton({ fill, reasonId }: { fill: FillControls; reasonId: string }) {
   const own = fillButtonJob(fill.job);
   const state = own ? own.status : 'idle';
   const phrase = fillPhrase(fill.at, fill.phraseBars);
+  const off = state === 'playing' || (state === 'idle' && fill.unavailable !== null);
+  const reason = fillReason(fill);
   return (
     <button
       type="button"
       className={cx('fill-button tap', state !== 'idle' && 'is-on')}
       data-state={state}
-      disabled={state === 'playing' || (state === 'idle' && fill.unavailable !== null)}
+      aria-disabled={off || undefined}
       aria-label={fillButtonAria(fill.job, fill.name, phrase)}
-      title={state === 'idle' && fill.unavailable ? fill.unavailable : fillButtonTitle(fill.name, own ? own.phrase : phrase)}
-      onClick={fill.onFill}
+      aria-describedby={reason ? reasonId : undefined}
+      title={reason ?? fillButtonTitle(fill.name, own ? own.phrase : phrase)}
+      onClick={off ? undefined : fill.onFill}
     >
       {fillButtonLabel(fill.job)}
     </button>
@@ -407,20 +442,22 @@ function FillButton({ fill }: { fill: FillControls }) {
  * "Fill · Bar 8 → Drop" while it waits, "Filling → Drop" while the fill plays; pressing it
  * again cancels it.
  */
-function FillIntoButton({ fill }: { fill: FillControls }) {
+function FillIntoButton({ fill, reasonId }: { fill: FillControls; reasonId: string }) {
   const own = fillIntoJob(fill.job);
   const state = own ? own.status : 'idle';
   const phrase = fillPhrase(fill.at, fill.phraseBars);
   const aria = fillIntoAria(fill.job, fill.intoName, phrase);
+  const reason = fillIntoReason(fill);
   return (
     <button
       type="button"
       className={cx('fill-into-button tap', own && 'is-on')}
       data-state={state}
-      disabled={!own && fill.intoUnavailable !== null}
+      aria-disabled={reason !== null || undefined}
       aria-label={aria}
-      title={!own && fill.intoUnavailable ? fill.intoUnavailable : aria}
-      onClick={fill.onFillInto}
+      aria-describedby={reason ? reasonId : undefined}
+      title={reason ?? aria}
+      onClick={reason !== null ? undefined : fill.onFillInto}
     >
       {fillIntoLabel(fill.job, fill.intoName)}
     </button>

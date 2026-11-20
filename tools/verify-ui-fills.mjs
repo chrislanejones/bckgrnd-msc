@@ -106,18 +106,19 @@ function kit(page) {
     await waitBar(bar);
   };
   const fillAt = (at) =>
-    page.getByRole('button', { name: at === 'phrase' ? 'Fill at the phrase end' : 'Fill on the next bar', exact: true }).click();
-  const phrase = (n) => page.getByRole('button', { name: `Phrases of ${n} bars`, exact: true }).click();
+    page.getByRole('radio', { name: at === 'phrase' ? 'Fill at the phrase end' : 'Fill on the next bar', exact: true }).click();
+  const phrase = (n) => page.getByRole('radio', { name: `Phrases of ${n} bars`, exact: true }).click();
   const riseOver = async (n) => {
-    const rise = page.getByRole('button', { name: 'Rise into the scene over several bars' });
-    if ((await rise.getAttribute('aria-pressed')) !== 'true') await rise.click();
-    await page.getByRole('button', { name: `Rise over ${n} bars` }).click();
+    const rise = page.getByRole('radio', { name: 'Rise into the scene over several bars' });
+    if ((await rise.getAttribute('aria-checked')) !== 'true') await rise.click();
+    await page.getByRole('radio', { name: `Rise over ${n} bars` }).click();
   };
   const finishWithFill = async (on) => {
-    const b = page.getByRole('button', { name: RISE_FILL_NAME, exact: true });
-    if (((await b.getAttribute('aria-pressed')) === 'true') !== on) await b.click();
+    const b = page.getByRole('switch', { name: RISE_FILL_NAME, exact: true });
+    if (((await b.getAttribute('aria-checked')) === 'true') !== on) await b.click();
   };
-  const switchOn = (name) => page.getByRole('button', { name, exact: true }).click();
+  // Switch on is a radio group (Night 8 accessibility pass).
+  const switchOn = (name) => page.getByRole('radio', { name, exact: true }).click();
   const mix = async () =>
     flat(await page.evaluate((ids) => {
       const p = window.__BCKGRND_PROJECT__();
@@ -137,7 +138,8 @@ function kit(page) {
       let last = '';
       const btn = (sel) => {
         const el = document.querySelector(sel);
-        return el ? { text: el.textContent.trim(), state: el.getAttribute('data-state'), disabled: el.disabled, title: el.title } : null;
+        // Unavailable fill buttons are aria-disabled (they keep focus), not disabled.
+        return el ? { text: el.textContent.trim(), state: el.getAttribute('data-state'), disabled: el.disabled || el.getAttribute('aria-disabled') === 'true', title: el.title } : null;
       };
       const snap = () => {
         const pads = [...document.querySelectorAll('.scene-slot')].map((el) => ({
@@ -248,12 +250,13 @@ export async function fillChecks({ open, check }) {
     const k = kit(page);
     try {
       await page.waitForSelector('.scene-fill-tools');
-      const fillAtGroup = page.getByRole('group', { name: 'Fill at' });
-      check('fill names: the fill row is a group named Fill, with a Fill at group in it',
+      // Fill at is a radio group since the Night 8 accessibility pass.
+      const fillAtGroup = page.getByRole('radiogroup', { name: 'Fill at' });
+      check('fill names: the fill row is a group named Fill, with a Fill at radio group in it',
         (await page.getByRole('group', { name: 'Fill', exact: true }).count()) === 1 && (await fillAtGroup.count()) === 1);
       check('fill defaults: Fill at is Next bar, and no phrase picker shows',
-        (await page.getByRole('button', { name: 'Fill on the next bar', exact: true }).getAttribute('aria-pressed')) === 'true'
-        && (await page.getByRole('button', { name: 'Fill at the phrase end', exact: true }).getAttribute('aria-pressed')) === 'false'
+        (await page.getByRole('radio', { name: 'Fill on the next bar', exact: true }).getAttribute('aria-checked')) === 'true'
+        && (await page.getByRole('radio', { name: 'Fill at the phrase end', exact: true }).getAttribute('aria-checked')) === 'false'
         && (await page.locator('.scene-phrase-bars').count()) === 0);
       check('fill defaults: the Fill button reads Drum fill', (await k.text(k.fillBtn)) === 'Drum fill', await k.text(k.fillBtn));
       const fillName = (await k.fillBtn.getAttribute('aria-label'))?.replace(/ for one bar, from the next bar$/, '');
@@ -267,19 +270,19 @@ export async function fillChecks({ open, check }) {
       await k.fillAt('phrase');
       check('fill names: Phrase end shows 2 · 4 · 8 · 16 bars, 4 picked',
         (await page.locator('.scene-phrase-bars').count()) === 1
-        && (await page.getByRole('button', { name: 'Phrases of 4 bars', exact: true }).getAttribute('aria-pressed')) === 'true'
-        && (await Promise.all([2, 8, 16].map((n) => page.getByRole('button', { name: `Phrases of ${n} bars`, exact: true }).count()))).every((c) => c === 1));
+        && (await page.getByRole('radio', { name: 'Phrases of 4 bars', exact: true }).getAttribute('aria-checked')) === 'true'
+        && (await Promise.all([2, 8, 16].map((n) => page.getByRole('radio', { name: `Phrases of ${n} bars`, exact: true }).count()))).every((c) => c === 1));
       check('fill names: with Phrase end, Fill and Fill → Drop name the phrase',
         (await k.fillBtn.getAttribute('aria-label')) === `${fillName} for one bar, ending on the next 4-bar phrase line`
         && (await k.intoBtn.getAttribute('aria-label')) === 'Fill into Drop at the end of the 4-bar phrase',
         `${await k.fillBtn.getAttribute('aria-label')} / ${await k.intoBtn.getAttribute('aria-label')}`);
       await k.fillAt('bar');
       await k.switchOn('Rise into the scene over several bars');
-      const toggle = page.getByRole('button', { name: RISE_FILL_NAME, exact: true });
-      check('rise fill: Finish with Fill shows beside the Rise bars, off', (await toggle.count()) === 1 && (await toggle.getAttribute('aria-pressed')) === 'false'
+      const toggle = page.getByRole('switch', { name: RISE_FILL_NAME, exact: true });
+      check('rise fill: Finish with Fill shows beside the Rise bars, off', (await toggle.count()) === 1 && (await toggle.getAttribute('aria-checked')) === 'false'
         && (await page.locator('.scene-build-bars + .scene-rise-fill').count()) === 1
         && (await page.locator('.scene-build-bars .segment').count()) === 3);
-      check('rise fill: Rise bars still default to 4', (await page.getByRole('button', { name: 'Rise over 4 bars' }).getAttribute('aria-pressed')) === 'true');
+      check('rise fill: Rise bars still default to 4', (await page.getByRole('radio', { name: 'Rise over 4 bars' }).getAttribute('aria-checked')) === 'true');
       check('rise fill: the pads say Rise into Drop over 4 bars, with no fill yet',
         (await k.pad(DROP).getAttribute('aria-label')) === 'Rise into Drop over 4 bars', await k.pad(DROP).getAttribute('aria-label'));
       await k.finishWithFill(true);
@@ -587,7 +590,8 @@ export async function fillChecks({ open, check }) {
       const stored = await page.evaluate(() => Object.fromEntries(Object.keys(localStorage).filter((x) => x.startsWith('bckgrnd-msc:')).map((x) => [x, localStorage.getItem(x)])));
       await page.reload({ waitUntil: 'networkidle' });
       await page.waitForSelector('.scene-fill-tools');
-      const pressedName = (name) => page.getByRole('button', { name, exact: true }).getAttribute('aria-pressed');
+      // The pickers are radios and Finish with Fill a switch: both say aria-checked.
+      const pressedName = (name) => page.getByRole(name === RISE_FILL_NAME ? 'switch' : 'radio', { name, exact: true }).getAttribute('aria-checked');
       check('fill prefs: stored under bckgrnd-msc: keys',
         stored['bckgrnd-msc:fill-at'] === 'phrase' && stored['bckgrnd-msc:fill-phrase-bars'] === '8'
         && stored['bckgrnd-msc:rise-bars'] === '2' && stored['bckgrnd-msc:rise-fill'] === 'on', JSON.stringify(stored));

@@ -89,11 +89,11 @@ async function crashOnLaunch() {
   // A Rise's landing carries it too.
   await page.getByRole('button', { name: `Launch ${names[0]}`, exact: true }).click();
   await said(`${names[0]} active`);
-  await page.getByRole('button', { name: 'Rise into the scene over several bars', exact: true }).click();
-  await page.getByRole('button', { name: 'Rise over 2 bars', exact: true }).click();
+  await page.getByRole('radio', { name: 'Rise into the scene over several bars', exact: true }).click();
+  await page.getByRole('radio', { name: 'Rise over 2 bars', exact: true }).click();
   await page.getByRole('button', { name: `Rise into ${names[3]} over 2 bars`, exact: true }).click();
   await said(`${names[3]} active, with a crash`);
-  await page.getByRole('button', { name: 'Launch on the next bar', exact: true }).click();
+  await page.getByRole('radio', { name: 'Launch on the next bar', exact: true }).click();
   // Under a solo (the scene's own) the crash is silent, and the line says nothing of it.
   await page.getByRole('button', { name: 'Solo Kick' }).click();
   await slot(2).locator('.scene-menu-button').click();
