@@ -245,17 +245,19 @@ export function SceneStrip(props: Props) {
           ]}
         />
         {buildBars !== null ? (
-          <div className="scene-build-bars">
-            <Segmented<BuildBars>
-              label="Rise over"
-              hideLabel
-              value={buildBars}
-              onPick={props.onBuildBars}
-              options={BUILD_BAR_CHOICES.map((n) => ({ value: n, label: `${n}`, aria: `Rise over ${n} bars` }))}
-            />
-            <span className="scene-build-unit" aria-hidden="true">bars</span>
+          <>
+            <div className="scene-build-bars">
+              <Segmented<BuildBars>
+                label="Rise over"
+                hideLabel
+                value={buildBars}
+                onPick={props.onBuildBars}
+                options={BUILD_BAR_CHOICES.map((n) => ({ value: n, label: `${n}`, aria: `Rise over ${n} bars` }))}
+              />
+              <span className="scene-build-unit" aria-hidden="true">bars</span>
+            </div>
             {fill ? <RiseFillToggle fill={fill} /> : null}
-          </div>
+          </>
         ) : null}
         <div className="scene-strip-actions">
           <button

@@ -4169,11 +4169,8 @@ html[data-control-drag="yes"] * {
   padding-inline: 0.5rem;
 }
 
-/* Finish with Fill: one pill in its own track, beside Rise's bar count. */
-.scene-rise-fill {
-  margin-inline-start: var(--space-1);
-}
-
+/* Finish with Fill: one pill in its own track, right after Rise's bar count. Its short
+   words ("+ Fill") are for narrow panels, below. */
 .rise-fill-short {
   display: none;
 }

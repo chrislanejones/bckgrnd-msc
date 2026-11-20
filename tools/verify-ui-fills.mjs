@@ -215,7 +215,7 @@ async function toolbar(page) {
       const tops = els.filter(Boolean).map(top);
       return tops.every((t) => Math.abs(t - tops[0]) < 3);
     };
-    const row1 = [':scope > .segmented-block', ':scope > .scene-build-bars', ':scope > .scene-strip-actions'].map((s) => bar.querySelector(s));
+    const row1 = [':scope > .segmented-block', ':scope > .scene-build-bars', ':scope > .scene-rise-fill', ':scope > .scene-strip-actions'].map((s) => bar.querySelector(s));
     const tools = bar.querySelector('.scene-fill-tools');
     const row2 = tools ? [...tools.children] : [];
     const r = (el) => {
@@ -277,7 +277,8 @@ export async function fillChecks({ open, check }) {
       await k.switchOn('Rise into the scene over several bars');
       const toggle = page.getByRole('button', { name: RISE_FILL_NAME, exact: true });
       check('rise fill: Finish with Fill shows beside the Rise bars, off', (await toggle.count()) === 1 && (await toggle.getAttribute('aria-pressed')) === 'false'
-        && (await page.locator('.scene-build-bars .scene-rise-fill').count()) === 1);
+        && (await page.locator('.scene-build-bars + .scene-rise-fill').count()) === 1
+        && (await page.locator('.scene-build-bars .segment').count()) === 3);
       check('rise fill: Rise bars still default to 4', (await page.getByRole('button', { name: 'Rise over 4 bars' }).getAttribute('aria-pressed')) === 'true');
       check('rise fill: the pads say Rise into Drop over 4 bars, with no fill yet',
         (await k.pad(DROP).getAttribute('aria-label')) === 'Rise into Drop over 4 bars', await k.pad(DROP).getAttribute('aria-label'));
