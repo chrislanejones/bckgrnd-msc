@@ -1,6 +1,8 @@
 # ADR-001: PHP owns the music, Rust/WASM owns all DSP, React only draws and sends intent
 Date: 2026-10-02 (backfilled)   Status: accepted (10-05-2026)
 
+> Amendment proposed 11-19-2026. ADR-020 (draft) would bend this line again, as ADR-008 did: for fills, the engine computes phrase ends of 2, 4, 8 or 16 bars from step 0. The length is passed with each request.
+
 ## Context
 The first version (`old/`, TanStack Start) ran sequencing, synthesis and UI in
 one TypeScript app on Web Audio. The port to Rust + Laravel + NativePHP needed a
