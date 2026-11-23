@@ -40,6 +40,52 @@ export type SceneMix = {
 /** Length of the engine's scene vector: 8 stems x 4, then the scene parameters. */
 export const SCENE_VECTOR_LENGTH = STEMS.length * 4 + SCENE_PARAMS.length;
 
+/**
+ * A mix laid out like the engine's scene vector, but in the store's own doubles. The
+ * engine's copy (`sceneVector`) is float32; this is what those floats came from.
+ */
+export function sceneValues(mix: SceneMix): number[] {
+  const out = new Array<number>(SCENE_VECTOR_LENGTH).fill(0);
+  STEMS.forEach((id, i) => {
+    const s = mix.stems[id];
+    out[4 * i] = s.volume;
+    out[4 * i + 1] = s.send;
+    out[4 * i + 2] = s.muted ? 1 : 0;
+    out[4 * i + 3] = s.solo ? 1 : 0;
+  });
+  SCENE_PARAMS.forEach((id, j) => {
+    out[STEMS.length * 4 + j] = mix.params[id];
+  });
+  return out;
+}
+
+/**
+ * An engine vector read back without its float32 rounding, wherever the engine is
+ * only holding a value the host gave it. Each slot takes the first of `known` (mixes
+ * as `sceneValues`) whose float32 is exactly the engine's; a slot that matches none
+ * (a build part way between two values) keeps the engine's number.
+ *
+ * Without this, following a build wrote float32 into the store: Echo Time 1/8T came
+ * back as 0.3333333432674408, which is not one of the registry's options, so the
+ * project saved after it would not open again (docs/NIGHT7_PROTOCOL.md, The UI).
+ */
+export function exactValues(engine: ArrayLike<number>, known: readonly (readonly number[])[]): number[] {
+  const out = new Array<number>(engine.length);
+  for (let i = 0; i < engine.length; i += 1) {
+    const got = Number(engine[i]);
+    let value = got;
+    for (const mix of known) {
+      const candidate = mix[i];
+      if (candidate !== undefined && Math.fround(candidate) === got) {
+        value = candidate;
+        break;
+      }
+    }
+    out[i] = value;
+  }
+  return out;
+}
+
 /** The engine's scene vector for a mix (layout in docs/NIGHT3_PROTOCOL.md). */
 export function sceneVector(mix: SceneMix): Float32Array {
   const out = new Float32Array(SCENE_VECTOR_LENGTH);
@@ -340,7 +386,11 @@ function foldBuildEvent(
 ): SceneRequest {
   switch (event.kind) {
     case EVENT.buildQueued:
-      return request.status === 'sending' ? { ...request, status: 'queued', bar: event.a } : request;
+      // Also while already queued: the engine re-announces a waiting build when the
+      // loop changes, with the bar it now starts on, as it does for a scene.
+      return request.status === 'sending' || request.status === 'queued'
+        ? { ...request, status: 'queued', bar: event.a }
+        : request;
     case EVENT.buildStarted:
       return { ...request, status: 'building', build: { ...build, bar: 1 } };
     case EVENT.buildProgress:

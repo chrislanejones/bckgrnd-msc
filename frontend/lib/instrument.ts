@@ -38,10 +38,12 @@ import {
   isLaunchEvent,
   isPending,
   isSceneSlot,
+  exactValues,
   mixFromVector,
   renameScene,
   resetScene,
   sameMix,
+  sceneValues,
   sceneVector,
   type BuildBars,
   type Compare,
@@ -248,7 +250,16 @@ export function useInstrument() {
     touched: Set<number>;
     /** The render count when `last` was shown; the store only has it after a render. */
     shownAt: number;
-  }>({ requestId: -1, last: null, touched: new Set(), shownAt: 0 });
+    /** The mix the build set out from, in the store's own values (`sceneValues`). */
+    start: number[] | null;
+  }>({ requestId: -1, last: null, touched: new Set(), shownAt: 0, start: null });
+  /**
+   * A build the engine is still running although a scene or a comparison was queued
+   * after it. The engine only replaces a build when that scene commits; if the scene
+   * is cancelled or refused first, the build carries on and lands, so the host keeps
+   * its record here and takes it back (docs/NIGHT7_PROTOCOL.md, Interaction).
+   */
+  const shadowedBuild = useRef<SceneRequest | null>(null);
   const renders = useRef(0);
   renders.current += 1;
   /** One line for assistive technology: discrete changes only, never every beat. */
@@ -402,6 +413,11 @@ export function useInstrument() {
         cancelTempoGlide();
         const deck = liveDeck;
         engine.stop(deck);
+        // Stopping cancels a rise, and the engine puts the mix back where the rise set
+        // out from. Its last snapshot arrives after the scenes below are reset and is
+        // not followed, so put the knobs back here: the effects carry over to the new
+        // track and must read what the engine holds.
+        settleCancelledBuild();
         loadDeck(deck, arranged);
         engine.setMuted(0, false);
         setTrack(arranged);
@@ -658,6 +674,7 @@ export function useInstrument() {
     setScenes(factoryScenes(arranged));
     setActiveScene(null);
     beforeScenes.current = null;
+    shadowedBuild.current = null;
     setSceneRequest(null);
     setCompare(null);
     setSceneStatus('');
@@ -720,13 +737,33 @@ export function useInstrument() {
       engine.onSceneEvents((events: readonly WireEvent[]) => {
         for (const e of events) {
           if (!isLaunchEvent(e.kind)) continue;
+          // A build with a scene queued over it keeps reporting; keep its record
+          // current until the scene commits (which replaces it) or goes away.
+          const shadow = shadowedBuild.current;
+          if (shadow && shadow.requestId === e.requestId) {
+            const folded = foldSceneEvent(shadow, { kind: e.kind, id: e.requestId, a: e.a, b: e.b });
+            shadowedBuild.current = isPending(folded) ? folded : null;
+            continue;
+          }
           const current = sceneRequestRef.current;
           if (!current || current.requestId !== e.requestId) continue;
           const next = foldSceneEvent(current, { kind: e.kind, id: e.requestId, a: e.a, b: e.b });
           if (next === current) continue;
+          const name = sceneNameRef.current(next.target);
+          // The scene queued over a build never landed, so the build is still the
+          // request in hand: the pad goes back to its rise, and Cancel reaches it.
+          const resumed = shadowedBuild.current;
+          if (resumed && !next.build && (next.status === 'cancelled' || next.status === 'rejected')) {
+            shadowedBuild.current = null;
+            sceneRequestRef.current = resumed;
+            setSceneRequest(resumed);
+            const went = next.status === 'cancelled' ? 'cancelled' : 'not launched';
+            setSceneStatus(`${name} ${went}; ${sceneNameRef.current(resumed.target)} still rising`);
+            continue;
+          }
+          if (!isPending(next)) shadowedBuild.current = null;
           sceneRequestRef.current = next;
           setSceneRequest(next);
-          const name = sceneNameRef.current(next.target);
           if (next.build) {
             buildOutcomeRef.current(next, current);
             continue;
@@ -757,7 +794,8 @@ export function useInstrument() {
     () =>
       engine.onBuildBase((requestId, values) => {
         const current = sceneRequestRef.current;
-        if (!current?.build || current.requestId !== requestId) return;
+        const mine = current?.build && current.requestId === requestId;
+        if (!mine && shadowedBuild.current?.requestId !== requestId) return;
         followBuildRef.current(requestId, values);
       }),
     [],
@@ -773,11 +811,15 @@ export function useInstrument() {
   function followBuild(requestId: number, values: readonly number[]) {
     const shown = buildShown.current;
     if (shown.requestId !== requestId) {
-      buildShown.current = { requestId, last: null, touched: new Set(), shownAt: 0 };
+      buildShown.current = { requestId, last: null, touched: new Set(), shownAt: 0, start: null };
     }
     const state = buildShown.current;
-    const working = sceneVector(workingMix());
+    const held = sceneValues(workingMix());
+    const working = Float32Array.from(held);
     const next = Float32Array.from(values);
+    // The mix the build set out from: what the store holds when its first snapshot
+    // arrives. A cancel glides back to it, and Echo Time stays on it until the end.
+    state.start ??= held;
     // Until React has rendered the last snapshot, the store still holds the one before,
     // which would look like the user's hand.
     if (state.last && renders.current > state.shownAt) {
@@ -788,10 +830,30 @@ export function useInstrument() {
     for (const i of state.touched) next[i] = working[i]!;
     state.last = next;
     state.shownAt = renders.current;
-    showMix(mixFromVector(next));
+    // The engine speaks float32. Wherever it is only holding a value the store, the
+    // scene risen into or the starting mix already has, show that value itself, so a
+    // rise never leaves a rounded copy behind (an Echo Time that is no option at all).
+    const request = [sceneRequestRef.current, shadowedBuild.current].find((r) => r?.requestId === requestId);
+    const target = request ? sceneValues(request.mix) : held;
+    showMix(mixFromVector(exactValues(next, [held, target, state.start])));
   }
   const followBuildRef = useRef(followBuild);
   followBuildRef.current = followBuild;
+
+  /**
+   * Put the knobs where the engine leaves the mix when it cancels the build in hand:
+   * back on the mix the build set out from, except the controls the user moved during
+   * it, which stay theirs. For a cancel whose final snapshot will not be followed.
+   */
+  function settleCancelledBuild() {
+    const state = buildShown.current;
+    const request = [sceneRequestRef.current, shadowedBuild.current].find(
+      (r) => r?.build && isPending(r) && r.requestId === state.requestId,
+    );
+    if (!request || !state.start) return;
+    const held = sceneValues(workingMix());
+    showMix(mixFromVector(state.start.map((value, i) => (state.touched.has(i) ? held[i]! : value))));
+  }
 
   /** One build outcome: the pad line comes from the request, the status line from here. */
   function buildOutcome(next: SceneRequest, prev: SceneRequest) {
@@ -896,6 +958,10 @@ export function useInstrument() {
         : target === 'restore' ? 'Comparison closed; the earlier mix is back' : `${sceneName(target)} active`);
       return;
     }
+    // A build this request is queued over keeps running in the engine until the
+    // request commits. Keep its record: if this one is withdrawn, the build is back.
+    const over = sceneRequestRef.current;
+    if (over?.build && isPending(over)) shadowedBuild.current = over;
     const requestId = nextRequestId.current++;
     const deck = liveDeck;
     const request: SceneRequest = {
@@ -981,7 +1047,9 @@ export function useInstrument() {
       build: { bars },
       ...(sets ? { lanes: sets } : {}),
     };
-    buildShown.current = { requestId, last: null, touched: new Set(), shownAt: 0 };
+    buildShown.current = { requestId, last: null, touched: new Set(), shownAt: 0, start: null };
+    // A newer build replaces a build already queued or running at once, in the engine.
+    shadowedBuild.current = null;
     sceneRequestRef.current = request;
     setSceneRequest(request);
     // Compiled now, as for a launch, so the lanes that land are the ones risen into even
