@@ -1,0 +1,225 @@
+/**
+ * Fills as the UI reasons about them (Night 8, docs/NIGHT8_PROTOCOL.md): when a fill is
+ * asked to play, whether a late press rolled over to the next phrase, and what the
+ * Fill and Fill → Drop buttons, the pads and the status line say about it. Pure: no
+ * React, no engine.
+ *
+ * The engine keeps the timing. The host only remembers what it asked for (which kind
+ * of fill, which phrase length, where the playhead was) so the words match what the
+ * engine reported.
+ */
+
+import {
+  BUILD_REFUSAL,
+  EVENT,
+  REASON,
+  foldFillEvent,
+  isFillPending,
+  type EngineEvent,
+  type FillRequest,
+  type SceneRequest,
+} from './scenes';
+
+/** Fill at: the next bar (Night 3), or the last bar of the phrase. */
+export type FillAt = 'bar' | 'phrase';
+/** How many bars a phrase is: an app preference, passed with each request. */
+export type PhraseBars = 2 | 4 | 8 | 16;
+export const PHRASE_BAR_CHOICES: readonly PhraseBars[] = [2, 4, 8, 16];
+export const DEFAULT_PHRASE_BARS: PhraseBars = 4;
+
+/** The fill the Fill button plays: the track's first, as in Night 3. */
+export const FILL_INDEX = 0;
+
+/** What the engine is sent as `phrase`: 0 for the next bar. */
+export const fillPhrase = (at: FillAt, bars: PhraseBars): 0 | PhraseBars => (at === 'phrase' ? bars : 0);
+
+/** A plain fill, the fill of a Fill into, or the fill a Rise finishes with. */
+export type FillKind = 'plain' | 'into' | 'rise';
+
+/** The fill the host follows: the engine's request, and what it is part of. */
+export type FillJob = FillRequest & {
+  kind: FillKind;
+  /** The phrase it was sent with: 0 the next bar, else 2, 4, 8 or 16. */
+  phrase: number;
+  /** The song step (0-255) the playhead was on when it was asked for or re-announced. */
+  from: number;
+  /** A late press: it plays the end of the next phrase, not this one. */
+  late?: boolean;
+  /** The request it was sent with: the Fill into's scene, or the Rise. */
+  partner?: number;
+};
+
+const STEPS_PER_BAR = 16;
+const SONG_STEPS = 256;
+
+/**
+ * Whether a phrase fill rolled over to the next phrase: its first step (`fill queued`
+ * `b`) lies in a later phrase than the playhead, or behind it in the same one (a loop's
+ * last bar asked for while it plays, which comes round on the next pass). Never for a
+ * next-bar fill.
+ */
+export function rolledOver(from: number, firstStep: number, phrase: number): boolean {
+  if (phrase <= 0 || from < 0) return false;
+  const span = phrase * STEPS_PER_BAR;
+  const at = ((from % SONG_STEPS) + SONG_STEPS) % SONG_STEPS;
+  const first = ((firstStep % SONG_STEPS) + SONG_STEPS) % SONG_STEPS;
+  return Math.floor(first / span) !== Math.floor(at / span) || first <= at;
+}
+
+/**
+ * Fold one fill event into the job the host follows: `foldFillEvent`, plus whether a
+ * queued phrase fill rolled over (measured from the press, or for a re-announce after
+ * a loop change from `step`, where the playhead is now), and an unlinked fill becoming
+ * a plain one. Returns the same object when the event changes nothing.
+ */
+export function foldFillJob(job: FillJob, event: EngineEvent, step: number): FillJob {
+  let next = foldFillEvent(job, event);
+  if (next === job) return job;
+  if (event.kind === EVENT.fillQueued) {
+    const from = job.status === 'sending' ? job.from : step;
+    next = { ...next, from, late: rolledOver(from, event.b, job.phrase) };
+  }
+  if (event.kind === EVENT.fillUnlinked) {
+    next = { ...next, kind: 'plain' };
+    delete next.partner;
+  }
+  return next;
+}
+
+/**
+ * The request a fill leads into (a Fill into's scene, or a Rise), marked filling once
+ * that fill has started, so its pad can say "Filling into Drop". Any other request is
+ * returned as it is.
+ */
+export function markFilling(request: SceneRequest, fillId: number): SceneRequest {
+  if (request.fillInto?.fillId === fillId && !request.fillInto.filling) {
+    return { ...request, fillInto: { ...request.fillInto, filling: true } };
+  }
+  const build = request.build;
+  if (build?.fill?.fillId === fillId && !build.fill.filling) {
+    return { ...request, build: { ...build, fill: { ...build.fill, filling: true } } };
+  }
+  return request;
+}
+
+/** A pending fill the Fill button itself shows: a plain one, or any that is playing. */
+export function fillButtonJob(job: FillJob | null): FillJob | null {
+  if (!isFillPending(job)) return null;
+  return job.kind === 'plain' || job.status === 'playing' ? job : null;
+}
+
+/** The Fill button's words. "Drum fill" at rest, as in Night 3. */
+export function fillButtonLabel(job: FillJob | null): string {
+  const own = fillButtonJob(job);
+  if (!own) return 'Drum fill';
+  if (own.status === 'playing') return 'Fill playing';
+  if (own.status === 'sending') return 'Fill…';
+  if (own.late) return 'Fill · Next phrase';
+  return own.bar ? `Fill · Bar ${own.bar}` : 'Fill queued';
+}
+
+/** The Fill button's name for assistive technology. `phrase` is the current Fill at. */
+export function fillButtonAria(job: FillJob | null, name: string, phrase: number): string {
+  const own = fillButtonJob(job);
+  if (own?.status === 'playing') return `${name} is playing`;
+  if (own) {
+    if (own.phrase === 0 || !own.bar) return `Cancel the queued ${name}`;
+    return own.late
+      ? `Cancel the queued ${name}, at the end of the next phrase, bar ${own.bar}`
+      : `Cancel the queued ${name}, at the end of bar ${own.bar}`;
+  }
+  return phrase === 0
+    ? `${name} for one bar, from the next bar`
+    : `${name} for one bar, ending on the next ${phrase}-bar phrase line`;
+}
+
+/** The Fill button's tooltip when it can be pressed. */
+export const fillButtonTitle = (name: string, phrase: number): string =>
+  phrase === 0 ? `${name}: one bar, from the next bar` : `${name}: one bar, ending on the ${phrase}-bar phrase line`;
+
+/** The status line when a plain fill is queued (again, after a loop change). */
+export function fillQueuedStatus(job: FillJob): string {
+  if (job.phrase === 0 || !job.bar) return `Fill queued for bar ${job.bar ?? ''}`.trim();
+  return job.late
+    ? `Fill queued for bar ${job.bar}, the end of the next phrase`
+    : `Fill queued for bar ${job.bar}, the end of the phrase`;
+}
+
+/** The pending Fill into, if the job is one. */
+export const fillIntoJob = (job: FillJob | null): FillJob | null =>
+  isFillPending(job) && job.kind === 'into' ? job : null;
+
+/** The Fill → Drop button's words, `scene` being the slot's current name. */
+export function fillIntoLabel(job: FillJob | null, scene: string): string {
+  const own = fillIntoJob(job);
+  if (!own) return `Fill → ${scene}`;
+  if (own.status === 'playing') return `Filling → ${scene}`;
+  if (own.status === 'sending' || !own.bar) return `Fill → ${scene}…`;
+  return own.late ? `Fill · Next phrase → ${scene}` : `Fill · Bar ${own.bar} → ${scene}`;
+}
+
+/** The Fill → Drop button's name for assistive technology. */
+export function fillIntoAria(job: FillJob | null, scene: string, phrase: number): string {
+  const own = fillIntoJob(job);
+  if (!own) {
+    return phrase === 0
+      ? `Fill into ${scene}: a fill on the next bar, then ${scene}`
+      : `Fill into ${scene} at the end of the ${phrase}-bar phrase`;
+  }
+  if (own.status === 'playing') return `Filling into ${scene}. Press again to cancel ${scene}; the fill plays out its bar.`;
+  if (own.status === 'sending' || !own.bar) return `Fill into ${scene}, being queued. Press again to cancel.`;
+  return own.late
+    ? `Fill into ${scene} at the end of the next phrase, bar ${own.bar}. Press again to cancel.`
+    : `Fill into ${scene} at the end of bar ${own.bar}. Press again to cancel.`;
+}
+
+/** A pad's line while its scene waits on a fill: Fill into, or a Rise's last bar. */
+export const fillingLine = (scene: string): string => `Filling into ${scene}`;
+/** A pad's line while a Fill into's scene waits for its fill. */
+export const fillInLine = (bar: number | undefined): string => (bar ? `Fill in · Bar ${bar}` : 'Fill in…');
+
+// ---- Refusals: plain words, naming the part at fault -------------------------
+
+/** Why a request was refused, where the scene words (`REASON`) would mislead. */
+const REFUSAL: Record<number, string> = {
+  3: 'not while the deck is scratched or braking',
+  6: 'not during a mix',
+  7: 'press Play first',
+  9: 'the track changed',
+};
+
+/** Why a plain fill was not started (event 15). */
+export function fillRefusal(reason: number): string {
+  if (reason === 1) return "this track's fill isn't available";
+  if (reason === 8) return 'a fill is already queued or playing';
+  return REFUSAL[reason] ?? REASON[reason] ?? 'refused';
+}
+
+/** `b` of a refused Fill into's events 15 and 5 (`FILL_INTO_REJECTED_PART`). */
+const INTO_PART = { scene: 1, fill: 2, lanes: 3 } as const;
+
+/** Why a Fill into was not started (events 15 and 5), naming the part at fault. */
+export function fillIntoRefusal(reason: number, part: number, scene: string): string {
+  if (part === INTO_PART.scene) return reason === 1 ? `${scene} isn't a valid mix` : (REFUSAL[reason] ?? REASON[reason] ?? 'refused');
+  if (part === INTO_PART.fill) return fillRefusal(reason);
+  if (part === INTO_PART.lanes) return `${scene}'s patterns were refused`;
+  return REFUSAL[reason] ?? REASON[reason] ?? 'refused';
+}
+
+/** `b` of event 45 with reason `invalid`: the parts Night 8 adds (`BUILD_REJECTED_PART`). */
+const BUILD_PART = { lanes: 4, fill: 5 } as const;
+
+/** Why a Rise was not started (event 45), naming the part at fault. */
+export function buildRefusal(reason: number, part: number): string {
+  if (part === BUILD_PART.fill) return reason === 8 ? 'a fill is already waiting' : "this track's fill isn't available";
+  if (part === BUILD_PART.lanes && reason === 1) return 'its patterns were refused';
+  return BUILD_REFUSAL[reason] ?? REASON[reason] ?? 'refused';
+}
+
+/** The status line when a Fill into or a Rise + Fill was canceled or cut short. */
+export function fillIntoCancelled(scene: string, reason: number | undefined, filling: boolean): string {
+  if (reason === undefined || reason === 10) {
+    return filling ? `${scene} canceled; the fill plays out its bar` : `Fill → ${scene} canceled`;
+  }
+  return `Fill → ${scene} canceled: ${REASON[reason] ?? ''}`;
+}

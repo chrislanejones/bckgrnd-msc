@@ -92,8 +92,8 @@ function withSlot(scenes: Scenes, next: Scene): Scenes {
 }
 
 /**
- * Capture the working mix into a slot. The name and factory recipe stay; the
- * revision goes up, so anything already queued from the old revision is not changed
+ * Capture the working mix into a slot. The name, factory recipe and Crash on launch
+ * stay; the revision goes up, so anything already queued from the old revision is not changed
  * by this (the engine holds its own copy).
  */
 export function captureScene(
@@ -123,7 +123,7 @@ export function renameScene(scenes: Scenes, slot: SceneSlotId, name: string): Sc
   return withSlot(scenes, { ...old, name: clean, revision: old.revision + 1 });
 }
 
-/** Copy one slot's mix (and name) into another slot. */
+/** Copy one slot's mix (and name) into another slot. The target keeps its own Crash on launch. */
 export function duplicateScene(scenes: Scenes, from: SceneSlotId, to: SceneSlotId): Scenes {
   const src = scenes.slots.find((s) => s.slot === from);
   const dst = scenes.slots.find((s) => s.slot === to);
@@ -139,7 +139,10 @@ export function duplicateScene(scenes: Scenes, from: SceneSlotId, to: SceneSlotI
   });
 }
 
-/** Put a slot back to its factory recipe for this track. */
+/**
+ * Put a slot back to its factory mix for this track. Crash on launch is the user's
+ * own choice, not part of the recipe, so it stays as it was.
+ */
 export function resetScene(
   scenes: Scenes,
   slot: SceneSlotId,
@@ -147,7 +150,18 @@ export function resetScene(
 ): Scenes {
   const old = scenes.slots.find((s) => s.slot === slot);
   if (!old) return scenes;
-  return withSlot(scenes, factoryScene(track, old.factory, slot, old.revision + 1));
+  return withSlot(scenes, { ...factoryScene(track, old.factory, slot, old.revision + 1), crash: old.crash });
+}
+
+/**
+ * Turn Crash on launch on or off for one slot (ADR-022). Explicit only: nothing else
+ * ever sets it. The revision moves, as for a rename, so the slot reads as changed;
+ * a launch already queued keeps the accent it was sent with.
+ */
+export function setSceneCrash(scenes: Scenes, slot: SceneSlotId, crash: boolean): Scenes {
+  const old = scenes.slots.find((s) => s.slot === slot);
+  if (!old || old.crash === crash) return scenes;
+  return withSlot(scenes, { ...old, crash, revision: old.revision + 1 });
 }
 
 /** Stored levels for the miniature mixer, accounting for both cuts and solos. */
@@ -242,10 +256,19 @@ export type SceneRequest = {
   /**
    * Set when the launch is a timed build (Night 7): the mix rises to the scene over
    * `bars` bars instead of switching on one onset. `bar` is the bar of the build now
-   * playing (1 to `bars`) once it has started.
+   * playing (1 to `bars`) once it has started. `fill` (Rise + Fill, Night 8) is the fill
+   * that plays its last bar, under its own request id; `filling` once it has started.
    */
-  build?: { bars: BuildBars; bar?: number };
+  build?: { bars: BuildBars; bar?: number; fill?: LinkedFill };
+  /**
+   * Set when the launch is the scene half of a Fill into (Night 8): it lands on the
+   * onset its fill ends. `filling` once that fill has started.
+   */
+  fillInto?: LinkedFill;
 };
+
+/** The fill a Fill into's scene or a Rise waits on (docs/NIGHT8_PROTOCOL.md). */
+export type LinkedFill = { fillId: number; filling?: boolean };
 
 /** Engine event kinds (docs/NIGHT3_PROTOCOL.md). */
 export const EVENT = {
@@ -267,6 +290,9 @@ export const EVENT = {
   buildRejected: 45,
   buildStarted: 46,
   buildProgress: 47,
+  fillLinked: 51,
+  fillUnlinked: 52,
+  accentFired: 53,
 } as const;
 
 /** Why something was refused or cancelled, in words for the status line. */
@@ -281,6 +307,7 @@ export const REASON: Record<number, string> = {
   8: 'already playing',
   9: 'the track changed',
   10: 'cancelled',
+  11: 'its Rise was replaced',
 };
 
 /**
@@ -358,6 +385,72 @@ function foldBuildEvent(
     default:
       return request;
   }
+}
+
+/** Where a fill request stands (docs/NIGHT3_PROTOCOL.md, docs/NIGHT8_PROTOCOL.md). */
+export type FillStatus = 'sending' | 'queued' | 'playing' | 'ended' | 'cancelled' | 'rejected';
+
+export type FillRequest = {
+  requestId: number;
+  status: FillStatus;
+  /** The bar it plays (1-based), from `fillQueued`: a phrase fill's is the phrase's last. */
+  bar?: number;
+  /** The request it leads into (a Fill into's scene), from `fillLinked` until `fillUnlinked`. */
+  linkedTo?: number;
+  /** The step that request is predicted to land on, while linked. */
+  landing?: number;
+  reason?: number;
+  /** For a refused linked request, the part refused (`b` of `fillRejected`). */
+  part?: number;
+};
+
+/** Whether a fill request may still start or is playing. */
+export const isFillPending = (f: FillRequest | null): f is FillRequest =>
+  f !== null && (f.status === 'sending' || f.status === 'queued' || f.status === 'playing');
+
+/**
+ * Fold one engine event into a fill request (kinds 11-15, 51, 52). Returns the same
+ * object for another request's event, and once the fill has ended, been cancelled or
+ * been refused, nothing moves it again. A late `fillQueued` cannot rewind a playing fill.
+ */
+export function foldFillEvent<F extends FillRequest>(fill: F, event: EngineEvent): F {
+  if (event.id !== fill.requestId || !isFillPending(fill)) return fill;
+  switch (event.kind) {
+    case EVENT.fillQueued:
+      return fill.status === 'playing' ? fill : { ...fill, status: 'queued', bar: event.a };
+    case EVENT.fillStarted:
+      return { ...fill, status: 'playing' };
+    case EVENT.fillEnded:
+      return { ...fill, status: 'ended', ...(event.a < 0 ? { reason: event.b } : {}) };
+    case EVENT.fillCancelled:
+      return { ...fill, status: 'cancelled', reason: event.a };
+    case EVENT.fillRejected:
+      return { ...fill, status: 'rejected', reason: event.a, part: event.b };
+    case EVENT.fillLinked:
+      return { ...fill, linkedTo: event.a, landing: event.b };
+    case EVENT.fillUnlinked: {
+      const rest = { ...fill };
+      delete rest.linkedTo;
+      delete rest.landing;
+      return rest;
+    }
+    default:
+      return fill;
+  }
+}
+
+/** Whether an engine event kind belongs to a fill (kinds 11-15, 51 and 52). */
+export const isFillEvent = (kind: number): boolean =>
+  (kind >= EVENT.fillQueued && kind <= EVENT.fillRejected) ||
+  kind === EVENT.fillLinked ||
+  kind === EVENT.fillUnlinked;
+/**
+ * The status line for `accentFired` (kind 53, `b`: 0 silent under a solo, 1 played,
+ * 2 merged with the Drop's own crash). A crash you could hear is said; a silent one
+ * under a solo says nothing, so the line stays "<name> active".
+ */
+export function accentStatus(name: string, b: number): string | null {
+  return b === 1 || b === 2 ? `${name} active, with a crash` : null;
 }
 
 /** Whether an engine event kind belongs to a scene launch or a timed build. */

@@ -65,14 +65,41 @@ export const ENGINE_EVENT = {
   buildRejected: 45,
   buildStarted: 46,
   buildProgress: 47,
+  fillLinked: 51,
+  fillUnlinked: 52,
+  accentFired: 53,
 } as const;
+
+/**
+ * A scene's accent (docs/NIGHT8_PROTOCOL.md): `crash` plays the transition crash once on
+ * the onset the scene (a launch, a Fill into's scene, a Rise's landing) commits, during
+ * playback. Never automatic. Where it is stored is the project format's business.
+ */
+export const SCENE_ACCENT = { none: 0, crash: 1 } as const;
+export type SceneAccent = (typeof SCENE_ACCENT)[keyof typeof SCENE_ACCENT];
+
+/** `b` of `accentFired`: silent under a solo, played, or merged with the Drop's crash. */
+export const ACCENT_FIRED = { silent: 0, played: 1, merged: 2 } as const;
 
 /** How many bars a timed build may rise over (docs/NIGHT7_PROTOCOL.md). */
 export const BUILD_BARS = [2, 4, 8] as const;
 export type BuildBars = (typeof BUILD_BARS)[number];
 
+/**
+ * What a fill ends on (docs/NIGHT8_PROTOCOL.md): 0 the next bar (Night 3), or a phrase
+ * of 2, 4, 8 or 16 bars on the absolute grid, where the loop's wrap also counts.
+ */
+export const FILL_PHRASE_BARS = [0, 2, 4, 8, 16] as const;
+export type FillPhrase = (typeof FILL_PHRASE_BARS)[number];
+
+/**
+ * `b` of the `fillRejected` and `sceneRejected` a refused Fill into posts: which part
+ * was refused (0: the whole request, such as not playing).
+ */
+export const FILL_INTO_REJECTED_PART = { scene: 1, fill: 2, lanes: 3 } as const;
+
 /** `b` of a `buildRejected` with reason `invalid`: which part was refused. */
-export const BUILD_REJECTED_PART = { bars: 1, target: 2, land: 3 } as const;
+export const BUILD_REJECTED_PART = { bars: 1, target: 2, land: 3, lanes: 4, fill: 5 } as const;
 
 /** Why a request was cancelled or rejected. */
 export const ENGINE_REASON = {
@@ -86,6 +113,8 @@ export const ENGINE_REASON = {
   alreadyPlaying: 8,
   staleGeneration: 9,
   cancelledByUser: 10,
+  /** A Rise's fill, cancelled or unlinked because its Rise was replaced (Night 8). */
+  linked: 11,
 } as const;
 
 /** Held-gesture kinds (docs/NIGHT3_PROTOCOL.md, Gestures). */
@@ -100,7 +129,8 @@ export type GestureKind = (typeof GESTURE_KIND)[keyof typeof GESTURE_KIND];
  * |---|---|---|
  * | sceneQueued, fillQueued | predicted bar (1-based) | predicted step |
  * | sceneApplied | step it applied on (-1 for Now / stopped) | 0 |
- * | sceneCancelled, sceneRejected, fillCancelled, fillRejected | reason (`ENGINE_REASON`) | 0 |
+ * | sceneCancelled, fillCancelled | reason (`ENGINE_REASON`) | 0 |
+ * | sceneRejected, fillRejected | reason (`ENGINE_REASON`) | 0, or for a Fill into the part refused (`FILL_INTO_REJECTED_PART`) |
  * | sceneReplaced | request id that replaced it | 0 |
  * | fillStarted | step | 0 |
  * | fillEnded | step the track's drums resume on (-1 when cut short) | 0, or the reason it was cut short |
@@ -116,6 +146,12 @@ export type GestureKind = (typeof GESTURE_KIND)[keyof typeof GESTURE_KIND];
  * | buildCancelled | reason (`ENGINE_REASON`) | 0 |
  * | buildReplaced | request id that replaced it (0: the idle deck's follower) | 0 |
  * | buildRejected | reason (`ENGINE_REASON`) | for `invalid`, the part (`BUILD_REJECTED_PART`) |
+ * | fillLinked | id of the request the fill leads into | predicted landing step |
+ * | fillUnlinked | reason (`ENGINE_REASON`) its partner went (10, or 11 for a replaced Rise) | 0 |
+ * | accentFired | step the crash accent fired on (-1 for a Now launch) | `ACCENT_FIRED` |
+ *
+ * A phrase fill's `fillQueued` names the bar it plays (the phrase's last), and comes
+ * again if a loop change moves it (docs/NIGHT8_PROTOCOL.md).
  */
 export type EngineEvent = {
   deck: Deck;
@@ -594,6 +630,7 @@ export class EngineHost {
     values: ArrayLike<number>,
     generation: number,
     patterns?: { requestId: number; data: Float32Array },
+    accent: SceneAccent = SCENE_ACCENT.none,
   ): void {
     this.post({
       type: 'scene',
@@ -602,6 +639,7 @@ export class EngineHost {
       timing,
       values: Array.from(values),
       ...(patterns ? { patterns: patterns.data, patternsId: patterns.requestId } : {}),
+      ...(accent ? { accent } : {}),
     });
   }
 
@@ -644,6 +682,14 @@ export class EngineHost {
    * `patterns` are the lanes the build sets, compiled, as for `queueScene`: they commit
    * on the build's end onset, after the landing and before that step's notes, and are
    * withdrawn (kinds 31-35) if the build is cancelled, rejected or replaced.
+   *
+   * `extra.fill` (Rise + Fill, docs/NIGHT8_PROTOCOL.md) finishes it with fill `index`,
+   * under its own request id, on the build's last bar; the landing still commits on the
+   * next downbeat. One transaction: a refusal of either part refuses both (`fillRejected`
+   * and `buildRejected`, part `BUILD_REJECTED_PART.fill` for the fill), a cancel of
+   * either (`cancelBuild` or `cancelFill`) ends both, and a replaced build takes its
+   * waiting fill along (`fillCancelled`, `ENGINE_REASON.linked`). The fill reports
+   * `fillQueued`, `fillLinked` (`a` = this build), then `fillStarted` and `fillEnded`.
    */
   queueBuild(
     requestId: number,
@@ -652,7 +698,9 @@ export class EngineHost {
     generation: number,
     land?: ArrayLike<number>,
     patterns?: { requestId: number; data: Float32Array },
+    extra: { fill?: { requestId: number; index: number }; accent?: SceneAccent } = {},
   ): void {
+    const { fill, accent = SCENE_ACCENT.none } = extra;
     this.post({
       type: 'build',
       requestId,
@@ -661,6 +709,8 @@ export class EngineHost {
       target: Array.from(target),
       ...(land ? { land: Array.from(land) } : {}),
       ...(patterns ? { patterns: patterns.data, patternsId: patterns.requestId } : {}),
+      ...(fill ? { fillId: fill.requestId, fillIndex: fill.index } : {}),
+      ...(accent ? { accent } : {}),
     });
   }
 
@@ -676,18 +726,62 @@ export class EngineHost {
   // -- Fills ----------------------------------------------------------------
 
   /**
-   * Ask the live deck to play fill `index` of its track (0 in Night 3) from the next
-   * bar line, for one bar. Outcomes arrive through `onSceneEvents`: `fillQueued`,
-   * `fillStarted`, `fillEnded`, or `fillRejected` (not playing, already queued or
+   * Ask the live deck to play fill `index` of its track (0 in Night 3) for one bar:
+   * from the next bar line (`phrase` 0, the default), or as the bar that ends on the
+   * next phrase line of 2, 4, 8 or 16 bars, or on the loop's wrap (docs/NIGHT8_PROTOCOL.md).
+   * A press too late for this phrase goes to the next one: `fillQueued` says which bar.
+   * Outcomes arrive through `onSceneEvents`: `fillQueued` (again if a loop change moves
+   * it), `fillStarted`, `fillEnded`, or `fillRejected` (not playing, already queued or
    * playing, mixing, stale generation, no such fill) or `fillCancelled`.
    */
-  queueFill(requestId: number, index: number, generation: number): void {
-    this.post({ type: 'fill', requestId, generation, index });
+  queueFill(requestId: number, index: number, generation: number, phrase: FillPhrase = 0): void {
+    this.post({ type: 'fill', requestId, generation, index, ...(phrase ? { phrase } : {}) });
+  }
+
+  /**
+   * Fill into (docs/NIGHT8_PROTOCOL.md): play fill `index` as `queueFill` would with
+   * `phrase`, and commit the scene `values` (44 values, copied here) on the onset the
+   * fill ends, before that step's notes, as one request. `patterns` are the lanes the
+   * scene sets, compiled, as for `queueScene`.
+   *
+   * Both parts are accepted or neither is. Outcomes arrive through `onSceneEvents`, for
+   * the fill as `fillQueued`, `fillLinked` (with the landing step), `fillStarted`,
+   * `fillEnded`, and for the scene (`sceneId`) as a launch's: `sceneQueued` with the
+   * landing bar, then `sceneApplied`. A refusal posts `fillRejected` and `sceneRejected`
+   * with the same reason and the part (`FILL_INTO_REJECTED_PART`). Another scene or a
+   * Rise replaces the scene, and the fill carries on unlinked (`fillUnlinked`).
+   */
+  queueFillInto(
+    fillId: number,
+    sceneId: number,
+    index: number,
+    values: ArrayLike<number>,
+    generation: number,
+    options: {
+      phrase?: FillPhrase;
+      patterns?: { requestId: number; data: Float32Array };
+      accent?: SceneAccent;
+    } = {},
+  ): void {
+    const { phrase = 0, patterns, accent = SCENE_ACCENT.none } = options;
+    this.post({
+      type: 'fillInto',
+      fillId,
+      sceneId,
+      generation,
+      index,
+      ...(phrase ? { phrase } : {}),
+      values: Array.from(values),
+      ...(patterns ? { patterns: patterns.data, patternsId: patterns.requestId } : {}),
+      ...(accent ? { accent } : {}),
+    });
   }
 
   /**
    * Withdraw a queued fill. Resolves true when it was still waiting for its bar (a
    * `fillCancelled` event follows), false otherwise; a fill already playing runs its bar.
+   * A Fill into's fill cancels the whole request: resolves true while the scene is
+   * still to land, and a fill already playing runs its bar unlinked.
    */
   cancelFill(requestId: number): Promise<boolean> {
     return this.ask(this.fillCancelWaiters, requestId, { type: 'cancelFill', requestId });

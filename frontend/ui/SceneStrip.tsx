@@ -1,11 +1,12 @@
 /**
- * The scene strip: four scene pads after the stem mixer, then one toolbar row with the
- * shared timing selector, the one-bar Fill, Cancel (restores the mix from before scene
- * choices) and Compare A/B. The status line and the Shift+1–4 hint sit in the panel
- * header (`SceneHeader`), so they cost no rows of their own.
+ * The scene strip: four scene pads after the stem mixer, then the toolbar: the shared
+ * timing selector and Cancel (restores the mix from before scene choices), the fill
+ * row, and Compare A/B, a row each. The status line and the Shift+1–4 hint sit in the
+ * panel header (`SceneHeader`), so they cost no rows of their own.
  *
- * A pad press only ever *launches*. Saving, renaming, duplicating and resetting live
- * in each pad's own menu, so a performance click can never overwrite a scene.
+ * A pad press only ever *launches*. Saving, renaming, duplicating, resetting and Crash
+ * on launch live in each pad's own menu, so a performance click can never overwrite a
+ * scene. A pad whose scene crashes on launch says so in words beside a bolt icon.
  *
  * What the pads show comes from the engine: a pad reads Active only after the engine
  * says the scene was applied. Until then it reads Sending…, then Queued · Bar N.
@@ -13,11 +14,17 @@
  * Switch on → Rise (Night 7, a timed build) makes a pad press rise into its scene over
  * 2, 4 or 8 bars: the pad reads Rise · Bar N, then Rising · 2 of 4 with a progress rule along
  * its foot, then Active. Pressing it again while it waits or builds cancels, and the
- * mix glides back to where it started.
+ * mix glides back to where it started. Finish with Fill (Night 8) ends the Rise with the
+ * track's fill on its last bar: the pad reads Filling into Drop for that bar.
+ *
+ * Fill (Night 8) has a row of its own under Switch on: Fill at (Next bar or Phrase end,
+ * with a 2 · 4 · 8 · 16 bars picker for Phrase end), the Fill button, and Fill → Drop, which
+ * plays the fill and lands the fourth scene on the onset it ends: the pad reads Fill in ·
+ * Bar 9, then Filling into Drop, then Active.
  */
 
 import { useEffect, useId, useRef, useState } from 'react';
-import { MoreHorizontal, X } from 'lucide-react';
+import { MoreHorizontal, X, Zap } from 'lucide-react';
 import type { Scene, SceneSlotId } from '../lib/contract';
 import { SCENE_SLOTS } from '../lib/contract';
 import {
@@ -30,12 +37,49 @@ import {
   type SceneRequest,
   type Timing,
 } from '../lib/scenes';
+import {
+  PHRASE_BAR_CHOICES,
+  fillButtonAria,
+  fillButtonJob,
+  fillButtonLabel,
+  fillButtonTitle,
+  fillInLine,
+  fillIntoAria,
+  fillIntoJob,
+  fillIntoLabel,
+  fillPhrase,
+  fillingLine,
+  type FillAt,
+  type FillJob,
+  type PhraseBars,
+} from '../lib/fills';
 import { STEM_ORDER, STEM_NAMES } from '../lib/stems';
 import type { TrackSummary } from '../lib/types';
 import { cx, Segmented } from './controls';
 import type { CSSProperties, ReactNode } from 'react';
 
-export type FillState = 'idle' | 'sending' | 'queued' | 'playing';
+/** Fill, Fill at, Fill → Drop and Finish with Fill; left out when the track has no fill. */
+export type FillControls = {
+  /** The fill the engine holds (plain, a Fill into's or a Rise's), or null. */
+  job: FillJob | null;
+  /** The track's fill, by name. */
+  name: string;
+  at: FillAt;
+  phraseBars: PhraseBars;
+  /** Finish with Fill, on Rise. */
+  riseFill: boolean;
+  /** Why Fill cannot start now, or null. */
+  unavailable: string | null;
+  /** The scene Fill → Drop lands, by its current name. */
+  intoName: string;
+  /** Why Fill → Drop cannot start now, or null. */
+  intoUnavailable: string | null;
+  onFill: () => void;
+  onFillInto: () => void;
+  onAt: (at: FillAt) => void;
+  onPhraseBars: (bars: PhraseBars) => void;
+  onRiseFill: (on: boolean) => void;
+};
 
 type Props = {
   scenes: Scene[];
@@ -51,29 +95,28 @@ type Props = {
   buildBars: BuildBars | null;
   /** Why launching is unavailable right now (a mix is running), or null. */
   unavailable: string | null;
-  /** The one-bar fill; left out until the engine has one. */
-  fill?: FillState;
-  fillBar?: number;
-  fillName?: string;
-  /** Why a fill cannot start now, or null. */
-  fillUnavailable?: string | null;
+  /** The fill controls; left out until the track has a fill. */
+  fill?: FillControls;
   onTiming: (t: Timing | 'build') => void;
   onBuildBars: (bars: BuildBars) => void;
   onLaunch: (slot: SceneSlotId) => void;
   onCancel: () => void;
-  onFill?: () => void;
   onCapture: (slot: SceneSlotId) => void;
   onRename: (slot: SceneSlotId, name: string) => boolean;
   onDuplicate: (from: SceneSlotId, to: SceneSlotId) => void;
   onReset: (slot: SceneSlotId) => void;
+  /** Crash on launch for one slot (project version 4). */
+  onCrash: (slot: SceneSlotId, crash: boolean) => void;
   /** Rendered at the end of the toolbar row (Compare A/B). */
   children?: ReactNode;
 };
 
 export function SceneStrip(props: Props) {
-  const { scenes, active, modified, request, timing, buildBars, unavailable } = props;
+  const { scenes, active, modified, request, timing, buildBars, unavailable, fill } = props;
+  const riseFill = Boolean(fill?.riseFill);
   const pending = isPending(request) && isSceneSlot(request.target) ? request : null;
   const [menuFor, setMenuFor] = useState<SceneSlotId | null>(null);
+  const reasonIds = { fill: useId(), into: useId() };
 
   return (
     <section className="scene-strip" aria-label="Scenes">
@@ -102,9 +145,9 @@ export function SceneStrip(props: Props) {
               : state === 'sending'
                 ? 'Sending…'
                 : state === 'queued'
-                  ? queuedLine(queued!)
+                  ? queuedLine(queued!, scene.name)
                   : state === 'building'
-                    ? buildingLine(queued!)
+                    ? buildingLine(queued!, scene.name)
                     : state === 'modified'
                       ? 'Active · Modified'
                       : state === 'active'
@@ -128,19 +171,32 @@ export function SceneStrip(props: Props) {
                 disabled={state === 'unavailable'}
                 aria-label={
                   queued
-                    ? `Cancel ${queued.build ? 'the rise into' : 'the queued'} ${scene.name}`
+                    ? `Cancel ${queued.build ? 'the rise into' : queued.fillInto ? 'Fill into' : 'the queued'} ${scene.name}`
                     : buildBars !== null
-                      ? `Rise into ${scene.name} over ${buildBars} bars`
+                      ? `Rise into ${scene.name} over ${buildBars} bars${riseFill ? ', ending with a fill' : ''}`
                       : `Launch ${scene.name}`
                 }
                 aria-pressed={isActive}
                 aria-keyshortcuts={`Shift+${i + 1}`}
                 aria-describedby={`scene-summary-${slot} scene-line-${slot}`}
+                data-crash={scene.crash ? 'on' : undefined}
                 title={`${preview.description} · Shift+${i + 1}`}
                 onClick={() => props.onLaunch(slot)}
               >
                 <span className="scene-name">{scene.name}</span>
-                <span id={`scene-summary-${slot}`} className="scene-summary">{preview.summary}</span>
+                <span id={`scene-summary-${slot}`} className="scene-summary">
+                  {scene.crash ? (
+                    <>
+                      <span className="scene-crash-mark">
+                        <Zap aria-hidden="true" size={11} strokeWidth={2.5} />
+                        Crash<span className="sr-only"> on launch</span>
+                      </span>
+                      <span className="scene-crash-sep" aria-hidden="true">·</span>
+                      <span className="sr-only">, </span>
+                    </>
+                  ) : null}
+                  {preview.summary}
+                </span>
                 <span className="scene-pad-foot">
                   <span className="scene-mix-preview" aria-hidden="true">
                     {sceneLevels(scene).map((level, index) => (
@@ -187,6 +243,7 @@ export function SceneStrip(props: Props) {
                     props.onReset(slot);
                     setMenuFor(null);
                   }}
+                  onCrash={(on) => props.onCrash(slot, on)}
                 />
               ) : null}
             </div>
@@ -195,6 +252,7 @@ export function SceneStrip(props: Props) {
       </div>
       <div className="scene-toolbar">
         <Segmented<Timing | 'build'>
+          radio
           label="Switch on"
           value={buildBars !== null ? 'build' : timing}
           onPick={props.onTiming}
@@ -206,19 +264,22 @@ export function SceneStrip(props: Props) {
           ]}
         />
         {buildBars !== null ? (
-          <div className="scene-build-bars">
-            <Segmented<BuildBars>
-              label="Rise over"
-              hideLabel
-              value={buildBars}
-              onPick={props.onBuildBars}
-              options={BUILD_BAR_CHOICES.map((n) => ({ value: n, label: `${n}`, aria: `Rise over ${n} bars` }))}
-            />
-            <span className="scene-build-unit" aria-hidden="true">bars</span>
-          </div>
+          <>
+            <div className="scene-build-bars">
+              <Segmented<BuildBars>
+                radio
+                label="Rise over"
+                hideLabel
+                value={buildBars}
+                onPick={props.onBuildBars}
+                options={BUILD_BAR_CHOICES.map((n) => ({ value: n, label: `${n}`, aria: `Rise over ${n} bars` }))}
+              />
+              <span className="scene-build-unit" aria-hidden="true">bars</span>
+            </div>
+            {fill ? <RiseFillToggle fill={fill} /> : null}
+          </>
         ) : null}
         <div className="scene-strip-actions">
-          {props.onFill ? <FillButton {...props} /> : null}
           <button
             type="button"
             className="text-button scene-cancel"
@@ -230,8 +291,10 @@ export function SceneStrip(props: Props) {
             <X size={12} aria-hidden="true" /> Cancel
           </button>
         </div>
+        {fill ? <FillTools fill={fill} ids={reasonIds} /> : null}
         {props.children}
       </div>
+      {fill ? <FillReasons fill={fill} ids={reasonIds} /> : null}
     </section>
   );
 }
@@ -255,46 +318,148 @@ export function SceneHeader({ status }: { status: string }) {
   );
 }
 
-function queuedLine(r: SceneRequest): string {
+function queuedLine(r: SceneRequest, name: string): string {
   if (r.build) return r.bar ? `Rise · Bar ${r.bar}` : 'Rise queued';
+  if (r.fillInto) return r.fillInto.filling ? fillingLine(name) : fillInLine(r.bar);
   if (r.timing === 'now') return 'Queued · now';
   return r.bar ? `Queued · Bar ${r.bar}` : 'Queued';
 }
 
-function buildingLine(r: SceneRequest): string {
+function buildingLine(r: SceneRequest, name: string): string {
   const b = r.build!;
+  if (b.fill?.filling) return fillingLine(name);
   return `Rising · ${b.bar ?? 1} of ${b.bars}`;
 }
 
-function FillButton(props: Props) {
-  const { fill = 'idle', fillBar, fillName = 'Fill', fillUnavailable = null } = props;
-  const label =
-    fill === 'playing'
-      ? 'Fill playing'
-      : fill === 'queued'
-        ? fillBar
-          ? `Fill · Bar ${fillBar}`
-          : 'Fill queued'
-        : fill === 'sending'
-          ? 'Fill…'
-          : 'Drum fill';
-  const aria =
-    fill === 'playing'
-      ? `${fillName} is playing`
-      : fill === 'queued' || fill === 'sending'
-        ? `Cancel the queued ${fillName}`
-        : `${fillName} for one bar, from the next bar`;
+/**
+ * Finish with Fill, beside Rise's bars: one pill, filled acid when on. "+ Fill" on a
+ * narrow panel; its name stays the full one.
+ */
+function RiseFillToggle({ fill }: { fill: FillControls }) {
+  return (
+    <div className="segmented scene-rise-fill">
+      <button
+        type="button"
+        role="switch"
+        className="segment tap"
+        aria-checked={fill.riseFill}
+        aria-label="Finish with Fill: the fill plays the Rise's last bar"
+        title="Finish with Fill: the fill plays the Rise's last bar, and the scene lands on the next downbeat"
+        onClick={() => fill.onRiseFill(!fill.riseFill)}
+      >
+        <span className="rise-fill-full">Finish with Fill</span>
+        <span className="rise-fill-short" aria-hidden="true">+ Fill</span>
+      </button>
+    </div>
+  );
+}
+
+/** Why the Fill button can't be pressed now, when it is waiting to be (not while playing). */
+const fillReason = (fill: FillControls): string | null => (fillButtonJob(fill.job) ? null : fill.unavailable);
+/** Why Fill → Drop can't be pressed now; never while it is its own to cancel. */
+const fillIntoReason = (fill: FillControls): string | null => (fillIntoJob(fill.job) ? null : fill.intoUnavailable);
+
+/**
+ * The fill buttons' reasons, outside the toolbar so they take no room and stay out of
+ * the buttons' own words: hidden, and read as each button's description.
+ */
+function FillReasons({ fill, ids }: { fill: FillControls; ids: { fill: string; into: string } }) {
+  const a = fillReason(fill);
+  const b = fillIntoReason(fill);
+  return (
+    <>
+      {a ? <span id={ids.fill} hidden>Unavailable: {a}</span> : null}
+      {b ? <span id={ids.into} hidden>Unavailable: {b}</span> : null}
+    </>
+  );
+}
+
+/** Fill's own row: Fill at, the phrase length (Phrase end only), Fill and Fill → Drop. */
+function FillTools({ fill, ids }: { fill: FillControls; ids: { fill: string; into: string } }) {
+  return (
+    <div className="scene-fill-tools" role="group" aria-label="Fill">
+      <Segmented<FillAt>
+        radio
+        label="Fill at"
+        value={fill.at}
+        onPick={fill.onAt}
+        options={[
+          { value: 'bar', label: 'Next bar', short: 'Bar', aria: 'Fill on the next bar' },
+          { value: 'phrase', label: 'Phrase end', short: 'Phrase', aria: 'Fill at the phrase end' },
+        ]}
+      />
+      {fill.at === 'phrase' ? (
+        <div className="scene-phrase-bars">
+          <Segmented<PhraseBars>
+            radio
+            label="Phrase length"
+            hideLabel
+            value={fill.phraseBars}
+            onPick={fill.onPhraseBars}
+            options={PHRASE_BAR_CHOICES.map((n) => ({ value: n, label: `${n}`, aria: `Phrases of ${n} bars` }))}
+          />
+          <span className="scene-build-unit" aria-hidden="true">bars</span>
+        </div>
+      ) : null}
+      <FillButton fill={fill} reasonId={ids.fill} />
+      <FillIntoButton fill={fill} reasonId={ids.into} />
+    </div>
+  );
+}
+
+/**
+ * The Fill button: the track's fill, at the Fill at timing. Shows where a queued fill
+ * plays ("Fill · Bar 8", "Fill · Next phrase") and any fill playing.
+ *
+ * Unavailable is aria-disabled, not disabled: it stays in the tab order, so focus is
+ * not dropped to the page when a queued fill starts playing under it, and the reason
+ * (a Rise ending with the fill, say) is read as its description.
+ */
+function FillButton({ fill, reasonId }: { fill: FillControls; reasonId: string }) {
+  const own = fillButtonJob(fill.job);
+  const state = own ? own.status : 'idle';
+  const phrase = fillPhrase(fill.at, fill.phraseBars);
+  const off = state === 'playing' || (state === 'idle' && fill.unavailable !== null);
+  const reason = fillReason(fill);
   return (
     <button
       type="button"
-      className={cx('fill-button tap', fill !== 'idle' && 'is-on')}
-      data-state={fill}
-      disabled={fill === 'playing' || (fill === 'idle' && fillUnavailable !== null)}
-      aria-label={aria}
-      title={fill === 'idle' && fillUnavailable ? fillUnavailable : `${fillName}: one bar, from the next bar`}
-      onClick={props.onFill}
+      className={cx('fill-button tap', state !== 'idle' && 'is-on')}
+      data-state={state}
+      aria-disabled={off || undefined}
+      aria-label={fillButtonAria(fill.job, fill.name, phrase)}
+      aria-describedby={reason ? reasonId : undefined}
+      title={reason ?? fillButtonTitle(fill.name, own ? own.phrase : phrase)}
+      onClick={off ? undefined : fill.onFill}
     >
-      {label}
+      {fillButtonLabel(fill.job)}
+    </button>
+  );
+}
+
+/**
+ * Fill → Drop: the fill, then the fourth scene on the onset it ends, as one request.
+ * "Fill · Bar 8 → Drop" while it waits, "Filling → Drop" while the fill plays; pressing it
+ * again cancels it.
+ */
+function FillIntoButton({ fill, reasonId }: { fill: FillControls; reasonId: string }) {
+  const own = fillIntoJob(fill.job);
+  const state = own ? own.status : 'idle';
+  const phrase = fillPhrase(fill.at, fill.phraseBars);
+  const aria = fillIntoAria(fill.job, fill.intoName, phrase);
+  const reason = fillIntoReason(fill);
+  return (
+    <button
+      type="button"
+      className={cx('fill-into-button tap', own && 'is-on')}
+      data-state={state}
+      aria-disabled={reason !== null || undefined}
+      aria-label={aria}
+      aria-describedby={reason ? reasonId : undefined}
+      title={reason ?? aria}
+      onClick={reason !== null ? undefined : fill.onFillInto}
+    >
+      {fillIntoLabel(fill.job, fill.intoName)}
     </button>
   );
 }
@@ -308,6 +473,7 @@ function SceneMenu({
   onRename,
   onDuplicate,
   onReset,
+  onCrash,
 }: {
   scene: Scene;
   scenes: Scene[];
@@ -317,6 +483,7 @@ function SceneMenu({
   onRename: (name: string) => boolean;
   onDuplicate: (to: SceneSlotId) => void;
   onReset: () => void;
+  onCrash: (crash: boolean) => void;
 }) {
   const titleId = useId();
   const ref = useRef<HTMLDivElement>(null);
@@ -408,6 +575,11 @@ function SceneMenu({
           Rename…
         </button>
       )}
+      {/* Saved with the scene; stays open so the change is seen. Undo takes it back. */}
+      <label className="scene-menu-check">
+        <input type="checkbox" checked={scene.crash} onChange={(e) => onCrash(e.target.checked)} />
+        <span>Crash on launch</span>
+      </label>
       <p className="scene-menu-group">Duplicate to</p>
       <div className="scene-menu-row">
         {scenes

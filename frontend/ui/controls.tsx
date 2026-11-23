@@ -9,7 +9,7 @@
  */
 
 import { useEffect, useId, useRef } from 'react';
-import type { ReactNode, PointerEvent as ReactPointerEvent } from 'react';
+import type { KeyboardEvent as ReactKeyboardEvent, ReactNode, PointerEvent as ReactPointerEvent } from 'react';
 import { engine } from '../lib/engine';
 import { editHistory } from '../lib/history';
 import type { StemState } from '../lib/stems';
@@ -311,9 +311,38 @@ export function Fader({
   );
 }
 
+/** Arrow keys, Home and End inside a radio group: the next pill is focused and picked. */
+function radioKey(event: ReactKeyboardEvent<HTMLButtonElement>) {
+  const step =
+    event.key === 'ArrowRight' || event.key === 'ArrowDown'
+      ? 1
+      : event.key === 'ArrowLeft' || event.key === 'ArrowUp'
+        ? -1
+        : event.key === 'Home'
+          ? -Infinity
+          : event.key === 'End'
+            ? Infinity
+            : 0;
+  if (!step) return;
+  const group = event.currentTarget.closest('[role="radiogroup"]');
+  const radios = group ? [...group.querySelectorAll<HTMLButtonElement>('[role="radio"]:not(:disabled)')] : [];
+  const at = radios.indexOf(event.currentTarget);
+  if (at < 0 || radios.length < 2) return;
+  event.preventDefault();
+  const next =
+    step === -Infinity ? radios[0] : step === Infinity ? radios[radios.length - 1] : radios[(at + step + radios.length) % radios.length];
+  next?.focus();
+  next?.click();
+}
+
 /**
  * A row of mutually exclusive pills. Picking the lit one again is passed through to
  * `onPick` so a caller can make it mean "off" (Loop and Echo time do).
+ *
+ * `radio` makes it a real radio group (role radiogroup, aria-checked, one tab stop,
+ * arrow keys move and pick) for pickers where one choice is always on and picking it
+ * again means nothing: the scene strip's Switch on, Rise over, Fill at and phrase
+ * length. The others stay toggle buttons, since some of them can be picked off.
  */
 export function Segmented<T extends string | number>({
   label,
@@ -324,6 +353,7 @@ export function Segmented<T extends string | number>({
   hideLabel = false,
   perKnobColumn,
   title,
+  radio = false,
 }: {
   label: string;
   /** A shorter word shown in place of the label; the full label stays the group's name. */
@@ -343,14 +373,20 @@ export function Segmented<T extends string | number>({
   perKnobColumn?: number;
   /** A tooltip for this control alone, not the row it sits in. */
   title?: string;
+  /** A radio group rather than toggle buttons (see above). */
+  radio?: boolean;
 }) {
   const id = useId();
+  // With nothing checked, the first radio takes the group's one tab stop.
+  const tabStop = options.some((o) => o.value === value) ? value : options[0]?.value;
   const pill = (o: { value: T; label: string; short?: string; aria?: string; icon?: ReactNode }) => (
     <button
       key={String(o.value)}
       type="button"
       className={cx('segment tap', o.icon ? 'segment-icon' : undefined)}
-      aria-pressed={value === o.value}
+      {...(radio
+        ? { role: 'radio', 'aria-checked': value === o.value, tabIndex: o.value === tabStop ? 0 : -1, onKeyDown: radioKey }
+        : { 'aria-pressed': value === o.value })}
       aria-label={o.aria ?? (o.short ? o.label : undefined)}
       title={o.icon ? o.label : undefined}
       onClick={() => onPick(o.value)}
@@ -401,7 +437,7 @@ export function Segmented<T extends string | number>({
       ) : (
         <div
           className="segmented"
-          role="group"
+          role={radio ? 'radiogroup' : 'group'}
           aria-labelledby={id}
           style={{ gridTemplateColumns: `repeat(${options.length}, minmax(0, 1fr))` }}
         >

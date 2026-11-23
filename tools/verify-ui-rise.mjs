@@ -97,9 +97,9 @@ function kit(page) {
     await page.waitForFunction(() => document.querySelector('.app')?.getAttribute('data-playing') === 'yes', null, RT);
   };
   const riseOver = async (n) => {
-    const rise = page.getByRole('button', { name: 'Rise into the scene over several bars' });
-    if ((await rise.getAttribute('aria-pressed')) !== 'true') await rise.click();
-    await page.getByRole('button', { name: `Rise over ${n} bars` }).click();
+    const rise = page.getByRole('radio', { name: 'Rise into the scene over several bars' });
+    if ((await rise.getAttribute('aria-checked')) !== 'true') await rise.click();
+    await page.getByRole('radio', { name: `Rise over ${n} bars` }).click();
   };
   // A knob's range input takes only multiples of its step; Playwright refuses any other.
   const knobFill = async (name, value) => {

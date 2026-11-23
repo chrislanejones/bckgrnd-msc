@@ -1,6 +1,8 @@
 # ADR-008: Transition sounds sit outside the stems and fire only on a natural crossing
 Date: 2026-10-05 (backfilled)   Status: accepted (10-05-2026)
 
+> Amendment proposed 11-19-2026. ADR-022 (draft) would amend "a launch makes no transition sound": a scene marked Crash on launch fires the crash when it commits during playback. Unmarked scenes stay silent.
+
 ## Context
 The song is 256 steps in four 4-bar parts, and the `[ ]` brackets on the
 waveform named them, but nothing in the sound marked the Break or the Drop. The

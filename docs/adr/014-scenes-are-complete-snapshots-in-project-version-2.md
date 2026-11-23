@@ -1,6 +1,8 @@
 # ADR-014: Scenes are complete snapshots, stored in project version 2
 Date: 2026-11-04   Status: draft
 
+> Amendment proposed 11-19-2026. ADR-023 (draft) would add an explicit `crash` boolean to every scene, in project version 4.
+
 ## Context
 Night 3 adds four scene slots (Full, Sparse, Build, Drop) that a project has to keep.
 The v1 schema (ADR-012) has `additionalProperties: false` at the top and `patterns`

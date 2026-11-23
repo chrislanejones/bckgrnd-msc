@@ -78,7 +78,8 @@ check('bundle is pinned to this build (worklet/wasm cache key)', app.includes(ma
 
 // 4. The manifest describes what was actually shipped.
 check('manifest format', manifest.format === 'bckgrnd-msc/build' && manifest.version === 1);
-check('manifest contract versions', manifest.projectVersion === 3 && manifest.snapshotVersion === 1
+const projectVersion = JSON.parse(readFileSync(resolve(root, 'contracts/project.schema.json'), 'utf8')).properties.version.const;
+check('manifest contract versions', manifest.projectVersion === projectVersion && manifest.snapshotVersion === 1
   && manifest.renderer === 'project-renderer-1',
   `project v${manifest.projectVersion}, snapshot v${manifest.snapshotVersion}, ${manifest.renderer}`);
 const tree = (name, sub) => {

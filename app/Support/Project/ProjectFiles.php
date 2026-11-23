@@ -20,13 +20,41 @@ final class ProjectFiles
         return $out;
     }
 
+    /**
+     * The oldest musical version a snapshot may hold. Snapshots arrived with project
+     * version 3 (Night 6); bare v1/v2 project files still open through Contract::migrate().
+     */
+    public const OLDEST_SNAPSHOT_PROJECT = 3;
+
+    /**
+     * A stored project as the current version states it, reading and repairing
+     * nothing: v3 -> v4 only says `crash: false` on every scene (ADR-023). Mirrors
+     * `asCurrentVersion()` in frontend/lib/snapshot.ts.
+     *
+     * @param  array<string, mixed>  $project
+     * @return array<string, mixed>
+     */
+    public static function asCurrentVersion(array $project): array
+    {
+        if (($project['version'] ?? null) !== 3 || !is_array($project['scenes']['slots'] ?? null)) return $project;
+        $project['version'] = Contract::VERSION;
+        foreach ($project['scenes']['slots'] as $i => $slot) {
+            if (is_array($slot)) $project['scenes']['slots'][$i]['crash'] = false;
+        }
+        return $project;
+    }
+
     public static function validate(array $s): void
     {
+        $version = $s['project']['version'] ?? null;
+        if (is_int($version) && $version > Contract::VERSION) {
+            throw new RuntimeException("Project version {$version} is newer than this app understands (".Contract::VERSION.'). Keep the original file and use a newer app.');
+        }
         if (($s['format'] ?? '') !== 'bckgrnd-msc/snapshot' || ($s['version'] ?? 0) !== 1
             || ($s['renderer'] ?? '') !== 'project-renderer-1'
             || !is_string($s['id'] ?? null) || !preg_match('/^[a-zA-Z0-9_-]{1,100}$/D', $s['id'])
             || !is_int($s['revision'] ?? null) || $s['revision'] < 1
-            || ($s['project']['version'] ?? 0) !== 3) {
+            || !is_int($version) || $version < self::OLDEST_SNAPSHOT_PROJECT) {
             throw new RuntimeException('Unsupported or malformed project snapshot.');
         }
         if (array_diff(array_keys($s), ['format', 'version', 'id', 'revision', 'savedAt', 'renderer', 'source', 'project'])
@@ -34,8 +62,10 @@ final class ProjectFiles
             || ($s['source']['trackId'] ?? null) !== ($s['project']['trackId'] ?? null)
             || !preg_match('/^[a-f0-9]{64}$/D', $s['source']['sha256'] ?? '')
             || array_diff(array_keys($s['source']), ['trackId', 'sha256'])) throw new RuntimeException('Malformed snapshot metadata.');
+        // Canonical, complete documents only: an older one is held to the same check after
+        // the one step its migration states, so nothing is clamped or dropped quietly.
         $normalized = json_decode(json_encode(Contract::migrate($s['project']), JSON_THROW_ON_ERROR), true);
-        if ($normalized != $s['project']) throw new RuntimeException('Project contains invalid values or unsupported fields.');
+        if ($normalized != self::asCurrentVersion($s['project'])) throw new RuntimeException('Project contains invalid values or unsupported fields.');
     }
 
     public function write(array $snapshot, ?int $expected): void
@@ -47,18 +77,20 @@ final class ProjectFiles
         $lock = fopen($path.'.lock', 'c');
         if (!$lock || !flock($lock, LOCK_EX)) throw new RuntimeException('Cannot lock project storage.');
         try {
-            $record = is_file($path) ? json_decode(file_get_contents($path), true, flags: JSON_THROW_ON_ERROR) : [];
+            // Revisions this write doesn't replace are kept exactly as stored, decoded as
+            // objects so `{}` stays `{}`: an older (v3) revision is never rewritten as v4
+            // behind the user's back, only the snapshot being written is current.
+            $stored = is_file($path) ? json_decode(file_get_contents($path), false, flags: JSON_THROW_ON_ERROR) : null;
+            $record = $stored instanceof \stdClass ? get_object_vars($stored) : [];
+            $revision = static fn (mixed $entry): int => is_object($entry) ? (int) ($entry->revision ?? 0) : (int) ($entry['revision'] ?? 0);
             if ($expected === null) {
-                if (max($record['current']['revision'] ?? 0, $record['recovery']['revision'] ?? 0) >= $snapshot['revision']) return;
+                if (max($revision($record['current'] ?? null), $revision($record['recovery'] ?? null)) >= $snapshot['revision']) return;
                 $record['recovery'] = $snapshot;
             } else {
-                if (($record['current']['revision'] ?? 0) !== $expected || $snapshot['revision'] < $expected) throw new RuntimeException('This project changed in another window. Save As to preserve both versions.');
+                if ($revision($record['current'] ?? null) !== $expected || $snapshot['revision'] < $expected) throw new RuntimeException('This project changed in another window. Save As to preserve both versions.');
                 if (isset($record['current'])) $record['previous'] = $record['current'];
                 $record['current'] = $snapshot;
-                if (($record['recovery']['revision'] ?? 0) <= $snapshot['revision']) unset($record['recovery']);
-            }
-            foreach (['current', 'previous', 'recovery'] as $key) {
-                if (isset($record[$key])) $record[$key]['project'] = Contract::migrate(json_decode(json_encode($record[$key]['project']), true));
+                if ($revision($record['recovery'] ?? null) <= $snapshot['revision']) unset($record['recovery']);
             }
             self::atomicWrite($path, json_encode($record, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR));
         } finally { flock($lock, LOCK_UN); fclose($lock); }

@@ -29,6 +29,89 @@ const file = async () => {
   return JSON.parse(readFileSync(path, 'utf8'));
 };
 
+/**
+ * Crash on launch (project version 4, ADR-022): the toggle in a pad's options, the
+ * pad's mark, one undo step, save → reopen, and the launch carrying the accent to the
+ * engine, read back from event 53 in the status line ("with a crash"), by a pad, by a
+ * Rise's landing, and quiet under a solo.
+ */
+async function crashOnLaunch() {
+  const slot = (i) => page.locator('.scene-slot').nth(i);
+  const status = () => page.locator('.scene-status').textContent();
+  const crashes = async () => (await project()).scenes.slots.map((x) => x.crash);
+  const toggle = async (i, on) => {
+    await slot(i).locator('.scene-menu-button').click();
+    const box = page.getByRole('checkbox', { name: 'Crash on launch', exact: true });
+    assert.equal(await box.isChecked(), !on);
+    if (on) await box.check(); else await box.uncheck();
+    await page.keyboard.press('Escape');
+  };
+  const said = (text) => page.waitForFunction((t) => document.querySelector('.scene-status')?.textContent === t, text, { timeout: 30000 });
+  const names = (await project()).scenes.slots.map((x) => x.name);
+
+  assert.deepEqual(await crashes(), [false, false, false, false], 'off by default');
+  assert.equal(await page.locator('.scene-crash-mark').count(), 0, 'no mark until asked for');
+  await toggle(3, true);
+  assert.deepEqual(await crashes(), [false, false, false, true]);
+  assert.equal(await slot(3).locator('.scene-crash-mark').textContent(), 'Crash on launch', 'the mark is words and an icon, not color');
+  assert.equal(await slot(3).locator('.scene-crash-mark svg').count(), 1);
+  assert.equal(await status(), `${names[3]} crashes on launch`);
+  // One undo step takes it back, and redo returns it.
+  await page.evaluate(() => (document.activeElement instanceof HTMLElement ? document.activeElement.blur() : undefined));
+  await page.keyboard.press('Control+z');
+  await page.waitForFunction(() => window.__BCKGRND_PROJECT__().scenes.slots[3].crash === false);
+  assert.equal(await slot(3).locator('.scene-crash-mark').count(), 0);
+  await page.keyboard.press('Control+Shift+z');
+  await page.waitForFunction(() => window.__BCKGRND_PROJECT__().scenes.slots[3].crash === true);
+
+  // Save → reopen: the file is v4 and carries it; a reload and Open bring it back.
+  await menu(); await page.getByLabel('Project name', { exact: true }).fill('Crash café'); await save();
+  const saved = await file();
+  assert.equal(saved.project.version, 4);
+  assert.deepEqual(saved.project.scenes.slots.map((x) => x.crash), [false, false, false, true]);
+  assert.deepEqual((await readSnapshot(saved, library.tracks, source)).project.scenes.slots.map((x) => x.crash), [false, false, false, true]);
+  await close();
+  await page.reload(); await page.waitForFunction(() => !!window.__BCKGRND_PROJECT__?.());
+  await menu(); await page.locator('li', { hasText: 'Crash café' }).getByRole('button', { name: 'Open', exact: true }).click();
+  await page.waitForFunction(() => document.querySelector('[data-testid="project-status"]')?.textContent?.startsWith('Opened '));
+  await close();
+  assert.deepEqual(await crashes(), [false, false, false, true]);
+  assert.equal(await slot(3).locator('.scene-crash-mark').count(), 1);
+  assert.equal(await page.locator('.save-status').textContent(), 'Saved', 'reopening is not an edit');
+
+  // A pad launch during playback carries the accent: event 53 comes back as heard.
+  await page.getByRole('button', { name: 'Play the track', exact: true }).click();
+  await page.waitForFunction(() => document.querySelector('.app')?.dataset.playing === 'yes');
+  await page.getByRole('button', { name: `Launch ${names[0]}`, exact: true }).click();
+  await said(`${names[0]} active`);
+  await page.getByRole('button', { name: `Launch ${names[3]}`, exact: true }).click();
+  await said(`${names[3]} active, with a crash`);
+  // A Rise's landing carries it too.
+  await page.getByRole('button', { name: `Launch ${names[0]}`, exact: true }).click();
+  await said(`${names[0]} active`);
+  await page.getByRole('radio', { name: 'Rise into the scene over several bars', exact: true }).click();
+  await page.getByRole('radio', { name: 'Rise over 2 bars', exact: true }).click();
+  await page.getByRole('button', { name: `Rise into ${names[3]} over 2 bars`, exact: true }).click();
+  await said(`${names[3]} active, with a crash`);
+  await page.getByRole('radio', { name: 'Launch on the next bar', exact: true }).click();
+  // Under a solo (the scene's own) the crash is silent, and the line says nothing of it.
+  await page.getByRole('button', { name: 'Solo Kick' }).click();
+  await slot(2).locator('.scene-menu-button').click();
+  await page.getByRole('button', { name: 'Capture current mix', exact: true }).click();
+  await toggle(2, true);
+  await page.getByRole('button', { name: `Launch ${names[2]}`, exact: true }).click();
+  await said(`${names[2]} active`);
+  await page.waitForTimeout(1500);
+  assert.equal(await status(), `${names[2]} active`, 'a crash silent under a solo is not announced');
+  await page.getByRole('button', { name: 'Solo Kick' }).click();
+  await page.getByRole('button', { name: 'Stop the track', exact: true }).click();
+  // Stopped, a launch applies with no sound and so says nothing of a crash.
+  await page.getByRole('button', { name: `Launch ${names[3]}`, exact: true }).click();
+  await said(`${names[3]} active`);
+  await page.waitForTimeout(500);
+  assert.equal(await status(), `${names[3]} active`);
+}
+
 try {
   await page.goto(base); await page.waitForFunction(() => !!window.__BCKGRND_PROJECT__?.());
   // An untouched track has nothing to lose: no warning, no recovery row, no "Unsaved".
@@ -77,8 +160,13 @@ try {
   await close();
   // Import portable accepted composition before editing and saving it.
   await menu();
+  const releaseBytes = readFileSync('tests/fixtures/release/edited.bckgrnd.json', 'utf8');
   await page.locator('input[type=file]').setInputFiles('tests/fixtures/release/edited.bckgrnd.json');
   await page.waitForFunction(() => document.querySelector('[data-testid="project-status"]')?.textContent?.startsWith('Opened '));
+  // A v3 release file opens as v4 with every scene's crash off, and the file is left alone.
+  assert.equal(JSON.parse(releaseBytes).project.version, 3);
+  { const opened = await project(); assert.equal(opened.version, 4); assert.deepEqual(opened.scenes.slots.map((x) => x.crash), [false, false, false, false]); }
+  assert.equal(readFileSync('tests/fixtures/release/edited.bckgrnd.json', 'utf8'), releaseBytes);
   await close();
   await page.getByRole('button', { name: 'Edit patterns', exact: true }).click();
   await page.locator('[data-drum-cell][data-lane="clap"][data-step="1"]').click();
@@ -136,10 +224,11 @@ try {
   const older = readFileSync('tests/fixtures/contract/v1-sparse.input.json', 'utf8');
   await page.locator('input[type=file]').setInputFiles('tests/fixtures/contract/v1-sparse.input.json');
   await page.waitForFunction(() => document.querySelector('[data-testid="project-status"]')?.textContent?.startsWith('Opened '));
-  assert.equal((await file()).project.version, 3);
+  { const migrated = (await file()).project; assert.equal(migrated.version, 4); assert.ok(migrated.scenes.slots.every((x) => x.crash === false), 'a v1 import states every crash off'); }
   assert.equal(readFileSync('tests/fixtures/contract/v1-sparse.input.json', 'utf8'), older);
   assert.equal(await page.locator('.app').getAttribute('data-playing'), 'no');
   await close();
+  await crashOnLaunch();
   // A candidate may sound, but saving still records accepted working patterns.
   await page.getByRole('button', { name: 'Edit patterns', exact: true }).click();
   await page.getByRole('button', { name: 'Closed hat', exact: true }).click();
@@ -200,7 +289,7 @@ try {
     assert.equal(await tab.getByRole('button', { name: 'Reveal Export' }).count(), 0, 'static build offers no desktop file actions');
     assert.deepEqual(nativeCalls, [], 'static build never calls the native bridge');
     await web.close();
-    console.log(`PASS (static) project save/reopen/no-autoplay, Full → Drop → Cancel → save, failed save, migration, preview exclusion, recovery, export cancellation, PCM WAV (${bytes.length} bytes), browser storage despite a desktop token. Artifacts: ${temp}`);
+    console.log(`PASS (static) project save/reopen/no-autoplay, v3/v1 → v4, crash on launch (toggle, mark, undo, save/reopen, pad and Rise accent, quiet under solo), Full → Drop → Cancel → save, failed save, migration, preview exclusion, recovery, export cancellation, PCM WAV (${bytes.length} bytes), browser storage despite a desktop token. Artifacts: ${temp}`);
   } else {
   // Desktop: Save As ties the project to its file, and Save keeps that file current. The
   // bridge is mocked here; ProjectFilesTest covers the real file writes.
@@ -232,6 +321,6 @@ try {
   calls = []; fileFails = false; await saveProject(); await said(`Desk song 3 · r`); await said(chosen);
   assert.deepEqual(writes(), ['update-file']);
   await desktop.close();
-  console.log(`PASS project save/reopen/no-autoplay, Full → Drop → Cancel → save, failed save, migration, preview exclusion, recovery, export cancellation, PCM WAV (${bytes.length} bytes). Artifacts: ${temp}`);
+  console.log(`PASS project save/reopen/no-autoplay, v3/v1 → v4, crash on launch (toggle, mark, undo, save/reopen, pad and Rise accent, quiet under solo), Full → Drop → Cancel → save, failed save, migration, preview exclusion, recovery, export cancellation, PCM WAV (${bytes.length} bytes). Artifacts: ${temp}`);
   }
 } finally { await context.close(); await browser.close(); }

@@ -23,6 +23,14 @@ use crate::transport::Transport;
 /// Fills start on bar lines.
 const FILL_GRID: usize = 16;
 
+/// The phrase lengths a fill can end on, in bars (`docs/NIGHT8_PROTOCOL.md`). 0 is not
+/// a phrase: the fill plays the next bar, as it always has.
+pub const FILL_PHRASE_BARS: [u8; 5] = [0, 2, 4, 8, 16];
+
+/// The fill lengths `queue_fill_at` takes. Only 0, one bar, for now; the argument is
+/// there so more lengths fit later without changing the call.
+pub const FILL_LENGTHS: [u8; 1] = [0];
+
 /// Length of the scene vector: 8 stems x (volume, send, muted, solo), then 12 effects.
 pub const SCENE_LEN: usize = 44;
 
@@ -142,6 +150,9 @@ pub enum Timing {
     Beat,
     /// The first eligible onset on a multiple of 16 steps.
     Bar,
+    /// On the onset serial [`PendingScene::due`]: the scene of a Fill into, which
+    /// commits on the onset its fill ends (`docs/NIGHT8_PROTOCOL.md`). Never on the wire.
+    Linked,
 }
 
 impl Timing {
@@ -157,7 +168,7 @@ impl Timing {
     /// Steps between eligible onsets, or `None` for `Now`, which waits on no onset.
     pub fn grid(self) -> Option<usize> {
         match self {
-            Self::Now => None,
+            Self::Now | Self::Linked => None,
             Self::Beat => Some(4),
             Self::Bar => Some(16),
         }
@@ -198,6 +209,30 @@ pub mod event {
     pub const BUILD_REJECTED: u8 = 45;
     pub const BUILD_STARTED: u8 = 46;
     pub const BUILD_PROGRESS: u8 = 47;
+    /// Linked requests (`docs/NIGHT8_PROTOCOL.md`): a fill tied to the scene or build it
+    /// leads into (`a` = that request's id, `b` = the predicted landing step), and the
+    /// tie broken while the fill lives on as a plain fill (`a` = the reason).
+    pub const FILL_LINKED: u8 = 51;
+    pub const FILL_UNLINKED: u8 = 52;
+    /// A scene's crash accent on the onset it committed (`a` = the step, -1 for Now;
+    /// `b` = [`super::accent_fired`]).
+    pub const ACCENT_FIRED: u8 = 53;
+}
+
+/// The accent a scene, a Fill into's scene or a Rise's landing carries
+/// (`docs/NIGHT8_PROTOCOL.md`). Anything else is refused as invalid.
+pub mod accent {
+    pub const NONE: u8 = 0;
+    pub const CRASH: u8 = 1;
+}
+
+/// `b` of `accent fired` (53).
+pub mod accent_fired {
+    /// Counted but not heard: a stem is soloed (the transition sounds' rule).
+    pub const SILENT: u8 = 0;
+    pub const PLAYED: u8 = 1;
+    /// The Drop's own crash fired on the same onset; one crash, not two.
+    pub const MERGED: u8 = 2;
 }
 
 /// Reason codes, carried by `cancelled` and `rejected` events and returned by
@@ -214,6 +249,9 @@ pub mod reason {
     pub const ALREADY_PLAYING: u8 = 8;
     pub const STALE: u8 = 9;
     pub const USER: u8 = 10;
+    /// One part of a linked request was cancelled because its partner was replaced
+    /// (`docs/NIGHT8_PROTOCOL.md`).
+    pub const LINKED: u8 = 11;
 }
 
 /// Numbers per event: `[kind, request id, a, b]`.
@@ -302,6 +340,10 @@ pub struct PendingScene {
     /// The onset serial when the boundary was announced. Only an onset with a higher
     /// serial can apply it.
     pub queued_at: u64,
+    /// For [`Timing::Linked`], the onset serial it commits on. Unused otherwise.
+    pub due: u64,
+    /// A crash on the onset it commits (during playback).
+    pub accent: bool,
     /// The snapshot, copied when queued.
     pub values: [f32; SCENE_LEN],
 }
@@ -312,8 +354,23 @@ pub struct PendingFill {
     pub request_id: u32,
     /// Index into the track's `fills`.
     pub index: u32,
-    /// The onset serial when it was queued; only a later bar onset can start it.
-    queued_at: u64,
+    /// 0: the next bar. 2, 4, 8 or 16: the bar that ends on a phrase line of that many
+    /// bars, or on the loop's wrap.
+    pub phrase_bars: u8,
+    /// The onset serial its first step plays on: counted in onsets, so a tempo change
+    /// moves nothing. Recomputed when the loop changes under it.
+    pub start_serial: u64,
+    /// The request it leads into, if any.
+    pub link: Link,
+}
+
+/// What a fill is tied to (`docs/NIGHT8_PROTOCOL.md`): nothing, the scene it leads
+/// into (Fill into), or the build whose last bar it plays (Rise + Fill).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Link {
+    None,
+    Scene(u32),
+    Build(u32),
 }
 
 /// The fill playing now.
@@ -323,6 +380,8 @@ pub struct ActiveFill {
     pub index: u32,
     /// Which of its sixteen steps the current onset plays, 0..16.
     pub pos: usize,
+    /// The request it leads into, if any.
+    pub link: Link,
 }
 
 /// The scheduler's state: the onset serial, the pending scene, the pending and
@@ -353,7 +412,14 @@ impl Scheduler {
     /// A request already pending is replaced, reported as `replaced`, and its
     /// announced boundary kept unless the new request is `Now`. Then `queued` is
     /// reported with the predicted bar and step, unless the boundary is `Now`.
-    pub fn queue(&mut self, request_id: u32, timing: Timing, values: &[f32], t: &Transport) {
+    pub fn queue(
+        &mut self,
+        request_id: u32,
+        timing: Timing,
+        values: &[f32],
+        accent: bool,
+        t: &Transport,
+    ) {
         let mut copy = [0.0f32; SCENE_LEN];
         copy.copy_from_slice(&values[..SCENE_LEN]);
         let (timing, queued_at) = match self.scene.take() {
@@ -364,8 +430,11 @@ impl Scheduler {
                     request_id as f64,
                     0.0,
                 );
-                if timing == Timing::Now {
-                    (Timing::Now, self.serial)
+                // A Fill into's scene replaced: its fill plays on as a plain fill, and
+                // the new scene keeps its own timing, not the fill's end.
+                self.unlink_fill(Link::Scene(old.request_id), reason::USER);
+                if timing == Timing::Now || old.timing == Timing::Linked {
+                    (timing, self.serial)
                 } else {
                     (old.timing, old.queued_at)
                 }
@@ -376,9 +445,28 @@ impl Scheduler {
             request_id,
             timing,
             queued_at,
+            due: 0,
+            accent,
             values: copy,
         });
         self.announce(t);
+    }
+
+    /// Put `values` (already validated) in the pending slot as a Fill into's scene,
+    /// committing on onset serial `due`. A scene already pending is replaced, as by
+    /// [`Scheduler::queue`]. Announced with its fill, by [`Scheduler::announce_fill`].
+    pub fn queue_linked(&mut self, request_id: u32, values: &[f32], due: u64, accent: bool) {
+        let mut copy = [0.0f32; SCENE_LEN];
+        copy.copy_from_slice(&values[..SCENE_LEN]);
+        self.replace_pending(request_id);
+        self.scene = Some(PendingScene {
+            request_id,
+            timing: Timing::Linked,
+            queued_at: self.serial,
+            due,
+            accent,
+            values: copy,
+        });
     }
 
     /// Report `queued` for the pending scene with a fresh prediction. Called when it
@@ -395,17 +483,37 @@ impl Scheduler {
         );
     }
 
-    /// Report `fill queued` for the pending fill with a fresh prediction.
+    /// Work out the pending fill's start onset afresh (the loop may have moved its
+    /// phrase end) and report `fill queued` with the bar and step it starts on.
+    ///
+    /// A Fill into's scene moves with it, to the onset the fill ends on, and is
+    /// re-announced (`scene queued`) with its landing. A build's fill is the build's to
+    /// time and announce (`Engine::announce_build_fill`), so it is left alone here.
     #[inline(never)]
     pub fn announce_fill(&mut self, t: &Transport) {
-        let Some(f) = self.fill.as_ref() else { return };
-        let step = predict(t, FILL_GRID);
-        self.events.push(
-            event::FILL_QUEUED,
-            f.request_id,
-            (step / 16 + 1) as f64,
-            step as f64,
-        );
+        let serial = self.serial;
+        let Some(f) = self.fill.as_mut() else { return };
+        if matches!(f.link, Link::Build(_)) {
+            return;
+        }
+        let ahead = fill_offset(t, f.phrase_bars);
+        f.start_serial = serial + 1 + ahead as u64;
+        let (id, start_serial, link) = (f.request_id, f.start_serial, f.link);
+        let step = walk(t, ahead);
+        self.events
+            .push(event::FILL_QUEUED, id, (step / 16 + 1) as f64, step as f64);
+        if let Link::Scene(scene) = link {
+            if let Some(p) = self.scene.as_mut().filter(|p| p.request_id == scene) {
+                p.due = start_serial + FILL_STEPS as u64;
+                let land = walk(t, ahead + FILL_STEPS);
+                self.events.push(
+                    event::SCENE_QUEUED,
+                    scene,
+                    (land / 16 + 1) as f64,
+                    land as f64,
+                );
+            }
+        }
     }
 
     /// Whether a fill is queued or playing. A second one is refused while either is.
@@ -421,16 +529,85 @@ impl Scheduler {
         self.active_fill.as_ref()
     }
 
-    /// Queue fill `index` (already checked against the track) for the first bar
-    /// onset after now, and report `fill queued`. The caller has already refused a
-    /// request while [`Scheduler::fill_busy`].
-    pub fn queue_fill(&mut self, request_id: u32, index: u32, t: &Transport) {
+    /// Queue fill `index` (already checked against the track) for the bar
+    /// `phrase_bars` picks ([`fill_offset`]), and report `fill queued`. The caller has
+    /// already checked the arguments and refused a request while
+    /// [`Scheduler::fill_busy`].
+    ///
+    /// `link` ties it to the request it leads into. A build's fill is not timed here:
+    /// it waits, unarmed, until the build starts and [`Scheduler::arm_fill`] sets it.
+    pub fn queue_fill(
+        &mut self,
+        request_id: u32,
+        index: u32,
+        phrase_bars: u8,
+        link: Link,
+        t: &Transport,
+    ) {
         self.fill = Some(PendingFill {
             request_id,
             index,
-            queued_at: self.serial,
+            phrase_bars,
+            start_serial: u64::MAX,
+            link,
         });
         self.announce_fill(t);
+    }
+
+    /// Time the waiting fill tied to `partner` to start on onset serial `start`.
+    pub fn arm_fill(&mut self, partner: Link, start: u64) {
+        if let Some(f) = self.fill.as_mut().filter(|f| f.link == partner) {
+            f.start_serial = start;
+        }
+    }
+
+    /// Whether the fill slot is taken for a build's fill: a fill is waiting that is not
+    /// `replacing`'s (the build the new one replaces, whose fill goes with it). A fill
+    /// playing now does not count: it ends within a bar, and a build's fill plays the
+    /// build's last bar, at least a bar after the build starts.
+    pub fn fill_busy_for_build(&self, replacing: Option<u32>) -> bool {
+        self.fill
+            .is_some_and(|f| replacing.is_none_or(|id| f.link != Link::Build(id)))
+    }
+
+    /// The pending fill's id and link, and whether it is pending (true) or playing
+    /// (false), if `request_id` is either.
+    pub fn fill_state(&self, request_id: u32) -> Option<(bool, Link)> {
+        if let Some(f) = self.fill.filter(|f| f.request_id == request_id) {
+            return Some((true, f.link));
+        }
+        self.active_fill
+            .filter(|a| a.request_id == request_id)
+            .map(|a| (false, a.link))
+    }
+
+    /// The fill tied to `partner` loses it and carries on as a plain fill, waiting or
+    /// playing: `fill unlinked` with `why`. Nothing if no fill is tied to it.
+    #[inline(never)]
+    pub fn unlink_fill(&mut self, partner: Link, why: u8) {
+        let pending = self.fill.as_mut().map(|f| (&mut f.link, f.request_id));
+        let active = self
+            .active_fill
+            .as_mut()
+            .map(|a| (&mut a.link, a.request_id));
+        for (link, id) in [pending, active].into_iter().flatten() {
+            if *link == partner {
+                *link = Link::None;
+                self.events.push(event::FILL_UNLINKED, id, why as f64, 0.0);
+            }
+        }
+    }
+
+    /// The fill tied to `partner` goes with it: cancelled with `why` while it waits.
+    /// One already playing runs its bar (Night 3) and is unlinked instead.
+    #[inline(never)]
+    pub fn drop_fill(&mut self, partner: Link, why: u8) {
+        if let Some(f) = self.fill.filter(|f| f.link == partner) {
+            self.fill = None;
+            self.events
+                .push(event::FILL_CANCELLED, f.request_id, why as f64, 0.0);
+        }
+        self.unlink_fill(partner, why);
     }
 
     /// The fill's part of an onset, run after [`Scheduler::on_onset`] has counted it
@@ -448,16 +625,19 @@ impl Scheduler {
                     .push(event::FILL_ENDED, id, step as f64, reason::OK as f64);
             }
         }
+        // Due on its own onset. The bar-line check only guards against a start that
+        // somehow fell off the grid: the fill then waits for the next bar line.
         let due = self
             .fill
             .as_ref()
-            .is_some_and(|f| self.serial > f.queued_at && step.is_multiple_of(FILL_GRID));
+            .is_some_and(|f| self.serial >= f.start_serial && step.is_multiple_of(FILL_GRID));
         if due {
             if let Some(f) = self.fill.take() {
                 self.active_fill = Some(ActiveFill {
                     request_id: f.request_id,
                     index: f.index,
                     pos: 0,
+                    link: f.link,
                 });
                 self.events
                     .push(event::FILL_STARTED, f.request_id, step as f64, 0.0);
@@ -503,11 +683,12 @@ impl Scheduler {
     #[inline]
     pub fn on_onset(&mut self, step: usize) -> Option<PendingScene> {
         self.serial += 1;
-        let due = self.scene.as_ref().is_some_and(|p| {
-            self.serial > p.queued_at
-                && p.timing
-                    .grid()
-                    .is_some_and(|grid| step.is_multiple_of(grid))
+        let due = self.scene.as_ref().is_some_and(|p| match p.timing {
+            Timing::Linked => self.serial >= p.due,
+            timing => {
+                self.serial > p.queued_at
+                    && timing.grid().is_some_and(|grid| step.is_multiple_of(grid))
+            }
         });
         if due {
             self.scene.take()
@@ -534,7 +715,11 @@ impl Scheduler {
             .as_ref()
             .is_some_and(|p| p.request_id == request_id)
         {
-            self.cancel_pending(reason::USER)
+            self.cancel_pending(reason::USER);
+            // A Fill into is one request: its waiting fill goes too, and a playing one
+            // runs its bar unlinked.
+            self.drop_fill(Link::Scene(request_id), reason::USER);
+            true
         } else {
             false
         }
@@ -547,6 +732,7 @@ impl Scheduler {
             Some(p) => {
                 self.events
                     .push(event::SCENE_REPLACED, p.request_id, by as f64, 0.0);
+                self.unlink_fill(Link::Scene(p.request_id), reason::USER);
                 true
             }
             None => false,
@@ -565,6 +751,39 @@ impl Scheduler {
             None => false,
         }
     }
+}
+
+/// How many onsets from now (0: the next one) a fill asked for with `phrase_bars`
+/// starts: the first bar line, walking the clock's own advance rule from the step due
+/// next, whose bar ends on a phrase line or on the loop's wrap. Phrase lines sit on the
+/// absolute grid from step 0, so every one of 2, 4, 8 and 16 bars also falls on the
+/// song's own wrap. `phrase_bars` 0 takes the first bar line, as fills always have. A
+/// bar line already passed is never waited for: the walk only looks ahead, so a late
+/// press goes to the next phrase end. Bounded: a phrase end or the loop's last bar
+/// turns up within one pass of the song.
+pub fn fill_offset(t: &Transport, phrase_bars: u8) -> usize {
+    let phrase = phrase_bars as usize * FILL_GRID;
+    let loop_end = t.loop_start + t.loop_steps;
+    let mut step = t.step;
+    for ahead in 0..=STEPS {
+        if step.is_multiple_of(FILL_GRID) {
+            let end = step + FILL_GRID;
+            if phrase == 0 || end.is_multiple_of(phrase) || (t.loop_steps > 0 && end == loop_end) {
+                return ahead;
+            }
+        }
+        step = t.following(step);
+    }
+    0
+}
+
+/// The step the clock plays `ahead` onsets from now (0: the step due next).
+pub fn walk(t: &Transport, ahead: usize) -> usize {
+    let mut step = t.step;
+    for _ in 0..ahead {
+        step = t.following(step);
+    }
+    step
 }
 
 /// The step the next eligible onset on `grid` will fire, walking the clock's own

@@ -1,6 +1,6 @@
 {
     "format": "bckgrnd-msc/project",
-    "version": 3,
+    "version": 4,
     "id": "kept",
     "name": "Kept",
     "updatedAt": "2026-10-21T12:00:00+00:00",
@@ -148,7 +148,8 @@
                         "solo": false
                     }
                 },
-                "patterns": {}
+                "patterns": {},
+                "crash": false
             },
             {
                 "slot": "sparse",
@@ -219,7 +220,8 @@
                         "solo": false
                     }
                 },
-                "patterns": {}
+                "patterns": {},
+                "crash": false
             },
             {
                 "slot": "build",
@@ -290,7 +292,8 @@
                         "solo": false
                     }
                 },
-                "patterns": {}
+                "patterns": {},
+                "crash": false
             },
             {
                 "slot": "drop",
@@ -361,7 +364,8 @@
                         "solo": false
                     }
                 },
-                "patterns": {}
+                "patterns": {},
+                "crash": false
             }
         ]
     }

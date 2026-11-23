@@ -73,6 +73,8 @@ type Inbound =
       patterns?: Float32Array;
       /** The request id those lanes carry in events. */
       patternsId?: number;
+      /** 1: a crash on the onset it commits, during playback (docs/NIGHT8_PROTOCOL.md). */
+      accent?: number;
     }
   | { type: 'cancelScene'; requestId: number }
   | {
@@ -90,6 +92,14 @@ type Inbound =
       patterns?: Float32Array;
       /** The request id those lanes carry in events. */
       patternsId?: number;
+      /**
+       * Rise + Fill (docs/NIGHT8_PROTOCOL.md): the fill that plays the build's last bar,
+       * with its own request id. Absent (or 0): no fill.
+       */
+      fillId?: number;
+      fillIndex?: number;
+      /** 1: a crash on the onset it lands (docs/NIGHT8_PROTOCOL.md). */
+      accent?: number;
     }
   | { type: 'cancelBuild'; requestId: number }
   | {
@@ -101,8 +111,41 @@ type Inbound =
       deck?: DeckId;
     }
   | { type: 'cancelPatterns'; requestId: number }
-  | { type: 'fill'; requestId: number; generation: number; index: number; deck?: DeckId }
+  | {
+      type: 'fill';
+      requestId: number;
+      generation: number;
+      index: number;
+      deck?: DeckId;
+      /** 0 the next bar, or 2, 4, 8 or 16: end on that phrase line (docs/NIGHT8_PROTOCOL.md). */
+      phrase?: number;
+      /** 0, one bar. The only length so far. */
+      length?: number;
+    }
   | { type: 'cancelFill'; requestId: number }
+  | {
+      /**
+       * Fill into (docs/NIGHT8_PROTOCOL.md): a phrase fill and the scene that commits on
+       * the onset it ends, as one request. Both are accepted or neither is.
+       */
+      type: 'fillInto';
+      fillId: number;
+      sceneId: number;
+      generation: number;
+      index: number;
+      /** 0 the next bar, or 2, 4, 8 or 16: the fill ends on that phrase line. */
+      phrase?: number;
+      /** 0, one bar. The only length so far. */
+      length?: number;
+      values: ArrayLike<number>;
+      deck?: DeckId;
+      /** The lanes the scene sets, compiled (NIGHT4_PROTOCOL.md); applied with it. */
+      patterns?: Float32Array;
+      /** The request id those lanes carry in events. */
+      patternsId?: number;
+      /** 1: a crash on the phrase line the scene lands on. */
+      accent?: number;
+    }
   | { type: 'gestureBegin'; token: number; kind: number }
   | { type: 'gestureEnd'; token: number }
   | { type: 'gestureRenew'; token: number }
@@ -148,6 +191,9 @@ const EVENT_SCENE_APPLIED = 2;
 const EVENT_SCENE_CANCELLED = 3;
 const EVENT_SCENE_REJECTED = 5;
 const EVENT_FILL_REJECTED = 15;
+/** `b` of a refused Fill into's two `rejected` events: the part refused (`fills::detail`). */
+const FILL_INTO_PART_SCENE = 1;
+const FILL_INTO_PART_LANES = 3;
 const EVENT_PATTERNS_REJECTED = 35;
 const EVENT_BUILD_APPLIED = 42;
 const EVENT_BUILD_CANCELLED = 43;
@@ -160,6 +206,26 @@ const REASON_TRACK = 4;
 const REASON_MIXING = 6;
 const REASON_NOT_PLAYING = 7;
 const REASON_STALE = 9;
+
+/**
+ * A fill's phrase length for the engine (docs/NIGHT8_PROTOCOL.md): 0 (or absent) the
+ * next bar, 2, 4, 8 or 16 bars. Anything else goes in as 255, which the engine refuses
+ * (`invalid`), rather than wrapping into a valid code on the way to a u8.
+ */
+function fillPhrase(phrase: number | undefined): number {
+  if (phrase === undefined) return 0;
+  return phrase === 0 || phrase === 2 || phrase === 4 || phrase === 8 || phrase === 16 ? phrase : 255;
+}
+
+/** A fill's length for the engine: 0 (or absent), one bar; anything else 255 (`invalid`). */
+function fillLength(length: number | undefined): number {
+  return length === undefined || length === 0 ? 0 : 255;
+}
+
+/** A scene's accent for the engine: 0 (or absent) none, 1 crash; anything else 255 (`invalid`). */
+function accentCode(accent: number | undefined): number {
+  return accent === undefined || accent === 0 ? 0 : accent === 1 ? 1 : 255;
+}
 
 class EngineProcessor extends AudioWorkletProcessor {
   /** Which deck the UI is listening to. */
@@ -477,8 +543,15 @@ class EngineProcessor extends AudioWorkletProcessor {
         const id = message.requestId >>> 0;
         const cancelled = engine ? engine.cancel_fill(id) : false;
         this.port.postMessage({ type: 'fillCancelResult', deck: this.live, requestId: id, cancelled });
+        // A linked fill's cancel also cancels its scene or build: say so now.
+        this.drainEvents(this.live, engine);
         return;
       }
+
+      case 'fillInto':
+        this.queueFillInto(message);
+        this.drainEvents(this.live, this.engines[this.live]);
+        return;
 
       // Gestures are the live deck's: they are something the performer is doing to
       // what they hear. The outgoing deck's are released when a mix starts.
@@ -582,7 +655,7 @@ class EngineProcessor extends AudioWorkletProcessor {
     // rather than wrapping into a valid code on the way to a u8.
     const t = message.timing;
     const timing = t === 0 || t === 1 || t === 2 ? t : 255;
-    const verdict = engine.queue_scene(requestId, timing, this.sceneIn);
+    const verdict = engine.queue_scene_with(requestId, timing, this.sceneIn, accentCode(message.accent));
     if (verdict === 0) {
       this.scenePending.set(this.sceneIn);
       this.scenePendingId = requestId;
@@ -598,6 +671,14 @@ class EngineProcessor extends AudioWorkletProcessor {
    */
   private queueBuild(message: Extract<Inbound, { type: 'build' }>): void {
     const requestId = message.requestId >>> 0;
+    const fillId = (message.fillId ?? 0) >>> 0;
+    // A Rise + Fill is one request: a refusal made here refuses its fill too, in the
+    // engine's own shape (`fill rejected` first, with the same reason and part).
+    const refuse = (reason: number, part: number) =>
+      this.postSceneEvents(this.live, [
+        ...(fillId !== 0 ? [EVENT_FILL_REJECTED, fillId, reason, part] : []),
+        EVENT_BUILD_REJECTED, requestId, reason, part,
+      ]);
     const { target, land } = message;
     let refusal = 0;
     if (target == null || target.length !== SCENE_LEN) refusal = REASON_INVALID;
@@ -611,7 +692,7 @@ class EngineProcessor extends AudioWorkletProcessor {
     const engine = this.engines[this.live];
     if (refusal === 0 && !engine) refusal = REASON_NOT_PLAYING;
     if (refusal !== 0 || !engine) {
-      this.postSceneEvents(this.live, [EVENT_BUILD_REJECTED, requestId, refusal, 0]);
+      refuse(refusal, 0);
       return;
     }
     // The lanes the build sets go in first, linked to it, exactly as a scene's do: the
@@ -621,7 +702,7 @@ class EngineProcessor extends AudioWorkletProcessor {
     if (message.patterns && message.patterns.length > 0) {
       const linkId = (message.patternsId ?? 0) >>> 0;
       if (engine.queue_patterns(linkId, 2, requestId, message.patterns) !== 0) {
-        this.postSceneEvents(this.live, [EVENT_BUILD_REJECTED, requestId, REASON_INVALID, BUILD_PART_LANES]);
+        refuse(REASON_INVALID, BUILD_PART_LANES);
         return;
       }
     }
@@ -631,11 +712,16 @@ class EngineProcessor extends AudioWorkletProcessor {
     // than wrapping into a valid length on the way to a u32.
     const b = message.bars;
     const bars = b === 2 || b === 4 || b === 8 ? b : 0;
-    const verdict = engine.queue_build(
+    const fi = message.fillIndex ?? 0;
+    const fillIndex = Number.isInteger(fi) && fi >= 0 ? fi : 0xffffffff;
+    const verdict = engine.queue_build_with(
       requestId,
       bars,
       this.buildTarget,
       land != null ? this.buildLand : EngineProcessor.NO_LAND,
+      fillId,
+      fillIndex >>> 0,
+      accentCode(message.accent),
     );
     if (verdict === 0) {
       this.buildPendingId = requestId;
@@ -694,7 +780,69 @@ class EngineProcessor extends AudioWorkletProcessor {
       return;
     }
     const index = Number.isInteger(message.index) && message.index >= 0 ? message.index : 0xffffffff;
-    engine.queue_fill(requestId, index >>> 0);
+    engine.queue_fill_at(requestId, index >>> 0, fillPhrase(message.phrase), fillLength(message.length));
+  }
+
+  /**
+   * Hand a Fill into to the live engine, or refuse both of its parts here, each in the
+   * engine's own `rejected` shape (`fill rejected` for the fill, `scene rejected` for
+   * the scene, `b` the part): a scene vector that is not 44 long (`invalid`, part 1),
+   * an auto-mix in progress (`mixing`), a stale deck or generation, no engine yet (`not
+   * playing`), or lanes the engine refused (`invalid`, part 3). The engine checks the
+   * rest and reports its own outcome for both parts.
+   */
+  private queueFillInto(message: Extract<Inbound, { type: 'fillInto' }>): void {
+    const fillId = message.fillId >>> 0;
+    const sceneId = message.sceneId >>> 0;
+    const values = message.values;
+    let refusal = 0;
+    let part = 0;
+    if (values == null || values.length !== SCENE_LEN) {
+      refusal = REASON_INVALID;
+      part = FILL_INTO_PART_SCENE;
+    } else if (this.mix) refusal = REASON_MIXING;
+    else if (
+      (message.deck !== undefined && message.deck !== this.live) ||
+      message.generation !== this.generation[this.live]
+    )
+      refusal = REASON_STALE;
+    const engine = this.engines[this.live];
+    if (refusal === 0 && !engine) refusal = REASON_NOT_PLAYING;
+    if (refusal !== 0 || !engine) {
+      this.postSceneEvents(this.live, [
+        EVENT_FILL_REJECTED, fillId, refusal, part,
+        EVENT_SCENE_REJECTED, sceneId, refusal, part,
+      ]);
+      return;
+    }
+    // The scene's lanes go in first, linked to it, as a launch's do. Refused lanes
+    // refuse the whole request: half a Fill into would play something nobody captured.
+    if (message.patterns && message.patterns.length > 0) {
+      const linkId = (message.patternsId ?? 0) >>> 0;
+      if (engine.queue_patterns(linkId, 2, sceneId, message.patterns) !== 0) {
+        this.postSceneEvents(this.live, [
+          EVENT_FILL_REJECTED, fillId, REASON_INVALID, FILL_INTO_PART_LANES,
+          EVENT_SCENE_REJECTED, sceneId, REASON_INVALID, FILL_INTO_PART_LANES,
+        ]);
+        return;
+      }
+    }
+    for (let i = 0; i < SCENE_LEN; i += 1) this.sceneIn[i] = Number(values[i]);
+    const index = Number.isInteger(message.index) && message.index >= 0 ? message.index : 0xffffffff;
+    const verdict = engine.queue_fill_into(
+      fillId,
+      index >>> 0,
+      fillPhrase(message.phrase),
+      fillLength(message.length),
+      sceneId,
+      this.sceneIn,
+      accentCode(message.accent),
+    );
+    if (verdict === 0) {
+      // The scene is the pending one now: its `applied` carries it to the idle deck.
+      this.scenePending.set(this.sceneIn);
+      this.scenePendingId = sceneId;
+    }
   }
 
   /**

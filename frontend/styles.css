@@ -915,7 +915,8 @@ body {
   border-color: color-mix(in srgb, var(--color-acid) 40%, var(--color-line));
 }
 
-.segment[aria-pressed="true"] {
+.segment[aria-pressed="true"],
+.segment[aria-checked="true"] {
   border-color: var(--color-acid);
   background: var(--color-acid);
   color: var(--color-acid-ink);
@@ -3957,6 +3958,51 @@ html[data-control-drag="yes"] * {
   border-color: var(--color-acid);
 }
 
+/* Crash on launch: a real checkbox, a whole-row target like the items above it. */
+.scene-menu-check {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-height: var(--control-sm);
+  padding: 0.3rem 0.6rem;
+  border: 1px solid var(--color-line);
+  border-radius: 0.6rem;
+  color: var(--color-fg);
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.scene-menu-check:hover,
+.scene-menu-check:focus-within {
+  border-color: var(--color-acid);
+}
+
+.scene-menu-check input {
+  accent-color: var(--color-acid);
+}
+
+/* The pad's crash mark: a bolt and the word, never color alone. It leads the summary
+   line so a long summary is what gets cut short, not the mark. */
+.scene-crash-mark {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  color: var(--color-fg);
+  font-weight: 700;
+  vertical-align: bottom;
+}
+
+.scene-crash-mark > svg {
+  flex-shrink: 0;
+}
+
+/* Outfit's word space is narrow (" · " came out 5px wide, "Crash·Kick"), so the dot
+   carries its own air rather than relying on spaces. */
+.scene-crash-sep {
+  margin-inline: 0.4em;
+}
+
 .scene-menu-group {
   margin-top: 0.25rem;
   font-size: var(--text-label);
@@ -4052,18 +4098,23 @@ html[data-control-drag="yes"] * {
   background: var(--color-bg);
 }
 
+/* No vertical padding: the joined group (2px inset, 1px rule) comes out exactly
+   button-sm-h tall, 32px with a mouse and 44px on touch, the same as Cancel, the fill
+   buttons and Compare's chips beside it, so every toolbar row is one control high. */
 .scene-toolbar .segment {
   min-height: calc(var(--button-sm-h) - 6px);
+  padding-block: 0;
   padding-inline: 0.7rem;
   border-color: transparent;
   background: transparent;
 }
 
-.scene-toolbar .segment:hover:not([aria-pressed="true"]) {
+.scene-toolbar .segment:hover:not([aria-pressed="true"], [aria-checked="true"]) {
   border-color: color-mix(in srgb, var(--color-acid) 40%, var(--color-line));
 }
 
-.scene-toolbar .segment[aria-pressed="true"] {
+.scene-toolbar .segment[aria-pressed="true"],
+.scene-toolbar .segment[aria-checked="true"] {
   border-color: var(--color-acid);
   background: var(--color-acid);
 }
@@ -4090,7 +4141,8 @@ html[data-control-drag="yes"] * {
   cursor: default;
 }
 
-.fill-button {
+.fill-button,
+.fill-into-button {
   min-height: var(--control-sm);
   padding: 0.25rem 0.85rem;
   border: 1px solid var(--color-line);
@@ -4103,19 +4155,81 @@ html[data-control-drag="yes"] * {
   white-space: nowrap;
 }
 
-.fill-button.is-on {
+.fill-button.is-on,
+.fill-into-button.is-on {
   border-style: dashed;
   border-color: var(--color-acid);
 }
 
-.fill-button[data-state="playing"] {
+.fill-button[data-state="playing"],
+.fill-into-button[data-state="playing"] {
   border-style: solid;
   background: var(--color-acid);
   color: var(--color-acid-ink);
 }
 
-.fill-button:disabled:not([data-state="playing"]) {
+/* Unavailable is aria-disabled (still focusable, reason read as its description). */
+.fill-button[aria-disabled="true"],
+.fill-into-button[aria-disabled="true"] {
+  cursor: not-allowed;
+}
+
+.fill-button[aria-disabled="true"]:not([data-state="playing"]),
+.fill-into-button[aria-disabled="true"] {
   opacity: 0.5;
+}
+
+/* Fill → Drop names the fourth scene as it is called now; a long name ends in an
+   ellipsis rather than widening the row (its full name is the button's name). */
+.fill-into-button {
+  max-width: 13rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Fill (Night 8): Fill at, the phrase length, Fill and Fill → Drop share a row of their
+   own under Switch on, so the timing sits beside the buttons it times and choosing
+   Phrase end or Rise never moves the other row. */
+.scene-fill-tools {
+  flex: 1 0 100%;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--group-gap) var(--space-3);
+  min-width: 0;
+}
+
+.scene-fill-tools > .segmented-block {
+  grid-template-columns: auto auto;
+  align-items: center;
+}
+
+.scene-fill-tools > .fill-button,
+.scene-fill-tools > .fill-into-button {
+  min-height: var(--button-sm-h);
+}
+
+/* The phrase length: 2 · 4 · 8 · 16 with "bars" after it, as Rise's bar count. */
+.scene-phrase-bars {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.scene-phrase-bars > .segmented-block {
+  grid-template-columns: auto;
+  align-items: center;
+}
+
+/* Numbers only, so the four pills need less air than Switch on's words. */
+.scene-toolbar .scene-phrase-bars .segment {
+  padding-inline: 0.5rem;
+}
+
+/* Finish with Fill: one pill in its own track, right after Rise's bar count. Its short
+   words ("+ Fill") are for narrow panels, below. */
+.rise-fill-short {
+  display: none;
 }
 
 /* Compare A/B: two session snapshots of the same track, kept visibly apart from the
@@ -4238,6 +4352,8 @@ html[data-control-drag="yes"] * {
 @media (pointer: coarse) {
   .scene-toolbar .segment,
   .scene-strip-actions > button,
+  .scene-fill-tools > .fill-button,
+  .scene-fill-tools > .fill-into-button,
   .compare-chip,
   .compare-row .text-button {
     min-height: var(--control-md);
@@ -4278,6 +4394,28 @@ html[data-control-drag="yes"] * {
   }
 
   .scene-toolbar > .segmented-block .seg-short {
+    display: inline;
+  }
+
+  .scene-fill-tools > .segmented-block .seg-full {
+    display: none;
+  }
+
+  .scene-fill-tools > .segmented-block .seg-short {
+    display: inline;
+  }
+}
+
+/* Finish with Fill reads "+ Fill" once the panel is too narrow for Switch on's full
+   names, Rise's 2 · 4 · 8 bars, "Finish with Fill" and Cancel in one row (about 47rem,
+   the 1100px docked tier). Its name stays the full one. The stacked phone rows have
+   room for the words again. */
+@container scenes (max-width: 47rem) {
+  .rise-fill-full {
+    display: none;
+  }
+
+  .rise-fill-short {
     display: inline;
   }
 }
@@ -4323,10 +4461,31 @@ html[data-control-drag="yes"] * {
     white-space: normal;
   }
 
+  /* Full-width rows, except Rise's bars and Finish with Fill, which share one (as they
+     sit side by side on the desktop row), so choosing Rise adds one row, not two. */
   .scene-toolbar {
     display: grid;
-    grid-template-columns: minmax(0, 1fr);
-    gap: var(--section-gap);
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: var(--section-gap) var(--group-gap);
+  }
+
+  .scene-toolbar > * {
+    grid-column: 1 / -1;
+  }
+
+  .scene-toolbar > .scene-build-bars {
+    display: flex;
+    grid-column: 1;
+    min-width: 0;
+  }
+
+  .scene-toolbar > .scene-build-bars > .segmented-block {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+
+  .scene-toolbar > .scene-rise-fill {
+    grid-column: 2;
   }
 
   .scene-toolbar > .segmented-block {
@@ -4339,6 +4498,62 @@ html[data-control-drag="yes"] * {
 
   .scene-strip-actions > button {
     flex: 1 1 0;
+  }
+
+  .rise-fill-full {
+    display: inline;
+  }
+
+  .rise-fill-short {
+    display: none;
+  }
+
+  /* Fill at and the phrase length each take a row; Fill and Fill → Drop share one.
+     Their two tracks are sized by their words, not split in half: the two are never
+     long at once (while Fill → Drop waits, Fill reads Drum fill), so "Fill · Next phrase
+     → Drop" gets the room Drum fill doesn't need and is never cut short. On a narrower
+     phone still, the long one wraps inside its 44px button instead. */
+  .scene-fill-tools {
+    display: grid;
+    grid-template-columns: auto auto;
+    gap: var(--section-gap) var(--group-gap);
+  }
+
+  .scene-fill-tools > .fill-button,
+  .scene-fill-tools > .fill-into-button {
+    min-width: 0;
+    max-width: none;
+    padding-inline: 0.75rem;
+    overflow: visible;
+    line-height: 1.15;
+    text-overflow: clip;
+    text-wrap: balance;
+    white-space: normal;
+  }
+
+  .scene-fill-tools > .segmented-block,
+  .scene-fill-tools > .scene-phrase-bars {
+    grid-column: 1 / -1;
+  }
+
+  .scene-fill-tools > .segmented-block {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .scene-fill-tools .segmented {
+    grid-auto-columns: minmax(0, 1fr);
+  }
+
+  /* The phrase length spans its row like Rise's bars, so each of 2 · 4 · 8 · 16 is a
+     thumb wide (they were 32px, sized to their digits). */
+  .scene-fill-tools > .scene-phrase-bars {
+    display: flex;
+    min-width: 0;
+  }
+
+  .scene-fill-tools > .scene-phrase-bars > .segmented-block {
+    flex: 1 1 auto;
+    min-width: 0;
   }
 
   .compare-bar {
@@ -4370,6 +4585,21 @@ html[data-control-drag="yes"] * {
   }
 }
 
+/* The smallest phones (320px): Finish with Fill goes back to a row of its own, and
+   Switch on and Fill at put their word over the pills rather than beside them, so
+   every pill stays at least 44px wide. */
+@container scenes (max-width: 18rem) {
+  .scene-toolbar > .scene-build-bars,
+  .scene-toolbar > .scene-rise-fill {
+    grid-column: 1 / -1;
+  }
+
+  .scene-toolbar > .segmented-block,
+  .scene-fill-tools > .segmented-block {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
 /* A mouse on a narrow desktop panel (the 1180-1279px three-column layout, and 900-1000px
    with the inspector docked) keeps the desktop toolbar. Switch on, Rise's 2 · 4 · 8,
    Drum fill and Cancel need about 37.4rem in one row; below 38rem the pills tighten,
@@ -4389,6 +4619,29 @@ html[data-control-drag="yes"] * {
     .scene-build-unit {
       display: none;
     }
+
+    .scene-fill-tools {
+      column-gap: var(--space-2);
+    }
+
+    /* The word "Fill at" goes here too, as "bars" does, so a late Fill → Drop ("Fill ·
+       Next phrase → Drop") still fits the fill row. The group keeps it as its name. */
+    .scene-fill-tools > .segmented-block > .control-label {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      overflow: hidden;
+      clip-path: inset(50%);
+      white-space: nowrap;
+    }
+
+    .rise-fill-full {
+      display: none;
+    }
+
+    .rise-fill-short {
+      display: inline;
+    }
   }
 
   @container scenes (max-width: 34rem) {
@@ -4397,12 +4650,64 @@ html[data-control-drag="yes"] * {
       gap: var(--group-gap) var(--space-2);
     }
 
+    .scene-fill-tools {
+      display: flex;
+    }
+
     .scene-toolbar > .segmented-block {
       grid-template-columns: auto auto;
     }
 
+    .scene-toolbar > * {
+      grid-column: auto;
+    }
+
     .scene-strip-actions > button {
       flex: none;
+    }
+
+    /* Fill and Fill → Drop keep their desktop one-line pills. */
+    .scene-fill-tools > .fill-button,
+    .scene-fill-tools > .fill-into-button {
+      padding-inline: 0.85rem;
+      line-height: inherit;
+      white-space: nowrap;
+    }
+
+    .scene-fill-tools > .fill-into-button {
+      max-width: 13rem;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    /* Compare A/B keeps its one desktop row too (title, the two captures, the hint
+       beside them in two lines), rather than the phone's title-then-captures stack,
+       which cost the 1180px toolbar a fourth row. */
+    .compare-bar {
+      padding: 0 0 0 var(--space-3);
+      border-top: 0;
+      border-inline-start: 1px solid var(--color-line);
+    }
+
+    .compare-title,
+    .compare-hint {
+      order: 0;
+    }
+
+    .compare-hint {
+      flex: 1 1 9rem;
+      text-align: start;
+    }
+
+    .compare-slots {
+      flex: none;
+      grid-template-columns: repeat(2, minmax(6.5rem, auto));
+    }
+
+    .compare-row {
+      flex: none;
+      justify-content: flex-end;
+      margin-inline-start: auto;
     }
   }
 }

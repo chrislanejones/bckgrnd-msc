@@ -1,6 +1,8 @@
 # ADR-019: Timed builds are engine requests that move the base over 2, 4 or 8 bars
 Date: 2026-11-17   Status: draft
 
+> Amendment proposed 11-19-2026. ADR-021 (draft) would let a Rise finish with a fill, queued and canceled with the build. Since `2e29170`, linked lanes wait in their own `staged` slot until their request is accepted. The Lanes paragraph below predates that.
+
 ## Context
 A Build should rise over several bars, not land on one boundary like a scene. That
 is up to 44 values moving on every sixteenth for as long as 128 onsets, and the UI

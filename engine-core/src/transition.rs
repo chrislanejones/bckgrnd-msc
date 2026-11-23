@@ -462,6 +462,9 @@ pub struct Transitions {
     /// The step that fired last in ordinary playback, or `None` after anything that
     /// was not (a jump into place is caught by the step not following it).
     last: Option<usize>,
+    /// Crashes fired, natural and accents, for the tests.
+    #[cfg(test)]
+    pub crashes: u32,
 }
 
 impl Transitions {
@@ -473,6 +476,8 @@ impl Transitions {
             sweep: NoiseSweep::new(),
             crash: Crash::new(sample_rate),
             last: None,
+            #[cfg(test)]
+            crashes: 0,
         }
     }
 
@@ -520,8 +525,9 @@ impl Transitions {
     }
 
     /// A step has just fired in ordinary playback. With `quiet` (a stem is soloed)
-    /// the crossing is counted but nothing new starts.
-    pub fn on_step(&mut self, step: usize, t: &Transport, quiet: bool) {
+    /// the crossing is counted but nothing new starts. Returns whether the Drop's crash
+    /// fired on it, so a scene's crash accent on the same onset merges with it.
+    pub fn on_step(&mut self, step: usize, t: &Transport, quiet: bool) -> bool {
         let sr = self.sample_rate;
         let crossing = self.last.is_some_and(|p| (p + 1) % STEPS == step);
         self.last = Some(step);
@@ -538,7 +544,7 @@ impl Transitions {
             self.sweep.release(RELEASE_SECONDS, sr);
         }
         if !crossing || quiet {
-            return;
+            return false;
         }
 
         let ch = self.ch;
@@ -555,7 +561,8 @@ impl Transitions {
                 sr,
             );
         } else if step == DROP_STEP {
-            self.crash.fire(&ch, t.bpm * t.rate, sr);
+            self.fire_crash(t);
+            return true;
         } else if step == BREAK_STEP {
             self.sweep.start(
                 false,
@@ -567,6 +574,23 @@ impl Transitions {
                 1.1,
                 sr,
             );
+        }
+        false
+    }
+
+    /// A scene's crash accent (`docs/NIGHT8_PROTOCOL.md`): the same crash as the Drop's,
+    /// fired now. The caller has already kept it quiet under a solo and merged it with
+    /// a natural crash on the same onset.
+    pub fn accent(&mut self, t: &Transport) {
+        self.fire_crash(t);
+    }
+
+    fn fire_crash(&mut self, t: &Transport) {
+        let ch = self.ch;
+        self.crash.fire(&ch, t.bpm * t.rate, self.sample_rate);
+        #[cfg(test)]
+        {
+            self.crashes += 1;
         }
     }
 

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { fetchTrack } from './api';
 import type { Instrument } from './instrument';
 import { BrowserProjectStore, type ProjectRecord, type ProjectStore } from './project-store';
-import { canonical, readSnapshot, snapshotOf, type Snapshot } from './snapshot';
+import { asCurrentVersion, canonical, readSnapshot, snapshotOf, type Snapshot } from './snapshot';
 import { DEFAULT_RENDER } from './project-renderer';
 import { exportProject } from './export';
 import { isPending } from './scenes';
@@ -163,8 +163,10 @@ export function useProjects(inst: Instrument) {
       // Same music as the saved copy is that saved copy, whichever revision was opened.
       // Anything else continues above it, so it can always be saved.
       // A changed source is new work too: Save records it against today's library.
+      // A stored v3 revision read as v4 is still that revision: opening it is not an
+      // edit, so nothing writes over the user's v3 copy until they save.
       const revision = sourceChanged ? Math.max(s.revision, stored?.revision ?? 0) + 1
-        : !stored ? s.revision : canonical(stored.project) === canonical(s.project) ? stored.revision : Math.max(s.revision, stored.revision + 1);
+        : !stored ? s.revision : canonical(asCurrentVersion(stored.project)) === canonical(s.project) ? stored.revision : Math.max(s.revision, stored.revision + 1);
       seenProject.current = latest.current.project;
       Object.assign(state.current, { id: s.id, trackId: s.project.trackId, source: latest.current.track, name: s.project.name, revision, saved: stored?.revision ?? 0, pristine, content: canonical(latest.current.project) });
       setNotice(`Opened ${s.project.name} · r${s.revision} · stopped`);
