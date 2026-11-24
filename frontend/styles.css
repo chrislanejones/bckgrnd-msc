@@ -3691,6 +3691,45 @@ html[data-control-drag="yes"] * {
   color: var(--color-fg);
 }
 
+/* Fill style (Night 9): a compact native menu in the scenes header, beside the status
+   line and the Shift 1-4 hint, with the drawn chevron the Next song menu uses. 24px
+   for a mouse (the compact floor), so the header keeps its height; 44px on touch. */
+.scene-fill-style {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.scene-fill-style > .control-label {
+  white-space: nowrap;
+}
+
+.fill-style-select {
+  min-height: 1.5rem;
+  appearance: none;
+  -webkit-appearance: none;
+  padding: 0.1rem 1.6rem 0.1rem 0.7rem;
+  border: 1px solid var(--color-line);
+  border-radius: 999px;
+  background-color: var(--color-surface);
+  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 8' fill='none' stroke='%238e939c' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M1 1.5 6 6.5 11 1.5'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 0.65rem center;
+  background-size: 0.6rem;
+  color: var(--color-fg);
+  font: inherit;
+  font-size: var(--text-label);
+  font-weight: 700;
+  cursor: pointer;
+}
+
+@media (pointer: coarse) {
+  .fill-style-select {
+    min-height: var(--control-md);
+  }
+}
+
 .scene-keys {
   flex-shrink: 0;
   display: inline-flex;

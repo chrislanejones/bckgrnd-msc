@@ -38,6 +38,9 @@ import {
   type Timing,
 } from '../lib/scenes';
 import {
+  FILL_STYLES,
+  FILL_STYLE_HINT,
+  FILL_STYLE_LABEL,
   PHRASE_BAR_CHOICES,
   fillButtonAria,
   fillButtonJob,
@@ -51,6 +54,7 @@ import {
   fillingLine,
   type FillAt,
   type FillJob,
+  type FillStyle,
   type PhraseBars,
 } from '../lib/fills';
 import { STEM_ORDER, STEM_NAMES } from '../lib/stems';
@@ -62,7 +66,7 @@ import type { CSSProperties, ReactNode } from 'react';
 export type FillControls = {
   /** The fill the engine holds (plain, a Fill into's or a Rise's), or null. */
   job: FillJob | null;
-  /** The track's fill, by name. */
+  /** The fill's name for its buttons: its style's ("Classic fill"). */
   name: string;
   at: FillAt;
   phraseBars: PhraseBars;
@@ -300,17 +304,25 @@ export function SceneStrip(props: Props) {
 }
 
 /**
- * The scene panel's header extras: the last outcome as a status line and the
- * Shift+1–4 hint as a small tag. Rendered as the panel's header actions, so the
+ * The scene panel's header extras: the last outcome as a status line, the Fill style
+ * menu and the Shift+1–4 hint as a small tag. Rendered as the panel's header actions, so the
  * status needs no row of its own.
  */
-export function SceneHeader({ status }: { status: string }) {
+export function SceneHeader({
+  status,
+  fillStyle,
+}: {
+  status: string;
+  /** Fill style, when the track has fills: the choice and how to change it. */
+  fillStyle?: { style: FillStyle; onStyle: (style: FillStyle) => void };
+}) {
   return (
     <>
       {/* Discrete changes only ("Drop queued", "Drop active"), never every beat. */}
       <p className="scene-status" role="status" aria-live="polite" title={status || undefined}>
         {status}
       </p>
+      {fillStyle ? <FillStyleSelect {...fillStyle} /> : null}
       <span className="scene-keys" title="Shift+1 to Shift+4 launch the four scenes">
         <kbd>Shift</kbd> <kbd>1–4</kbd>
       </span>
@@ -408,7 +420,37 @@ function FillTools({ fill, ids }: { fill: FillControls; ids: { fill: string; int
 }
 
 /**
- * The Fill button: the track's fill, at the Fill at timing. Shows where a queued fill
+ * Fill style (Night 9): a compact menu of the four, Classic first. A native select, so
+ * keyboard, touch and screen readers get the platform's own picker; its name is "Fill
+ * style" and its tooltip says what the chosen one does. A fill already queued keeps
+ * the style it was sent with.
+ *
+ * It sits in the panel's header, not on the fill row: with Phrase end, 16 bars and the
+ * widest button words ("Fill · Next phrase → Drop") that row is already full at every
+ * mouse width from 900 to 1280px, and a second fill row would break the toolbar's
+ * three 32px rows (tools/verify-ui-fills.mjs).
+ */
+function FillStyleSelect({ style, onStyle }: { style: FillStyle; onStyle: (style: FillStyle) => void }) {
+  return (
+    <label className="scene-fill-style" title={`Fill style: ${FILL_STYLE_LABEL[style]}, ${FILL_STYLE_HINT[style]}`}>
+      <span className="control-label">Fill style</span>
+      <select
+        className="fill-style-select"
+        value={style}
+        onChange={(event) => onStyle(event.target.value as FillStyle)}
+      >
+        {FILL_STYLES.map((style) => (
+          <option key={style} value={style}>
+            {FILL_STYLE_LABEL[style]}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
+/**
+ * The Fill button: the track's fill in the chosen style, at the Fill at timing. Shows where a queued fill
  * plays ("Fill · Bar 8", "Fill · Next phrase") and any fill playing.
  *
  * Unavailable is aria-disabled, not disabled: it stays in the tab order, so focus is

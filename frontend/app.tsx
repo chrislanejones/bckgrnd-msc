@@ -395,7 +395,12 @@ export function App() {
               title="Scenes & comparison"
               views={['perform', 'mix']}
               className="scenes-panel"
-              actions={<SceneHeader status={inst.sceneStatus} />}
+              actions={
+                <SceneHeader
+                  status={inst.sceneStatus}
+                  {...(inst.hasFill ? { fillStyle: { style: inst.fillStyle, onStyle: inst.setFillStyle } } : {})}
+                />
+              }
             >
               <SceneStrip
                 scenes={inst.scenes.slots}

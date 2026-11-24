@@ -20,6 +20,7 @@ declare(strict_types=1);
  * Usage: php tools/export-library.php [outputDir]
  */
 
+use App\Support\Music\Fills;
 use App\Support\Music\Library;
 
 require __DIR__.'/../app/Support/Music/Pitch.php';
@@ -124,6 +125,8 @@ foreach (Library::all() as $track) {
     $write("{$outDir}/{$track->id}.json", [
         'track' => $arrangedJson,
         'activity' => $activity,
+        // Beside the track, not in it: see Fills::styles.
+        'fillStyles' => Fills::styles($track),
     ]);
     $written++;
 }

@@ -62,19 +62,24 @@ import {
   type Timing,
 } from './scenes';
 import {
+  DEFAULT_FILL_STYLE,
   DEFAULT_PHRASE_BARS,
-  FILL_INDEX,
+  FILL_STYLES,
   PHRASE_BAR_CHOICES,
   buildRefusal,
+  fillIndex,
   fillIntoCancelled,
   fillIntoRefusal,
   fillPhrase,
   fillQueuedStatus,
   fillRefusal,
+  fillStyleName,
   foldFillJob,
   markFilling,
+  withFillStyles,
   type FillAt,
   type FillJob,
+  type FillStyle,
   type PhraseBars,
 } from './fills';
 import { PREF, readChoice, writeChoice } from './prefs';
@@ -82,7 +87,7 @@ import { STEM_ORDER, STEPS } from './stems';
 import { LANE_IDS, type LaneId, type ScenePatterns } from './patterns';
 import { usePatternWorkspace } from './workspace';
 import { useProjectHistory } from './project-history';
-import type { LibraryResponse, Mix, StemId, TrackArrangement, TrackSummary } from './types';
+import type { Fill, LibraryResponse, Mix, StemId, TrackArrangement, TrackSummary } from './types';
 
 /** The scene slot Fill → Drop leads into: the fourth, whatever it is named now. */
 const FILL_INTO_SLOT: SceneSlotId = 'drop';
@@ -223,6 +228,11 @@ export function useInstrument() {
   const [cued, setCued] = useState<TrackArrangement | null>(null);
 
   const arrangementCache = useRef(new Map<string, TrackArrangement>());
+  /**
+   * Each track's four fill styles (Night 9), by track id: sent to the engine as its
+   * fills, beside the arrangement rather than in it (the arrangement is hashed).
+   */
+  const fillStylesCache = useRef(new Map<string, Fill[]>());
 
   /**
    * Each deck's loaded-track generation. Every load bumps it and tells the worklet,
@@ -232,7 +242,7 @@ export function useInstrument() {
   const generations = useRef<Record<DeckId, number>>({ a: 0, b: 0 });
   const loadDeck = useCallback((deck: DeckId, arranged: TrackArrangement) => {
     generations.current[deck] += 1;
-    engine.loadTrack(deck, arranged, generations.current[deck]);
+    engine.loadTrack(deck, withFillStyles(arranged, fillStylesCache.current.get(arranged.id)), generations.current[deck]);
   }, []);
 
   // ---- Patterns ---------------------------------------------------------------
@@ -331,6 +341,10 @@ export function useInstrument() {
   const [fillAt, setFillAtState] = useState<FillAt>(() => readChoice(PREF.fillAt, ['bar', 'phrase'] as const, 'bar'));
   const [phraseBars, setPhraseBarsState] = useState<PhraseBars>(() =>
     readChoice(PREF.phraseBars, PHRASE_BAR_CHOICES, DEFAULT_PHRASE_BARS));
+  /** Fill style (Night 9): which of the track's fills the three fill controls play. */
+  const [fillStyle, setFillStyleState] = useState<FillStyle>(() => readChoice(PREF.fillStyle, FILL_STYLES, DEFAULT_FILL_STYLE));
+  /** The engine's index for the chosen style on the live track (0, Classic, if none). */
+  const fillStyleIndex = () => fillIndex(track ? fillStylesCache.current.get(track.id) : undefined, fillStyle);
   /**
    * Held effects, by kind, with the token the engine knows them by. Temporary
    * overrides only: none of this is part of the working mix or the project.
@@ -359,7 +373,8 @@ export function useInstrument() {
   const loadArrangement = useCallback(async (id: string): Promise<TrackArrangement | null> => {
     const cached = arrangementCache.current.get(id);
     if (cached) return cached;
-    const { track: arranged } = await fetchTrack(id);
+    const { track: arranged, fillStyles } = await fetchTrack(id);
+    if (fillStyles?.length) fillStylesCache.current.set(id, fillStyles);
     arrangementCache.current.set(id, arranged);
     return arranged;
   }, []);
@@ -566,7 +581,7 @@ export function useInstrument() {
         setMixing(arranged.name);
         generations.current[incoming] += 1;
         const mixGeneration = generations.current[incoming];
-        engine.mix(incoming, arranged, bpm, swing, () => {
+        engine.mix(incoming, withFillStyles(arranged, fillStylesCache.current.get(arranged.id)), bpm, swing, () => {
           setMixing(null);
           setTrack(arranged);
           resetScenesFor(arranged);
@@ -1157,7 +1172,7 @@ export function useInstrument() {
       if (isFillPending(waiting) && waiting.kind !== 'rise' && waiting.status !== 'playing') {
         void engine.cancelFill(waiting.requestId);
       }
-      setFill({ requestId: fillId, status: 'sending', kind: 'rise', phrase: 0, from: songStepRef.current, partner: requestId });
+      setFill({ requestId: fillId, status: 'sending', kind: 'rise', phrase: 0, from: songStepRef.current, partner: requestId, style: fillStyle });
     }
     const request: SceneRequest = {
       requestId,
@@ -1182,7 +1197,7 @@ export function useInstrument() {
       request.generation,
       undefined,
       data ? { requestId: nextRequestId.current++, data } : undefined,
-      { accent, ...(withFill ? { fill: { requestId: fillId, index: FILL_INDEX } } : {}) },
+      { accent, ...(withFill ? { fill: { requestId: fillId, index: fillStyleIndex() } } : {}) },
     );
   }
 
@@ -1515,6 +1530,12 @@ export function useInstrument() {
     writeChoice(PREF.phraseBars, bars);
   }
 
+  /** Fill style. Remembered. A fill already queued keeps the style it was sent with. */
+  function setFillStyle(style: FillStyle) {
+    setFillStyleState(style);
+    writeChoice(PREF.fillStyle, style);
+  }
+
   /**
    * The Fill button. First press queues the track's fill, for the next bar or the end of
    * the phrase (Fill at); a second press before it starts cancels it; a press while it
@@ -1529,8 +1550,8 @@ export function useInstrument() {
     if (!playing || mixing || !track?.fills?.length) return;
     const id = nextRequestId.current++;
     const phrase = fillPhrase(fillAt, phraseBars);
-    setFill({ requestId: id, status: 'sending', kind: 'plain', phrase, from: songStepRef.current });
-    engine.queueFill(id, FILL_INDEX, generations.current[liveDeck], phrase);
+    setFill({ requestId: id, status: 'sending', kind: 'plain', phrase, from: songStepRef.current, style: fillStyle });
+    engine.queueFill(id, fillStyleIndex(), generations.current[liveDeck], phrase);
   }
 
   /**
@@ -1581,10 +1602,10 @@ export function useInstrument() {
       ...(sets ? { lanes: sets } : {}),
     };
     setBook(bookSend(requestBook.current, request));
-    setFill({ requestId: fillId, status: 'sending', kind: 'into', phrase, from: songStepRef.current, partner: sceneId });
+    setFill({ requestId: fillId, status: 'sending', kind: 'into', phrase, from: songStepRef.current, partner: sceneId, style: fillStyle });
     // Compiled now, as for a launch, so the lanes that land are the ones pressed for.
     const data = sets ? patterns.scenePayload(sets) : undefined;
-    engine.queueFillInto(fillId, sceneId, FILL_INDEX, sceneVector(request.mix), request.generation, {
+    engine.queueFillInto(fillId, sceneId, fillStyleIndex(), sceneVector(request.mix), request.generation, {
       phrase,
       accent: scene.crash ? SCENE_ACCENT.crash : SCENE_ACCENT.none,
       ...(data ? { patterns: { requestId: nextRequestId.current++, data } } : {}),
@@ -1747,6 +1768,7 @@ export function useInstrument() {
     toggleFillInto,
     setFillAt,
     setPhraseBars,
+    setFillStyle,
     setRiseFill,
     panic,
     brake,
@@ -1819,7 +1841,9 @@ export function useInstrument() {
     sceneStatus,
     /** The fill the engine holds (plain, a Fill into's or a Rise's), or null. */
     fill,
-    fillName: track?.fills?.[FILL_INDEX]?.name ?? 'Fill',
+    /** The fill's name: its style's ("Busy fill"), the one it was sent with while pending. */
+    fillName: fillStyleName(isFillPending(fill) && fill.style ? fill.style : fillStyle),
+    fillStyle,
     hasFill: Boolean(track?.fills?.length),
     /** Fill at, the phrase length and Finish with Fill: app preferences. */
     fillAt,
