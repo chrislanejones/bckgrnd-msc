@@ -422,6 +422,7 @@ export function App() {
                         name: inst.fillName,
                         at: inst.fillAt,
                         phraseBars: inst.phraseBars,
+                        style: inst.fillStyle,
                         riseFill: inst.riseFill,
                         unavailable: inst.fillUnavailable,
                         intoName: inst.fillIntoName,
@@ -430,6 +431,7 @@ export function App() {
                         onFillInto: inst.toggleFillInto,
                         onAt: inst.setFillAt,
                         onPhraseBars: inst.setPhraseBars,
+                        onStyle: inst.setFillStyle,
                         onRiseFill: inst.setRiseFill,
                       },
                     }

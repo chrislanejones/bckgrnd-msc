@@ -4226,6 +4226,47 @@ html[data-control-drag="yes"] * {
   padding-inline: 0.5rem;
 }
 
+/* Fill style (Night 9): a compact native menu in the fill row, a pill as tall as Fill's
+   own buttons, with the drawn chevron the Next song menu uses. Its words ("Classic")
+   are its value; "Fill style" is its name. On a phone it takes a row of its own. */
+.scene-fill-style {
+  display: inline-flex;
+  min-width: 0;
+}
+
+.fill-style-select {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: var(--button-sm-h);
+  appearance: none;
+  -webkit-appearance: none;
+  padding: 0.25rem 1.75rem 0.25rem 0.85rem;
+  border: 1px solid var(--color-line);
+  border-radius: 999px;
+  background-color: var(--color-surface);
+  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 8' fill='none' stroke='%238e939c' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M1 1.5 6 6.5 11 1.5'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 0.75rem center;
+  background-size: 0.6rem;
+  color: var(--color-fg);
+  font: inherit;
+  font-size: 0.75rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+@media (pointer: coarse) {
+  .fill-style-select {
+    min-height: var(--control-md);
+  }
+}
+
+@container scenes (max-width: 34rem) {
+  .scene-fill-tools > .scene-fill-style {
+    grid-column: 1 / -1;
+  }
+}
+
 /* Finish with Fill: one pill in its own track, right after Rise's bar count. Its short
    words ("+ Fill") are for narrow panels, below. */
 .rise-fill-short {

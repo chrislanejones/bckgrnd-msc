@@ -9,6 +9,7 @@
  * engine reported.
  */
 
+import type { Fill, TrackArrangement } from './types';
 import {
   BUILD_REFUSAL,
   EVENT,
@@ -27,8 +28,51 @@ export type PhraseBars = 2 | 4 | 8 | 16;
 export const PHRASE_BAR_CHOICES: readonly PhraseBars[] = [2, 4, 8, 16];
 export const DEFAULT_PHRASE_BARS: PhraseBars = 4;
 
-/** The fill the Fill button plays: the track's first, as in Night 3. */
+/** The track's first fill, Classic: what plays when a style can't be found. */
 export const FILL_INDEX = 0;
+
+/**
+ * Fill style (Night 9): which of the track's four fills Fill, Fill → Drop and Rise +
+ * Fill play. An app preference, like Fill at; never part of a project.
+ */
+export type FillStyle = 'classic' | 'simple' | 'busy' | 'syncopated';
+export const FILL_STYLES: readonly FillStyle[] = ['classic', 'simple', 'busy', 'syncopated'];
+export const DEFAULT_FILL_STYLE: FillStyle = 'classic';
+export const FILL_STYLE_LABEL: Record<FillStyle, string> = {
+  classic: 'Classic',
+  simple: 'Simple',
+  busy: 'Busy',
+  syncopated: 'Syncopated',
+};
+/** What a style does, for its menu's tooltip. */
+export const FILL_STYLE_HINT: Record<FillStyle, string> = {
+  classic: "the track's own fill",
+  simple: 'a lighter fill: the hats thin out',
+  busy: 'a rising clap roll',
+  syncopated: 'offbeat accents, 3 + 3 + 2',
+};
+
+/** The Fill button's name for a style: "Classic fill". */
+export const fillStyleName = (style: FillStyle): string => `${FILL_STYLE_LABEL[style]} fill`;
+
+/**
+ * The engine's index for `style` among the fills it was loaded with: its place in
+ * `styles` (the track's `fillStyles`), or Classic's 0 when the library has none or
+ * lacks that style.
+ */
+export function fillIndex(styles: readonly Fill[] | undefined, style: FillStyle): number {
+  const i = styles?.findIndex((f) => f.style === style) ?? -1;
+  return i >= 0 ? i : FILL_INDEX;
+}
+
+/**
+ * The arrangement as the engine is sent it: with the four styles as its fills, so
+ * `fillIndex` picks one. The arrangement itself is left as it is (it is a project's
+ * hashed source); without styles it goes unchanged and index 0 is its own fill.
+ */
+export function withFillStyles(arranged: TrackArrangement, styles: readonly Fill[] | undefined): TrackArrangement {
+  return styles?.length ? { ...arranged, fills: [...styles] } : arranged;
+}
 
 /** What the engine is sent as `phrase`: 0 for the next bar. */
 export const fillPhrase = (at: FillAt, bars: PhraseBars): 0 | PhraseBars => (at === 'phrase' ? bars : 0);
@@ -47,6 +91,8 @@ export type FillJob = FillRequest & {
   late?: boolean;
   /** The request it was sent with: the Fill into's scene, or the Rise. */
   partner?: number;
+  /** The style it was sent with: it keeps it if the choice changes meanwhile. */
+  style?: FillStyle;
 };
 
 const STEPS_PER_BAR = 16;

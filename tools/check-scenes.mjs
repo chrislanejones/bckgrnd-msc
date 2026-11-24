@@ -329,6 +329,28 @@ check('a merged crash is said the same way', s.accentStatus('Drop', 2) === 'Drop
 check('a crash silent under a solo says nothing', s.accentStatus('Drop', 0) === null);
 check('accentFired is not a launch event, so it never settles a request', !s.isLaunchEvent(s.EVENT.accentFired));
 
+// ---- Fill style (Night 9, frontend/lib/fills.ts) ------------------------------------
+{
+  const lanes = { kick: [], clap: [], hat: [], hatOpen: [] };
+  const styles = fl.FILL_STYLES.map((style, i) => ({ id: `f${i}`, name: style, style, ...lanes }));
+  check('fill style: four styles, Classic first and the default',
+    JSON.stringify(fl.FILL_STYLES) === '["classic","simple","busy","syncopated"]' && fl.DEFAULT_FILL_STYLE === 'classic'
+    && fl.FILL_STYLES.map((x) => fl.FILL_STYLE_LABEL[x]).join() === 'Classic,Simple,Busy,Syncopated');
+  check('fill style: the index is the style\'s place among the fill styles',
+    fl.FILL_STYLES.every((x, i) => fl.fillIndex(styles, x) === i)
+    && fl.fillIndex([...styles].reverse(), 'classic') === 3);
+  check('fill style: no styles, or a style missing, falls back to Classic\'s 0',
+    fl.fillIndex(undefined, 'busy') === 0 && fl.fillIndex([], 'busy') === 0 && fl.fillIndex(styles.slice(0, 2), 'syncopated') === 0);
+  const track = { id: 't', fills: [{ id: 'roll', name: 'Clap roll', ...lanes }] };
+  const sent = fl.withFillStyles(track, styles);
+  check('fill style: the engine is sent the styles as fills, the arrangement left as it is',
+    sent.fills.length === 4 && sent.fills[2].style === 'busy' && track.fills.length === 1 && sent !== track);
+  check('fill style: without styles the arrangement goes unchanged',
+    fl.withFillStyles(track, undefined) === track && fl.withFillStyles(track, []) === track);
+  check('fill style: the buttons name the style', fl.fillStyleName('syncopated') === 'Syncopated fill'
+    && fl.fillButtonAria(null, fl.fillStyleName('busy'), 0) === 'Busy fill for one bar, from the next bar');
+}
+
 const vec = s.sceneVector(applied);
 const back = s.mixFromVector(vec);
 check('mixFromVector inverts sceneVector', s.sameMix(s.copyMix(back), applied) && s.sceneVector(back).every((v, i) => v === vec[i]));

@@ -38,6 +38,9 @@ import {
   type Timing,
 } from '../lib/scenes';
 import {
+  FILL_STYLES,
+  FILL_STYLE_HINT,
+  FILL_STYLE_LABEL,
   PHRASE_BAR_CHOICES,
   fillButtonAria,
   fillButtonJob,
@@ -51,6 +54,7 @@ import {
   fillingLine,
   type FillAt,
   type FillJob,
+  type FillStyle,
   type PhraseBars,
 } from '../lib/fills';
 import { STEM_ORDER, STEM_NAMES } from '../lib/stems';
@@ -62,10 +66,12 @@ import type { CSSProperties, ReactNode } from 'react';
 export type FillControls = {
   /** The fill the engine holds (plain, a Fill into's or a Rise's), or null. */
   job: FillJob | null;
-  /** The track's fill, by name. */
+  /** The fill's name for its buttons: its style's ("Classic fill"). */
   name: string;
   at: FillAt;
   phraseBars: PhraseBars;
+  /** Fill style: which fill Fill, Fill → Drop and Finish with Fill play. */
+  style: FillStyle;
   /** Finish with Fill, on Rise. */
   riseFill: boolean;
   /** Why Fill cannot start now, or null. */
@@ -78,6 +84,7 @@ export type FillControls = {
   onFillInto: () => void;
   onAt: (at: FillAt) => void;
   onPhraseBars: (bars: PhraseBars) => void;
+  onStyle: (style: FillStyle) => void;
   onRiseFill: (on: boolean) => void;
 };
 
@@ -374,7 +381,10 @@ function FillReasons({ fill, ids }: { fill: FillControls; ids: { fill: string; i
   );
 }
 
-/** Fill's own row: Fill at, the phrase length (Phrase end only), Fill and Fill → Drop. */
+/**
+ * Fill's own row: Fill at, the phrase length (Phrase end only), the fill style, Fill and
+ * Fill → Drop.
+ */
 function FillTools({ fill, ids }: { fill: FillControls; ids: { fill: string; into: string } }) {
   return (
     <div className="scene-fill-tools" role="group" aria-label="Fill">
@@ -401,6 +411,7 @@ function FillTools({ fill, ids }: { fill: FillControls; ids: { fill: string; int
           <span className="scene-build-unit" aria-hidden="true">bars</span>
         </div>
       ) : null}
+      <FillStyleSelect fill={fill} />
       <FillButton fill={fill} reasonId={ids.fill} />
       <FillIntoButton fill={fill} reasonId={ids.into} />
     </div>
@@ -408,7 +419,32 @@ function FillTools({ fill, ids }: { fill: FillControls; ids: { fill: string; int
 }
 
 /**
- * The Fill button: the track's fill, at the Fill at timing. Shows where a queued fill
+ * Fill style (Night 9): a compact menu of the four, Classic first. A native select, so
+ * keyboard, touch and screen readers get the platform's own picker; its name is "Fill
+ * style" and its tooltip says what the chosen one does. A fill already queued keeps
+ * the style it was sent with.
+ */
+function FillStyleSelect({ fill }: { fill: FillControls }) {
+  return (
+    <label className="scene-fill-style" title={`Fill style: ${FILL_STYLE_LABEL[fill.style]}, ${FILL_STYLE_HINT[fill.style]}`}>
+      <span className="sr-only">Fill style</span>
+      <select
+        className="fill-style-select"
+        value={fill.style}
+        onChange={(event) => fill.onStyle(event.target.value as FillStyle)}
+      >
+        {FILL_STYLES.map((style) => (
+          <option key={style} value={style}>
+            {FILL_STYLE_LABEL[style]}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
+/**
+ * The Fill button: the track's fill in the chosen style, at the Fill at timing. Shows where a queued fill
  * plays ("Fill · Bar 8", "Fill · Next phrase") and any fill playing.
  *
  * Unavailable is aria-disabled, not disabled: it stays in the tab order, so focus is
