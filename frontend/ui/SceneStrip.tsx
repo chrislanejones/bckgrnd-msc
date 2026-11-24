@@ -70,8 +70,6 @@ export type FillControls = {
   name: string;
   at: FillAt;
   phraseBars: PhraseBars;
-  /** Fill style: which fill Fill, Fill → Drop and Finish with Fill play. */
-  style: FillStyle;
   /** Finish with Fill, on Rise. */
   riseFill: boolean;
   /** Why Fill cannot start now, or null. */
@@ -84,7 +82,6 @@ export type FillControls = {
   onFillInto: () => void;
   onAt: (at: FillAt) => void;
   onPhraseBars: (bars: PhraseBars) => void;
-  onStyle: (style: FillStyle) => void;
   onRiseFill: (on: boolean) => void;
 };
 
@@ -307,17 +304,25 @@ export function SceneStrip(props: Props) {
 }
 
 /**
- * The scene panel's header extras: the last outcome as a status line and the
- * Shift+1–4 hint as a small tag. Rendered as the panel's header actions, so the
+ * The scene panel's header extras: the last outcome as a status line, the Fill style
+ * menu and the Shift+1–4 hint as a small tag. Rendered as the panel's header actions, so the
  * status needs no row of its own.
  */
-export function SceneHeader({ status }: { status: string }) {
+export function SceneHeader({
+  status,
+  fillStyle,
+}: {
+  status: string;
+  /** Fill style, when the track has fills: the choice and how to change it. */
+  fillStyle?: { style: FillStyle; onStyle: (style: FillStyle) => void };
+}) {
   return (
     <>
       {/* Discrete changes only ("Drop queued", "Drop active"), never every beat. */}
       <p className="scene-status" role="status" aria-live="polite" title={status || undefined}>
         {status}
       </p>
+      {fillStyle ? <FillStyleSelect {...fillStyle} /> : null}
       <span className="scene-keys" title="Shift+1 to Shift+4 launch the four scenes">
         <kbd>Shift</kbd> <kbd>1–4</kbd>
       </span>
@@ -381,10 +386,7 @@ function FillReasons({ fill, ids }: { fill: FillControls; ids: { fill: string; i
   );
 }
 
-/**
- * Fill's own row: Fill at, the phrase length (Phrase end only), the fill style, Fill and
- * Fill → Drop.
- */
+/** Fill's own row: Fill at, the phrase length (Phrase end only), Fill and Fill → Drop. */
 function FillTools({ fill, ids }: { fill: FillControls; ids: { fill: string; into: string } }) {
   return (
     <div className="scene-fill-tools" role="group" aria-label="Fill">
@@ -411,7 +413,6 @@ function FillTools({ fill, ids }: { fill: FillControls; ids: { fill: string; int
           <span className="scene-build-unit" aria-hidden="true">bars</span>
         </div>
       ) : null}
-      <FillStyleSelect fill={fill} />
       <FillButton fill={fill} reasonId={ids.fill} />
       <FillIntoButton fill={fill} reasonId={ids.into} />
     </div>
@@ -423,15 +424,20 @@ function FillTools({ fill, ids }: { fill: FillControls; ids: { fill: string; int
  * keyboard, touch and screen readers get the platform's own picker; its name is "Fill
  * style" and its tooltip says what the chosen one does. A fill already queued keeps
  * the style it was sent with.
+ *
+ * It sits in the panel's header, not on the fill row: with Phrase end, 16 bars and the
+ * widest button words ("Fill · Next phrase → Drop") that row is already full at every
+ * mouse width from 900 to 1280px, and a second fill row would break the toolbar's
+ * three 32px rows (tools/verify-ui-fills.mjs).
  */
-function FillStyleSelect({ fill }: { fill: FillControls }) {
+function FillStyleSelect({ style, onStyle }: { style: FillStyle; onStyle: (style: FillStyle) => void }) {
   return (
-    <label className="scene-fill-style" title={`Fill style: ${FILL_STYLE_LABEL[fill.style]}, ${FILL_STYLE_HINT[fill.style]}`}>
-      <span className="sr-only">Fill style</span>
+    <label className="scene-fill-style" title={`Fill style: ${FILL_STYLE_LABEL[style]}, ${FILL_STYLE_HINT[style]}`}>
+      <span className="control-label">Fill style</span>
       <select
         className="fill-style-select"
-        value={fill.style}
-        onChange={(event) => fill.onStyle(event.target.value as FillStyle)}
+        value={style}
+        onChange={(event) => onStyle(event.target.value as FillStyle)}
       >
         {FILL_STYLES.map((style) => (
           <option key={style} value={style}>

@@ -12,6 +12,11 @@
  * meanwhile; the choices survive a reload; every control has a full name; and the
  * scenes toolbar adds no row as the options and the widest labels come and go.
  *
+ * Fill style (Night 9): Classic by default; the choice is remembered; Fill, Fill → Drop
+ * and Rise + Fill send the chosen style's index, which the engine accepts because the
+ * track it was loaded with carries the four styles as its fills; a queued fill keeps
+ * the style it was sent with.
+ *
  * Every change of the pads, the fill buttons, the bar readout and the status line is
  * logged in the page with its time, so the checks read what the screen showed and for
  * how long, not a poll that can miss a bar.
@@ -596,6 +601,113 @@ export async function fillChecks({ open, check }) {
     await page.close();
   }
 
+  // ---- Fill style (Night 9): Classic by default, remembered, and sent with all three. --
+  {
+    const { page, errors } = await open(1440, 1000);
+    const k = kit(page);
+    try {
+      // Every message the page posts to the worklet that loads a track or asks for a fill.
+      await page.addInitScript(() => {
+        const sent = (window.__FILL_SENT__ = []);
+        const post = MessagePort.prototype.postMessage;
+        MessagePort.prototype.postMessage = function (message, ...rest) {
+          if (message && typeof message === 'object' && ['track', 'mix', 'fill', 'fillInto', 'build'].includes(message.type)) {
+            const { type, index, fillIndex, json } = message;
+            const fills = json ? JSON.parse(json).fills : undefined;
+            sent.push({ type, index, fillIndex, fills: fills?.map((f) => f.style ?? null) });
+          }
+          return post.call(this, message, ...rest);
+        };
+      });
+      await page.reload({ waitUntil: 'networkidle' });
+      await page.waitForSelector('.scene-fill-tools');
+      const select = page.getByRole('combobox', { name: 'Fill style', exact: true });
+      const sent = () => page.evaluate(() => window.__FILL_SENT__);
+      const options = await select.locator('option').evaluateAll((os) => os.map((o) => `${o.value}:${o.textContent.trim()}`));
+      check('fill style: a menu named Fill style in the scenes header (not the toolbar), Classic, Simple, Busy, Syncopated',
+        (await page.locator('.scenes-panel .panel-actions .fill-style-select').count()) === 1
+        && (await page.locator('.scene-toolbar select').count()) === 0
+        && options.join() === 'classic:Classic,simple:Simple,busy:Busy,syncopated:Syncopated', options.join());
+      check('fill style: Classic by default, and the Fill button names it',
+        (await select.inputValue()) === 'classic' && (await k.fillBtn.getAttribute('aria-label')) === 'Classic fill for one bar, from the next bar',
+        `${await select.inputValue()} / ${await k.fillBtn.getAttribute('aria-label')}`);
+      check('fill style: the default is not stored until it is chosen',
+        await page.evaluate(() => localStorage.getItem('bckgrnd-msc:fill-style')) === null);
+      // The track the UI keeps (a saved project's hashed source) still has its one fill.
+      const own = await page.evaluate(async () => (await (await fetch('/library/warehouse.json')).json()).track.fills.length);
+      check("fill style: the library's track keeps its one fill", own === 1, String(own));
+
+      await select.selectOption('busy');
+      check('fill style: choosing Busy is stored, and the Fill button names it',
+        await page.evaluate(() => localStorage.getItem('bckgrnd-msc:fill-style')) === 'busy'
+        && (await k.fillBtn.getAttribute('aria-label')) === 'Busy fill for one bar, from the next bar');
+      await page.reload({ waitUntil: 'networkidle' });
+      await page.waitForSelector('.scene-fill-tools');
+      check('fill style: after a reload it is still Busy', (await select.inputValue()) === 'busy', await select.inputValue());
+
+      await k.play();
+      await k.tempo(BPM);
+      // Messages queued before the first Play reach the worklet once it boots.
+      const loads = (await sent()).filter((m) => m.type === 'track');
+      check('fill style: the engine is loaded with the four styles as its fills',
+        loads.length > 0 && loads.every((m) => m.fills?.join() === 'classic,simple,busy,syncopated'), JSON.stringify(loads.map((m) => m.fills)));
+      check('fill style: with a mouse the Fill button\'s tooltip names the style',
+        /^Busy fill: /.test((await k.fillBtn.getAttribute('title')) ?? ''), await k.fillBtn.getAttribute('title'));
+      // Fill: index 2. Switched to Simple while it waits, it keeps Busy.
+      let from = (await sent()).length;
+      await k.fillBtn.click();
+      await page.waitForFunction((n) => window.__FILL_SENT__.slice(n).some((m) => m.type === 'fill'), from, RT);
+      await select.selectOption('simple');
+      const keptAria = await k.fillBtn.getAttribute('aria-label');
+      await k.waitFill('playing');
+      const playingAria = await k.fillBtn.getAttribute('aria-label');
+      await k.waitFill('idle');
+      const fillMsg = (await sent()).slice(from).find((m) => m.type === 'fill');
+      check('fill style: Fill sends Busy\'s index, 2, and the engine plays it', fillMsg?.index === 2, JSON.stringify(fillMsg));
+      check('fill style: a queued fill keeps the style it was sent with',
+        /Busy fill/.test(keptAria ?? '') && playingAria === 'Busy fill is playing', `${keptAria} / ${playingAria}`);
+      check('fill style: once it has played, the button names the new choice',
+        (await k.fillBtn.getAttribute('aria-label')) === 'Simple fill for one bar, from the next bar', await k.fillBtn.getAttribute('aria-label'));
+
+      // Fill → Drop: index 3 (Syncopated).
+      await select.selectOption('syncopated');
+      from = (await sent()).length;
+      await k.intoBtn.click();
+      await k.waitState(DROP, ['active', 'modified']);
+      const intoMsg = (await sent()).slice(from).find((m) => m.type === 'fillInto');
+      check('fill style: Fill → Drop sends Syncopated\'s index, 3, and Drop lands', intoMsg?.index === 3, JSON.stringify(intoMsg));
+
+      // Rise + Fill: index 1 (Simple), into the first scene.
+      await select.selectOption('simple');
+      await k.switchOn('Rise into the scene over several bars');
+      await k.riseOver(2);
+      await k.finishWithFill(true);
+      from = (await sent()).length;
+      await k.pad(0).click();
+      await page.waitForFunction((n) => window.__FILL_SENT__.slice(n).some((m) => m.type === 'build'), from, RT);
+      await k.waitFill('playing');
+      const riseAria = await k.fillBtn.getAttribute('aria-label');
+      await k.waitState(0, ['active', 'modified']);
+      const buildMsg = (await sent()).slice(from).find((m) => m.type === 'build');
+      check('fill style: Rise + Fill sends Simple\'s index, 1, and the fill plays the last bar',
+        buildMsg?.fillIndex === 1 && riseAria === 'Simple fill is playing', `${JSON.stringify(buildMsg)} / ${riseAria}`);
+
+      // Back to Classic: index 0, as before Night 9.
+      await select.selectOption('classic');
+      await k.switchOn('Launch on the next bar');
+      from = (await sent()).length;
+      await k.fillBtn.click();
+      await k.waitFill('playing');
+      await k.waitFill('idle');
+      const classicMsg = (await sent()).slice(from).find((m) => m.type === 'fill');
+      check('fill style: Classic sends index 0, the Night 3 fill', classicMsg?.index === 0, JSON.stringify(classicMsg));
+    } catch (e) {
+      check('fill style: the walk-through ran to the end', false, String(e.message).split('\n')[0]);
+    }
+    check('fill style: no page errors', errors.length === 0, errors.join('; '));
+    await page.close();
+  }
+
   // ---- Preferences survive a reload. -------------------------------------------------
   {
     const { page, errors } = await open(1440, 1000);
@@ -701,6 +813,12 @@ export async function fillChecks({ open, check }) {
       } else {
         check(`${w}px: and the longest wraps to two lines at most`, widest.lines <= 2, `${widest.lines} lines`);
       }
+      const menu = await page.evaluate(() => {
+        const b = document.querySelector('.fill-style-select')?.getBoundingClientRect();
+        return b ? { h: Math.round(b.height), w: Math.round(b.width), right: Math.round(b.right) } : null;
+      });
+      check(`${w}px: the Fill style menu is on screen, ${extra?.hasTouch ? '44' : '24'}px tall or more`,
+        menu !== null && menu.h >= (extra?.hasTouch ? 44 : 24) && menu.right <= w, JSON.stringify(menu));
       check(`${w}px: the page doesn't scroll sideways`, Object.values(all).every((m) => m.scroll <= w), Object.values(all).map((m) => m.scroll).join(','));
       if (extra?.hasTouch) {
         const small = await page.evaluate(() => [...document.querySelectorAll('.scene-toolbar button')]
