@@ -77,6 +77,12 @@ it.
 The host API is `EngineHost.queueFill(requestId, index, generation, phrase = 0)` with
 `FILL_PHRASE_BARS` in `frontend/lib/engine.ts`.
 
+Which fill: in Night 8 the host always sent index 0, the track's one fill. Since Night 9
+the engine is loaded with the track's four `fillStyles` as its fills, and Fill, Fill into
+and Rise + Fill send the index of the chosen Fill Style, looked up by `style` key with
+`fillIndex()` in `frontend/lib/fills.ts` (0, Classic, when a track has no styles). See
+ADR-024. The engine side is unchanged.
+
 ## Fill into
 
 One press: a phrase fill, and a scene (Drop, or any slot) that **commits on the onset
@@ -189,7 +195,7 @@ and its lanes commit on the next downbeat, which is the existing build landing.
 | `cancel_build(request_id) -> bool`, `cancel_fill(fill_id) -> bool` | Either cancels the whole request (below) |
 
 - `fill_id` 0 means no fill. Otherwise it is the fill's own request id, and `fill_index`
-  the track's fill to play.
+  the track's fill to play (the chosen Fill Style's index since Night 9, as for Fill).
 - Lanes are staged before it with `link` = the build's id, as in Night 7.
 
 ### One transaction
@@ -305,13 +311,14 @@ anything else goes in as 255 and is refused. The host API takes `SCENE_ACCENT` o
 | Check | Covers |
 |---|---|
 | `cargo test` `fill_tests.rs` | Phrase fills for 2/4/8/16 bars on every phrase line, bad phrase or length, late presses, loop wraps, tempo and loop while waiting; Fill into landing order, the scene's kick on the line, no gap, atomic refusal per part, every cancel/replace row, interrupts; Rise + Fill at 2/4/8 bars, refusal per part, cancel from either part, interrupts, replace, loop and tempo, the held slot; accents once on commit, merged on 192, silent under solo, none stopped, on a Rise landing and a Fill into, bad codes |
-| `cargo test --test no_alloc` | A counting allocator over every `process()` call and the request calls through all of the above (drums only: see below) |
+| `cargo test --test no_alloc` | A counting allocator over every `process()` call and the request calls through all of the above (tone stems too since `473d13c`: see below) |
 | `cargo bench --bench render` | `fills` (back-to-back Fill into) against `night3`, the same music through Night 3 calls, and both against `plain` |
 | `pnpm check:scenes` | `foldFillEvent` for 11-15, 51, 52, reason 11 and 53 |
 
-`process()` already allocates when it triggers a tone note (the `NoteEvent` clone and
-the voicing's detune `Vec`), before and outside Night 8. The no-allocation test plays a
-track's drums alone so that it measures Night 8; the tone path is parked.
+In Night 8 `process()` still allocated when it triggered a tone note (the `NoteEvent`
+clone and the voicing's detune `Vec`), so the no-allocation test played drums alone.
+Night 9 fixed that (`473d13c`, ADR-016's amendment): the test now plays every library
+track with its tone stems.
 
 ## Where this departs from the spec
 

@@ -37,7 +37,12 @@ and is marked `(backfilled)`.
 | [021](021-a-fill-and-its-landing-are-one-atomic-linked-request.md) | A fill and the scene or Rise it leads into are one atomic request with a shared deadline: both queued or neither, and a cancel never leaves half | draft | 2026-11-19 |
 | [022](022-a-scene-may-carry-an-explicit-crash-accent.md) | A scene may carry a crash accent, off by default and never automatic, fired when it commits during playback (amends ADR-008) | draft | 2026-11-19 |
 | [023](023-scene-accents-bump-the-project-to-version-4.md) | The scene accent bumps the project to version 4 with a v3 → v4 migration, not an optional v3 field | draft | 2026-11-19 |
+| [024](024-fill-styles-ship-beside-the-track-not-inside-it.md) | Four fill styles ship as `fillStyles` beside the track, not in `track.fills` (a project's hashed source); the host picks one by style key, and Fill Style is an app preference | draft | 2026-11-24 |
 
 Night 8's new event numbers (51 and up) and reason 11 (`linked`) are protocol, not
 decisions. They belong in a Night 8 protocol doc, alongside `docs/NIGHT7_PROTOCOL.md`,
 not in an ADR.
+
+Night 9 amended three drafts instead of adding ADRs for bug fixes: ADR-015 (the host
+keeps one record per request id), ADR-019 (a Rise keeps its own record and is followed
+in exact values) and ADR-016 (tone notes no longer allocate on the audio path).
