@@ -5,7 +5,56 @@
 //! selected by [`Voicing`] so the house/deep/acid/lo-fi characters stay distinct.
 
 use crate::dsp::{exp_between, midi_hz, Adsr, Ladder, Osc, StereoBiquad, Wave};
+use crate::patterns::MAX_NOTES;
 use crate::track::{NoteEvent, TrackKind};
+
+/// The most oscillators one voice holds: a full chord (`MAX_NOTES`, the most a note
+/// event carries in the pattern contract) with every note doubled, which is the widest
+/// `unison` any voicing asks for. A voice keeps its oscillators and its detune list
+/// inline, in arrays this long, because voices are built on the audio path: a `Vec`
+/// here would be an allocation on every note and a free when the note ends.
+pub const MAX_PARTIALS: usize = MAX_NOTES * 2;
+
+/// A voicing's detune list, in cents, held inline (see [`MAX_PARTIALS`]).
+#[derive(Clone, Copy)]
+pub struct Cents {
+    values: [f32; MAX_PARTIALS],
+    len: usize,
+}
+
+impl Cents {
+    /// The list as given. Entries past [`MAX_PARTIALS`] are dropped; no voice has an
+    /// oscillator to give them to.
+    pub fn of(values: &[f32]) -> Self {
+        let mut out = Self {
+            values: [0.0; MAX_PARTIALS],
+            len: values.len().min(MAX_PARTIALS),
+        };
+        out.values[..out.len].copy_from_slice(&values[..out.len]);
+        out
+    }
+
+    /// `pair` repeated `times` over: the pad's `[-9, 11, -9, 11, …]`.
+    pub fn alternating(pair: [f32; 2], times: usize) -> Self {
+        let mut out = Self {
+            values: [0.0; MAX_PARTIALS],
+            len: (times * 2).min(MAX_PARTIALS),
+        };
+        for (i, v) in out.values[..out.len].iter_mut().enumerate() {
+            *v = pair[i % 2];
+        }
+        out
+    }
+
+    /// Oscillator `i`'s detune: its own entry, or the last one once the list runs out.
+    /// An empty list detunes nothing.
+    pub fn get(&self, i: usize) -> f32 {
+        match self.len {
+            0 => 0.0,
+            n => self.values[i.min(n - 1)],
+        }
+    }
+}
 
 /// Per-stem voicing parameters.
 #[derive(Clone)]
@@ -18,7 +67,7 @@ pub struct Voicing {
     /// entry once the list runs out. So `[-6, 5]` on a four-note chord means the first
     /// note is 6 cents flat and the other three are 5 cents sharp, and the pad's
     /// `[−9, 11, −9, 11, …]` alternates all the way up the chord.
-    pub detune: Vec<f32>,
+    pub detune: Cents,
     pub peak: f32,
     pub attack: f32,
     pub decay: f32,
@@ -103,7 +152,7 @@ fn bass_voicing(kind: TrackKind, ev: &NoteEvent, freq: f32) -> Voicing {
     match kind {
         TrackKind::Acid => Voicing {
             wave: Wave::Saw,
-            detune: vec![4.0],
+            detune: Cents::of(&[4.0]),
             peak: ev.vel * 0.4,
             attack: 0.004,
             decay: 0.09,
@@ -124,7 +173,7 @@ fn bass_voicing(kind: TrackKind, ev: &NoteEvent, freq: f32) -> Voicing {
         },
         TrackKind::Lofi => Voicing {
             wave: Wave::Sine,
-            detune: vec![0.0],
+            detune: Cents::of(&[0.0]),
             peak: ev.vel * 0.46,
             attack: 0.02,
             decay: 0.22,
@@ -142,7 +191,7 @@ fn bass_voicing(kind: TrackKind, ev: &NoteEvent, freq: f32) -> Voicing {
         },
         TrackKind::Deep => Voicing {
             wave: Wave::Sine,
-            detune: vec![0.0],
+            detune: Cents::of(&[0.0]),
             peak: ev.vel * 0.55,
             attack: 0.006,
             decay: 0.18,
@@ -160,7 +209,7 @@ fn bass_voicing(kind: TrackKind, ev: &NoteEvent, freq: f32) -> Voicing {
         },
         TrackKind::House => Voicing {
             wave: Wave::Sine,
-            detune: vec![0.0],
+            detune: Cents::of(&[0.0]),
             peak: ev.vel * 0.48,
             attack: 0.006,
             decay: 0.1,
@@ -198,7 +247,7 @@ pub fn bass_sub_layer(stem: Stem, kind: TrackKind, ev: &NoteEvent, freq: f32) ->
             let deep = kind == TrackKind::Deep;
             Some(Voicing {
                 wave: Wave::Saw,
-                detune: vec![0.0],
+                detune: Cents::of(&[0.0]),
                 peak: ev.vel * if deep { 0.16 } else { 0.28 },
                 attack: 0.006,
                 decay: if deep { 0.2 } else { 0.12 },
@@ -226,7 +275,7 @@ fn stab_voicing(kind: TrackKind, ev: &NoteEvent) -> Voicing {
     match kind {
         TrackKind::Lofi => Voicing {
             wave: Wave::Sine,
-            detune: vec![-6.0, 5.0],
+            detune: Cents::of(&[-6.0, 5.0]),
             peak: ev.vel * 0.24,
             attack: 0.02,
             decay: 0.22,
@@ -244,7 +293,7 @@ fn stab_voicing(kind: TrackKind, ev: &NoteEvent) -> Voicing {
         },
         TrackKind::Deep => Voicing {
             wave: Wave::Triangle,
-            detune: vec![0.0],
+            detune: Cents::of(&[0.0]),
             peak: ev.vel * 0.22,
             attack: 0.012,
             decay: 0.18,
@@ -262,7 +311,7 @@ fn stab_voicing(kind: TrackKind, ev: &NoteEvent) -> Voicing {
         },
         TrackKind::Acid => Voicing {
             wave: Wave::Saw,
-            detune: vec![-6.0, 5.0],
+            detune: Cents::of(&[-6.0, 5.0]),
             peak: ev.vel * 0.14,
             attack: 0.004,
             decay: 0.08,
@@ -280,7 +329,7 @@ fn stab_voicing(kind: TrackKind, ev: &NoteEvent) -> Voicing {
         },
         TrackKind::House => Voicing {
             wave: Wave::Saw,
-            detune: vec![-6.0, 5.0],
+            detune: Cents::of(&[-6.0, 5.0]),
             peak: ev.vel * 0.26,
             attack: 0.004,
             decay: 0.13,
@@ -303,7 +352,7 @@ fn lead_voicing(kind: TrackKind, ev: &NoteEvent, freq: f32) -> Voicing {
     match kind {
         TrackKind::Lofi => Voicing {
             wave: Wave::Sine,
-            detune: vec![0.0],
+            detune: Cents::of(&[0.0]),
             peak: ev.vel * 0.2,
             attack: 0.04,
             decay: 0.2,
@@ -321,7 +370,7 @@ fn lead_voicing(kind: TrackKind, ev: &NoteEvent, freq: f32) -> Voicing {
         },
         TrackKind::Deep => Voicing {
             wave: Wave::Triangle,
-            detune: vec![0.0],
+            detune: Cents::of(&[0.0]),
             peak: ev.vel * 0.2,
             attack: 0.06,
             decay: 0.22,
@@ -339,7 +388,7 @@ fn lead_voicing(kind: TrackKind, ev: &NoteEvent, freq: f32) -> Voicing {
         },
         TrackKind::Acid => Voicing {
             wave: Wave::Saw,
-            detune: vec![3.0],
+            detune: Cents::of(&[3.0]),
             peak: ev.vel * 0.12,
             attack: 0.008,
             decay: 0.1,
@@ -357,7 +406,7 @@ fn lead_voicing(kind: TrackKind, ev: &NoteEvent, freq: f32) -> Voicing {
         },
         TrackKind::House => Voicing {
             wave: Wave::Triangle,
-            detune: vec![-5.0, 6.0],
+            detune: Cents::of(&[-5.0, 6.0]),
             peak: ev.vel * 0.16,
             attack: 0.016,
             decay: 0.18,
@@ -387,7 +436,7 @@ fn pad_voicing(kind: TrackKind, ev: &NoteEvent) -> Voicing {
         // The original passes `notes.flatMap(() => [-9, 11])`, so the cents
         // alternate down the whole bank: 2N entries for an N-note chord, with
         // anything past the end of the list falling back to its last value.
-        detune: (0..ev.notes.len()).flat_map(|_| [-9.0_f32, 11.0]).collect(),
+        detune: Cents::alternating([-9.0, 11.0], ev.notes.len()),
         // Lo-fi and acid pads sit at 0.1; the brighter flavours pull back so the
         // pad does not fight the lead for space.
         peak: ev.vel
@@ -430,7 +479,7 @@ fn arp_voicing(kind: TrackKind, ev: &NoteEvent) -> Voicing {
     };
     Voicing {
         wave,
-        detune: vec![0.0],
+        detune: Cents::of(&[0.0]),
         peak: ev.vel
             * if kind == TrackKind::Lofi {
                 0.22
@@ -482,6 +531,7 @@ fn detuned(wave: Wave, freq: f32, cents: f32, sample_rate: f32) -> Osc {
 }
 
 /// A single sounding pitch in a voice.
+#[derive(Clone, Copy)]
 struct Partial {
     osc: Osc,
     /// Pan position, -1 (hard left) to 1 (hard right).
@@ -522,7 +572,9 @@ impl VoiceFilter {
 pub struct ToneVoice {
     /// Which stem bus this voice feeds.
     stem: Stem,
-    partials: Vec<Partial>,
+    /// The oscillators, inline; only the first `count` sound.
+    partials: [Partial; MAX_PARTIALS],
+    count: usize,
     filter: VoiceFilter,
     env: Adsr,
     voicing: Voicing,
@@ -574,10 +626,17 @@ impl ToneVoice {
         // `freq` is only a fallback for an event with no notes; every caller derives
         // it from the event's first note, so an empty list stays a defensive case.
         let fallback = freq;
-        let notes = if ev.notes.is_empty() {
-            vec![fallback]
+        // Everything below is sized inline: this runs on the audio path, once per note.
+        let mut notes = [fallback; MAX_NOTES];
+        let note_count = if ev.notes.is_empty() {
+            1
         } else {
-            ev.notes.iter().map(|n| midi_hz(*n)).collect()
+            // A chord wider than the contract's MAX_NOTES keeps its first MAX_NOTES.
+            let n = ev.notes.len().min(MAX_NOTES);
+            for (slot, note) in notes.iter_mut().zip(&ev.notes[..n]) {
+                *slot = midi_hz(*note);
+            }
+            n
         };
 
         // One oscillator per entry in `freqs`, panned across the field.
@@ -594,31 +653,28 @@ impl ToneVoice {
         // pans. That put the lowest and highest notes at the extremes at the same time,
         // left the middle note dead centre, and added a chorus the original does not
         // have.
-        let freqs: Vec<f32> = if v.unison > 1 && notes.len() == 1 {
-            vec![notes[0]; v.unison]
-        } else {
-            notes
-                .iter()
-                .flat_map(|f| std::iter::repeat_n(*f, v.unison.max(1)))
-                .collect()
+        //
+        // `freqs` is each note `unison` times over, in note order (a single note with a
+        // unison is the same thing: that note, `unison` times).
+        let per_note = v.unison.max(1);
+        let count = (note_count * per_note).min(MAX_PARTIALS);
+        let silent = Partial {
+            osc: Osc::new(v.wave, 0.0, sample_rate),
+            pan: 0.0,
         };
-        let last = v.detune.len().saturating_sub(1);
-        let partials: Vec<Partial> = freqs
-            .iter()
-            .enumerate()
-            .map(|(i, f)| {
-                let cents = v.detune.get(i).copied().unwrap_or_else(|| v.detune[last]);
-                let pan = if v.wide && freqs.len() > 1 {
-                    (i as f32 / (freqs.len() - 1) as f32) * 1.1 - 0.55
-                } else {
-                    0.0
-                };
-                Partial {
-                    osc: detuned(v.wave, *f, cents, sample_rate),
-                    pan,
-                }
-            })
-            .collect();
+        let mut partials = [silent; MAX_PARTIALS];
+        for (i, partial) in partials[..count].iter_mut().enumerate() {
+            let f = notes[i / per_note];
+            let pan = if v.wide && count > 1 {
+                (i as f32 / (count - 1) as f32) * 1.1 - 0.55
+            } else {
+                0.0
+            };
+            *partial = Partial {
+                osc: detuned(v.wave, f, v.detune.get(i), sample_rate),
+                pan,
+            };
+        }
         let mut filter = if v.ladder && !v.wide {
             VoiceFilter::Ladder(Ladder::new())
         } else {
@@ -628,6 +684,7 @@ impl ToneVoice {
         Self {
             stem,
             partials,
+            count,
             filter,
             env: Adsr::new(
                 v.peak,
@@ -676,7 +733,7 @@ impl ToneVoice {
 
         let mut left = 0.0f32;
         let mut right = 0.0f32;
-        for p in &mut self.partials {
+        for p in &mut self.partials[..self.count] {
             let s = p.osc.next();
             // Equal-power pan, so widening a voice doesn't raise its peak level.
             let angle = (p.pan.clamp(-1.0, 1.0) + 1.0) * 0.25 * core::f32::consts::PI;
@@ -943,7 +1000,7 @@ mod tests {
         let stab = voicing(Stem::Stab, TrackKind::House, &ev, 440.0);
         let v = ToneVoice::with_stem(Stem::Stab, &ev, 440.0, 0.05, sr, stab);
 
-        assert_eq!(v.partials.len(), 3, "one oscillator per note, not a pair");
+        assert_eq!(v.count, 3, "one oscillator per note, not a pair");
         assert!((v.partials[0].pan + 0.55).abs() < 1e-6, "{:?}", pans(&v));
         assert!((v.partials[2].pan - 0.55).abs() < 1e-6, "{:?}", pans(&v));
         // Monotonic across the chord, so the stereo image matches the note order.
@@ -959,7 +1016,7 @@ mod tests {
         let pad = voicing(Stem::Pad, TrackKind::House, &ev, 440.0);
         let v = ToneVoice::with_stem(Stem::Pad, &ev, 440.0, 0.05, sr, pad);
 
-        assert_eq!(v.partials.len(), 6, "3 notes doubled");
+        assert_eq!(v.count, 6, "3 notes doubled");
         assert!((v.partials[0].pan + 0.55).abs() < 1e-6);
         assert!((v.partials[5].pan - 0.55).abs() < 1e-6, "{:?}", pans(&v));
     }
@@ -974,7 +1031,7 @@ mod tests {
         let lead = voicing(Stem::Lead, TrackKind::House, &ev, 440.0);
         let v = ToneVoice::with_stem(Stem::Lead, &ev, 440.0, 0.05, sr, lead);
 
-        assert_eq!(v.partials.len(), 2, "the lead doubles its single note");
+        assert_eq!(v.count, 2, "the lead doubles its single note");
         assert!((v.partials[0].pan + 0.55).abs() < 1e-6, "{:?}", pans(&v));
         assert!((v.partials[1].pan - 0.55).abs() < 1e-6, "{:?}", pans(&v));
     }
@@ -987,7 +1044,7 @@ mod tests {
         let ev = NoteEvent::new(vec![60.0], 0.05, 0.5, false);
         let stab = voicing(Stem::Stab, TrackKind::Deep, &ev, 440.0);
         let v = ToneVoice::with_stem(Stem::Stab, &ev, 440.0, 0.05, sr, stab);
-        assert_eq!(v.partials.len(), 1);
+        assert_eq!(v.count, 1);
         assert_eq!(v.partials[0].pan, 0.0);
     }
 
@@ -1009,7 +1066,7 @@ mod tests {
     }
 
     fn pans(v: &ToneVoice) -> Vec<f32> {
-        v.partials.iter().map(|p| p.pan).collect()
+        v.partials[..v.count].iter().map(|p| p.pan).collect()
     }
 
     #[test]

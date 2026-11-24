@@ -1944,22 +1944,33 @@ impl Engine {
             }
         }
         for stem in Stem::TUNED {
-            let Some(ev) = self.track.note(stem, at).cloned() else {
-                continue;
+            // Both voices are built while the event is borrowed from the track, then
+            // spawned once the borrow has ended. Cloning the event instead would copy
+            // its pitches to the heap on every note: an allocation and a free on the
+            // audio path.
+            let (voice, layer) = {
+                let Some(ev) = self.track.note(stem, at) else {
+                    continue;
+                };
+                let hold = self.hold_seconds(at, ev.len);
+                let freq = crate::dsp::midi_hz(ev.first(60.0));
+                let v = tone::voicing(stem, kind, ev, freq);
+                let mut voice =
+                    tone::ToneVoice::with_stem(stem, ev, freq, hold, self.sample_rate, v);
+                voice.set_onset(at);
+                // House and deep bass get a second saw layer under the sine body, routed
+                // to the same stem so it rides the same fader. `bass_sub_layer` checks
+                // the stem itself and returns None for the other tuned stems.
+                let layer = tone::bass_sub_layer(stem, kind, ev, freq).map(|sub| {
+                    let mut layer =
+                        tone::ToneVoice::with_stem(stem, ev, freq, hold, self.sample_rate, sub);
+                    layer.set_onset(at);
+                    layer
+                });
+                (voice, layer)
             };
-            let hold = self.hold_seconds(at, ev.len);
-            let freq = crate::dsp::midi_hz(ev.first(60.0));
-            let v = tone::voicing(stem, kind, &ev, freq);
-            let mut voice = tone::ToneVoice::with_stem(stem, &ev, freq, hold, self.sample_rate, v);
-            voice.set_onset(at);
             self.spawn(Voice::Tone(voice));
-            // House and deep bass get a second saw layer under the sine body, routed
-            // to the same stem so it rides the same fader. `bass_sub_layer` checks the
-            // stem itself and returns None for the other tuned stems.
-            if let Some(sub) = tone::bass_sub_layer(stem, kind, &ev, freq) {
-                let mut layer =
-                    tone::ToneVoice::with_stem(stem, &ev, freq, hold, self.sample_rate, sub);
-                layer.set_onset(at);
+            if let Some(layer) = layer {
                 self.spawn(Voice::Tone(layer));
             }
         }
