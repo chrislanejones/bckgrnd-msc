@@ -347,6 +347,60 @@ check('accentFired is not a launch event, so it never settles a request', !s.isL
     sent.fills.length === 4 && sent.fills[2].style === 'busy' && track.fills.length === 1 && sent !== track);
   check('fill style: without styles the arrangement goes unchanged',
     fl.withFillStyles(track, undefined) === track && fl.withFillStyles(track, []) === track);
+  // ---- Random and Rotate: resolved at queue time, moved on only when a fill plays.
+  const C = fl.FILL_CURSOR;
+  check('fill choice: six in the menu, the four styles then Random and Rotate',
+    JSON.stringify(fl.FILL_CHOICES) === '["classic","simple","busy","syncopated","random","rotate"]');
+  // Play `n` fills by `choice`, each started: the styles heard.
+  const playN = (choice, n, have = styles, cursor = C) => {
+    const out = [];
+    for (let i = 0; i < n; i += 1) {
+      const pick = fl.resolveFill(choice, have, cursor);
+      out.push(pick.style);
+      if (pick.index !== fl.fillIndex(have, pick.style)) out.push('BAD-INDEX');
+      cursor = fl.advanceFill(cursor, choice, pick.style);
+    }
+    return out;
+  };
+  check('rotate: Classic, Simple, Busy, Syncopated, then Classic again, with their indexes',
+    playN('rotate', 6).join() === 'classic,simple,busy,syncopated,classic,simple'
+    && [0, 1, 2, 3].every((r) => fl.resolveFill('rotate', styles, { ...C, rotate: r }).index === r));
+  const rotHalf = styles.filter((f) => f.style !== 'simple');
+  check('rotate: a style the track lacks is skipped', playN('rotate', 4, rotHalf).join() === 'classic,busy,syncopated,classic');
+  const seqA = playN('random', 40);
+  const seqB = playN('random', 40);
+  check('random: the sequence is the same every session (fixed seed + counter)', seqA.join() === seqB.join() && seqA.length === 40
+    && seqA.slice(0, 8).join() === 'syncopated,classic,syncopated,classic,simple,syncopated,busy,simple', seqA.slice(0, 8).join());
+  check('random: never the same style twice in a row', seqA.every((x, i) => i === 0 || x !== seqA[i - 1]));
+  check('random: all four come up, and nothing else', new Set(seqA).size === 4 && seqA.every((x) => fl.FILL_STYLES.includes(x)));
+  const two = styles.filter((f) => ['classic', 'busy'].includes(f.style));
+  const seqTwo = playN('random', 10, two);
+  check('random: only the styles the track has (two: they alternate)',
+    seqTwo.every((x) => x === 'classic' || x === 'busy') && seqTwo.every((x, i) => i === 0 || x !== seqTwo[i - 1]), seqTwo.join());
+  check('random: one style only, it repeats', playN('random', 3, styles.slice(0, 1)).join() === 'classic,classic,classic');
+  check('random: a different seed is a different sequence',
+    Array.from({ length: 12 }, (_, n) => fl.fillDraw(1, n)).join() !== Array.from({ length: 12 }, (_, n) => fl.fillDraw(fl.FILL_SEED, n)).join());
+  check('fallback: no fillStyles plays Classic and names it Classic, for a style and both modes',
+    ['busy', 'syncopated', 'random', 'rotate'].every((x) => {
+      const p = fl.resolveFill(x, undefined, { ...C, rotate: 2, draws: 5, last: 'classic' });
+      return p.style === 'classic' && p.index === 0;
+    }));
+  check('fallback: a style missing from the library is Classic, by name too',
+    fl.resolveFill('busy', rotHalf.filter((f) => f.style !== 'busy'), C).style === 'classic');
+  check('a cancel does not move the cursor: the next press plays what was shown',
+    fl.resolveFill('rotate', styles, C).style === 'classic' && fl.resolveFill('rotate', styles, C).style === 'classic'
+    && fl.resolveFill('rotate', styles, fl.advanceFill(C, 'rotate', 'classic')).style === 'simple');
+  check('a plain style playing leaves Rotate and Random where they were, but is the last played',
+    (() => { const c = fl.advanceFill(C, 'busy', 'busy'); return c.rotate === 0 && c.draws === 0 && c.last === 'busy'; })());
+  check('the menu and the Fill button say what the next press plays',
+    fl.fillChoiceLabel('rotate', 'busy') === 'Rotate · next Busy' && fl.fillChoiceLabel('simple', 'simple') === 'Simple'
+    && fl.fillChoiceName('random', 'syncopated') === 'Syncopated fill, by Random' && fl.fillChoiceName('busy', 'busy') === 'Busy fill');
+  check('the Fill button names a non-Classic style in place of "Fill"; Classic keeps Night 8\'s words',
+    fl.fillButtonLabel({ ...job({ phrase: 0 }), status: 'queued', bar: 8, style: 'busy' }) === 'Busy · Bar 8'
+    && fl.fillButtonLabel({ ...job(), status: 'playing', style: 'syncopated' }) === 'Synco playing'
+    && fl.fillButtonLabel({ ...job(), status: 'queued', bar: 8, late: true, style: 'simple' }) === 'Simple · Next phrase'
+    && fl.fillButtonLabel({ ...job({ phrase: 0 }), status: 'queued', bar: 8, style: 'classic' }) === 'Fill · Bar 8');
+
   check('fill style: the buttons name the style', fl.fillStyleName('syncopated') === 'Syncopated fill'
     && fl.fillButtonAria(null, fl.fillStyleName('busy'), 0) === 'Busy fill for one bar, from the next bar');
 }

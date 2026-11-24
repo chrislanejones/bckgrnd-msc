@@ -38,9 +38,12 @@ import {
   type Timing,
 } from '../lib/scenes';
 import {
-  FILL_STYLES,
+  FILL_CHOICES,
+  FILL_MODE_LABEL,
   FILL_STYLE_HINT,
   FILL_STYLE_LABEL,
+  fillChoiceLabel,
+  isFillMode,
   PHRASE_BAR_CHOICES,
   fillButtonAria,
   fillButtonJob,
@@ -54,6 +57,8 @@ import {
   fillingLine,
   type FillAt,
   type FillJob,
+  type FillChoice,
+  type FillMode,
   type FillStyle,
   type PhraseBars,
 } from '../lib/fills';
@@ -314,7 +319,7 @@ export function SceneHeader({
 }: {
   status: string;
   /** Fill style, when the track has fills: the choice and how to change it. */
-  fillStyle?: { style: FillStyle; onStyle: (style: FillStyle) => void };
+  fillStyle?: { style: FillChoice; next: Record<FillMode, FillStyle>; onStyle: (style: FillChoice) => void };
 }) {
   return (
     <>
@@ -430,18 +435,22 @@ function FillTools({ fill, ids }: { fill: FillControls; ids: { fill: string; int
  * mouse width from 900 to 1280px, and a second fill row would break the toolbar's
  * three 32px rows (tools/verify-ui-fills.mjs).
  */
-function FillStyleSelect({ style, onStyle }: { style: FillStyle; onStyle: (style: FillStyle) => void }) {
+function FillStyleSelect({ style, next, onStyle }: { style: FillChoice; next: Record<FillMode, FillStyle>; onStyle: (style: FillChoice) => void }) {
+  const title = isFillMode(style)
+    ? `Fill style: ${FILL_MODE_LABEL[style]}, next ${FILL_STYLE_LABEL[next[style]]} (${FILL_STYLE_HINT[next[style]]})`
+    : `Fill style: ${FILL_STYLE_LABEL[style]}, ${FILL_STYLE_HINT[style]}`;
   return (
-    <label className="scene-fill-style" title={`Fill style: ${FILL_STYLE_LABEL[style]}, ${FILL_STYLE_HINT[style]}`}>
+    <label className="scene-fill-style" title={title}>
       <span className="control-label">Fill style</span>
       <select
         className="fill-style-select"
         value={style}
-        onChange={(event) => onStyle(event.target.value as FillStyle)}
+        onChange={(event) => onStyle(event.target.value as FillChoice)}
       >
-        {FILL_STYLES.map((style) => (
-          <option key={style} value={style}>
-            {FILL_STYLE_LABEL[style]}
+        {/* Random and Rotate say what the next press plays: "Rotate · next Busy". */}
+        {FILL_CHOICES.map((choice) => (
+          <option key={choice} value={choice}>
+            {fillChoiceLabel(choice, isFillMode(choice) ? next[choice] : choice)}
           </option>
         ))}
       </select>

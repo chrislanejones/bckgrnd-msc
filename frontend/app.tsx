@@ -398,7 +398,7 @@ export function App() {
               actions={
                 <SceneHeader
                   status={inst.sceneStatus}
-                  {...(inst.hasFill ? { fillStyle: { style: inst.fillStyle, onStyle: inst.setFillStyle } } : {})}
+                  {...(inst.hasFill ? { fillStyle: { style: inst.fillStyle, next: inst.fillNextBy, onStyle: inst.setFillStyle } } : {})}
                 />
               }
             >

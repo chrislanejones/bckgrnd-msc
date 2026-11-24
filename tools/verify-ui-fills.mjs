@@ -624,10 +624,10 @@ export async function fillChecks({ open, check }) {
       const select = page.getByRole('combobox', { name: 'Fill style', exact: true });
       const sent = () => page.evaluate(() => window.__FILL_SENT__);
       const options = await select.locator('option').evaluateAll((os) => os.map((o) => `${o.value}:${o.textContent.trim()}`));
-      check('fill style: a menu named Fill style in the scenes header (not the toolbar), Classic, Simple, Busy, Syncopated',
+      check('fill style: a menu named Fill style in the scenes header (not the toolbar), the four styles, Random and Rotate',
         (await page.locator('.scenes-panel .panel-actions .fill-style-select').count()) === 1
         && (await page.locator('.scene-toolbar select').count()) === 0
-        && options.join() === 'classic:Classic,simple:Simple,busy:Busy,syncopated:Syncopated', options.join());
+        && options.join() === 'classic:Classic,simple:Simple,busy:Busy,syncopated:Syncopated,random:Random · next Syncopated,rotate:Rotate · next Classic', options.join());
       check('fill style: Classic by default, and the Fill button names it',
         (await select.inputValue()) === 'classic' && (await k.fillBtn.getAttribute('aria-label')) === 'Classic fill for one bar, from the next bar',
         `${await select.inputValue()} / ${await k.fillBtn.getAttribute('aria-label')}`);
@@ -708,6 +708,140 @@ export async function fillChecks({ open, check }) {
     await page.close();
   }
 
+  // ---- Random and Rotate (Night 9): resolved when queued, shown before the press, moved
+  // on only when a fill plays. Observed as the index each request sends. ---------------
+  {
+    const { page, errors } = await open(1440, 1000);
+    const k = kit(page);
+    try {
+      await page.addInitScript(() => {
+        const sent = (window.__FILL_SENT__ = []);
+        const post = MessagePort.prototype.postMessage;
+        MessagePort.prototype.postMessage = function (message, ...rest) {
+          if (message && typeof message === 'object' && ['fill', 'fillInto', 'build'].includes(message.type)) {
+            sent.push({ type: message.type, index: message.type === 'build' ? message.fillIndex : message.index });
+          }
+          return post.call(this, message, ...rest);
+        };
+      });
+      await page.reload({ waitUntil: 'networkidle' });
+      await page.waitForSelector('.scene-fill-tools');
+      const NAMES = ['Classic', 'Simple', 'Busy', 'Syncopated'];
+      const select = page.getByRole('combobox', { name: 'Fill style', exact: true });
+      const sent = () => page.evaluate(() => window.__FILL_SENT__);
+      const menuNext = async (mode) => {
+        const text = await select.locator(`option[value="${mode}"]`).textContent();
+        return NAMES.indexOf(text.replace(/^.* · next /, '').trim());
+      };
+      // One fill on the Fill button, played through; the index it sent and the words.
+      const fillOnce = async () => {
+        const from = (await sent()).length;
+        await k.fillBtn.click();
+        await k.waitFill('playing');
+        const playingText = await k.text(k.fillBtn);
+        await k.waitFill('idle');
+        return { index: (await sent()).slice(from).find((m) => m.type === 'fill')?.index, playingText };
+      };
+      await select.selectOption('rotate');
+      await page.reload({ waitUntil: 'networkidle' });
+      await page.waitForSelector('.scene-fill-tools');
+      check('fill modes: Rotate is remembered across a reload, and says Classic plays next',
+        (await select.inputValue()) === 'rotate' && await page.evaluate(() => localStorage.getItem('bckgrnd-msc:fill-style')) === 'rotate'
+        && (await menuNext('rotate')) === 0);
+      check('fill modes: at rest the Fill button names what the next press plays',
+        (await k.fillBtn.getAttribute('aria-label')) === 'Classic fill, by Rotate for one bar, from the next bar', await k.fillBtn.getAttribute('aria-label'));
+      await k.play();
+      await k.tempo(BPM);
+      const r1 = await fillOnce();
+      const shown2 = await menuNext('rotate');
+      const r2 = await fillOnce();
+      const r3 = await fillOnce();
+      check('rotate: three fills play Classic, Simple, Busy (indexes 0, 1, 2)', [r1.index, r2.index, r3.index].join() === '0,1,2' && shown2 === 1,
+        `${r1.index},${r2.index},${r3.index}; shown next ${shown2}`);
+      check('rotate: the playing words name the style ("Fill playing", "Simple playing", "Busy playing")',
+        [r1.playingText, r2.playingText, r3.playingText].join() === 'Fill playing,Simple playing,Busy playing', [r1.playingText, r2.playingText, r3.playingText].join());
+      check('rotate: the menu then says Syncopated is next, and so does the Fill button',
+        (await menuNext('rotate')) === 3 && /^Syncopated fill, by Rotate /.test((await k.fillBtn.getAttribute('aria-label')) ?? ''));
+
+      // A canceled Rotate fill: it sent Syncopated, and the next press sends Syncopated again.
+      await k.fillAt('phrase');
+      await k.phrase(4);
+      let from = (await sent()).length;
+      await k.fillBtn.click();
+      await k.waitText('.fill-button', /^Synco · /);
+      const queuedText = await k.text(k.fillBtn);
+      await k.fillBtn.click();
+      await page.waitForFunction(() => document.querySelector('.fill-button')?.textContent?.trim() === 'Drum fill', null, RT);
+      await page.waitForTimeout(300);
+      const canceledIndex = (await sent()).slice(from).find((m) => m.type === 'fill')?.index;
+      check('rotate: a canceled fill does not move on: the menu still says Syncopated',
+        canceledIndex === 3 && /^Synco · (Bar \d+|Next phrase)$/.test(queuedText ?? '') && (await menuNext('rotate')) === 3,
+        `sent ${canceledIndex}, read ${queuedText}, next ${await menuNext('rotate')}`);
+      await k.fillAt('bar');
+      const r4 = await fillOnce();
+      check('rotate: the next press plays Syncopated (3), then Classic is next', r4.index === 3 && (await menuNext('rotate')) === 0, `${r4.index}`);
+
+      // Fill → Drop and Rise + Fill resolve too, in Rotate and in Random.
+      from = (await sent()).length;
+      await k.intoBtn.click();
+      await k.waitState(DROP, ['active', 'modified']);
+      const intoRot = (await sent()).slice(from).find((m) => m.type === 'fillInto')?.index;
+      await select.selectOption('random');
+      const randomNext = await menuNext('random');
+      await k.switchOn('Rise into the scene over several bars');
+      await k.riseOver(2);
+      await k.finishWithFill(true);
+      from = (await sent()).length;
+      await k.pad(0).click();
+      await k.waitState(0, ['active', 'modified']);
+      const riseRand = (await sent()).slice(from).find((m) => m.type === 'build')?.index;
+      const randomNext2 = await menuNext('random');
+      await k.switchOn('Launch on the next bar');
+      from = (await sent()).length;
+      await k.intoBtn.click();
+      await k.waitState(DROP, ['active', 'modified']);
+      const intoRand = (await sent()).slice(from).find((m) => m.type === 'fillInto')?.index;
+      check('modes: Fill → Drop in Rotate plays the shown Classic (0)', intoRot === 0, String(intoRot));
+      check('modes: Rise + Fill in Random plays the style the menu showed', riseRand === randomNext, `${riseRand} vs ${randomNext}`);
+      check('modes: Fill → Drop in Random plays the next shown, never the one just played',
+        intoRand === randomNext2 && intoRand !== riseRand, `${intoRand} vs ${randomNext2}, after ${riseRand}`);
+      await select.selectOption('rotate');
+      await k.switchOn('Rise into the scene over several bars');
+      from = (await sent()).length;
+      await k.pad(1).click();
+      await k.waitState(1, ['active', 'modified']);
+      const riseRot = (await sent()).slice(from).find((m) => m.type === 'build')?.index;
+      check('modes: Rise + Fill in Rotate plays Simple (1), the next after Classic', riseRot === 1, String(riseRot));
+      await k.switchOn('Launch on the next bar');
+
+      // A loop: Phrase end at 2 bars inside a 2-bar loop puts the fill on the loop's last
+      // bar, at the wrap. One press, one style, and the cursor moves on exactly once.
+      await page.getByRole('button', { name: 'Loop 2 bars', exact: true }).click();
+      await k.fillAt('phrase');
+      await k.phrase(2);
+      const before = await menuNext('rotate');
+      from = (await sent()).length;
+      await k.fillBtn.click();
+      await k.waitFill('playing');
+      await k.waitFill('idle');
+      // Two more passes of the loop: the fill doesn't come round again, nothing moves.
+      await k.nextBar();
+      await k.nextBar();
+      await k.nextBar();
+      const loopSent = (await sent()).slice(from).filter((m) => m.type === 'fill');
+      const after = await menuNext('rotate');
+      check('loop: one press sends one fill, Busy (2), at the loop wrap', loopSent.length === 1 && loopSent[0].index === 2 && before === 2,
+        `${JSON.stringify(loopSent)}, shown ${before}`);
+      check('loop: the cursor moved on exactly once (Syncopated next) over three more bars', after === 3, String(after));
+      check('loop: the Fill button is free again, not replaying', (await k.fillBtn.getAttribute('data-state')) === 'idle');
+      await page.getByRole('button', { name: 'Loop 2 bars', exact: true }).click();
+    } catch (e) {
+      check('fill modes: the walk-through ran to the end', false, String(e.message).split('\n')[0]);
+    }
+    check('fill modes: no page errors', errors.length === 0, errors.join('; '));
+    await page.close();
+  }
+
   // ---- Preferences survive a reload. -------------------------------------------------
   {
     const { page, errors } = await open(1440, 1000);
@@ -777,7 +911,9 @@ export async function fillChecks({ open, check }) {
           r.selectNodeContents(el);
           return new Set([...r.getClientRects()].map((q) => Math.round(q.top))).size;
         };
-        for (const [a, b] of [['Fill · Next phrase', 'Fill → Drop'], ['Drum fill', 'Fill · Next phrase → Drop'], ['Drum fill', 'Fill · Bar 16 → Drop'], ['Fill playing', 'Filling → Drop']]) {
+        // Night 9: a style other than Classic names itself in place of the word Fill.
+        for (const [a, b] of [['Fill · Next phrase', 'Fill → Drop'], ['Drum fill', 'Fill · Next phrase → Drop'], ['Drum fill', 'Fill · Bar 16 → Drop'], ['Fill playing', 'Filling → Drop'],
+          ['Simple · Next phrase', 'Fill → Drop'], ['Synco · Next phrase', 'Fill → Drop'], ['Simple · Bar 16', 'Fill → Drop'], ['Simple playing', 'Filling → Drop']]) {
           fill.textContent = a;
           into.textContent = b;
           const h = Math.round(bar.getBoundingClientRect().height * 10) / 10;

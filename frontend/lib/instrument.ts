@@ -64,10 +64,12 @@ import {
 import {
   DEFAULT_FILL_STYLE,
   DEFAULT_PHRASE_BARS,
-  FILL_STYLES,
+  FILL_CHOICES,
+  FILL_CURSOR,
   PHRASE_BAR_CHOICES,
   buildRefusal,
-  fillIndex,
+  advanceFill,
+  fillChoiceName,
   fillIntoCancelled,
   fillIntoRefusal,
   fillPhrase,
@@ -76,10 +78,12 @@ import {
   fillStyleName,
   foldFillJob,
   markFilling,
+  resolveFill,
   withFillStyles,
   type FillAt,
   type FillJob,
-  type FillStyle,
+  type FillChoice,
+  type FillCursor,
   type PhraseBars,
 } from './fills';
 import { PREF, readChoice, writeChoice } from './prefs';
@@ -341,10 +345,19 @@ export function useInstrument() {
   const [fillAt, setFillAtState] = useState<FillAt>(() => readChoice(PREF.fillAt, ['bar', 'phrase'] as const, 'bar'));
   const [phraseBars, setPhraseBarsState] = useState<PhraseBars>(() =>
     readChoice(PREF.phraseBars, PHRASE_BAR_CHOICES, DEFAULT_PHRASE_BARS));
-  /** Fill style (Night 9): which of the track's fills the three fill controls play. */
-  const [fillStyle, setFillStyleState] = useState<FillStyle>(() => readChoice(PREF.fillStyle, FILL_STYLES, DEFAULT_FILL_STYLE));
-  /** The engine's index for the chosen style on the live track (0, Classic, if none). */
-  const fillStyleIndex = () => fillIndex(track ? fillStylesCache.current.get(track.id) : undefined, fillStyle);
+  /**
+   * Fill style (Night 9): a style, or Random / Rotate, for all three fill controls. An
+   * app preference. Random and Rotate keep their place in `fillCursor` for the session.
+   */
+  const [fillStyle, setFillStyleState] = useState<FillChoice>(() => readChoice(PREF.fillStyle, FILL_CHOICES, DEFAULT_FILL_STYLE));
+  const [fillCursor, setFillCursor] = useState<FillCursor>(FILL_CURSOR);
+  /**
+   * What the next press plays on the live track: the effective style (Classic when the
+   * library has no such style) and its engine index. Shown before the press, and sent
+   * by it; the cursor moves on only once that fill starts.
+   */
+  const liveStyles = track ? fillStylesCache.current.get(track.id) : undefined;
+  const fillPick = resolveFill(fillStyle, liveStyles, fillCursor);
   /**
    * Held effects, by kind, with the token the engine knows them by. Temporary
    * overrides only: none of this is part of the working mix or the project.
@@ -1172,7 +1185,7 @@ export function useInstrument() {
       if (isFillPending(waiting) && waiting.kind !== 'rise' && waiting.status !== 'playing') {
         void engine.cancelFill(waiting.requestId);
       }
-      setFill({ requestId: fillId, status: 'sending', kind: 'rise', phrase: 0, from: songStepRef.current, partner: requestId, style: fillStyle });
+      setFill({ requestId: fillId, status: 'sending', kind: 'rise', phrase: 0, from: songStepRef.current, partner: requestId, style: fillPick.style, choice: fillStyle });
     }
     const request: SceneRequest = {
       requestId,
@@ -1197,7 +1210,7 @@ export function useInstrument() {
       request.generation,
       undefined,
       data ? { requestId: nextRequestId.current++, data } : undefined,
-      { accent, ...(withFill ? { fill: { requestId: fillId, index: fillStyleIndex() } } : {}) },
+      { accent, ...(withFill ? { fill: { requestId: fillId, index: fillPick.index } } : {}) },
     );
   }
 
@@ -1531,7 +1544,7 @@ export function useInstrument() {
   }
 
   /** Fill style. Remembered. A fill already queued keeps the style it was sent with. */
-  function setFillStyle(style: FillStyle) {
+  function setFillStyle(style: FillChoice) {
     setFillStyleState(style);
     writeChoice(PREF.fillStyle, style);
   }
@@ -1550,8 +1563,8 @@ export function useInstrument() {
     if (!playing || mixing || !track?.fills?.length) return;
     const id = nextRequestId.current++;
     const phrase = fillPhrase(fillAt, phraseBars);
-    setFill({ requestId: id, status: 'sending', kind: 'plain', phrase, from: songStepRef.current, style: fillStyle });
-    engine.queueFill(id, fillStyleIndex(), generations.current[liveDeck], phrase);
+    setFill({ requestId: id, status: 'sending', kind: 'plain', phrase, from: songStepRef.current, style: fillPick.style, choice: fillStyle });
+    engine.queueFill(id, fillPick.index, generations.current[liveDeck], phrase);
   }
 
   /**
@@ -1602,10 +1615,10 @@ export function useInstrument() {
       ...(sets ? { lanes: sets } : {}),
     };
     setBook(bookSend(requestBook.current, request));
-    setFill({ requestId: fillId, status: 'sending', kind: 'into', phrase, from: songStepRef.current, partner: sceneId, style: fillStyle });
+    setFill({ requestId: fillId, status: 'sending', kind: 'into', phrase, from: songStepRef.current, partner: sceneId, style: fillPick.style, choice: fillStyle });
     // Compiled now, as for a launch, so the lanes that land are the ones pressed for.
     const data = sets ? patterns.scenePayload(sets) : undefined;
-    engine.queueFillInto(fillId, sceneId, fillStyleIndex(), sceneVector(request.mix), request.generation, {
+    engine.queueFillInto(fillId, sceneId, fillPick.index, sceneVector(request.mix), request.generation, {
       phrase,
       accent: scene.crash ? SCENE_ACCENT.crash : SCENE_ACCENT.none,
       ...(data ? { patterns: { requestId: nextRequestId.current++, data } } : {}),
@@ -1624,6 +1637,12 @@ export function useInstrument() {
     const next = foldFillJob(f, { kind: e.kind, id: e.requestId, a: e.a, b: e.b }, songStepRef.current);
     if (next === f) return;
     setFill(next);
+    // Random and Rotate move on once per fill that actually plays, whichever control
+    // asked for it; a cancel or a refusal leaves the next pick as it was shown.
+    if (e.kind === EVENT.fillStarted && f.status !== 'playing' && next.status === 'playing' && next.style) {
+      const { style, choice = style } = next;
+      setFillCursor((c) => advanceFill(c, choice, style));
+    }
     const linked = f.kind !== 'plain' && e.kind !== EVENT.fillUnlinked;
     if (linked) {
       const r = next.partner === undefined ? null : bookFind(requestBook.current, next.partner);
@@ -1841,9 +1860,17 @@ export function useInstrument() {
     sceneStatus,
     /** The fill the engine holds (plain, a Fill into's or a Rise's), or null. */
     fill,
-    /** The fill's name: its style's ("Busy fill"), the one it was sent with while pending. */
-    fillName: fillStyleName(isFillPending(fill) && fill.style ? fill.style : fillStyle),
+    /**
+     * The fill's name: while pending, the style it was sent with ("Busy fill"); at rest,
+     * the style the next press plays ("Busy fill, by Rotate").
+     */
+    fillName: isFillPending(fill) && fill.style ? fillStyleName(fill.style) : fillChoiceName(fillStyle, fillPick.style),
     fillStyle,
+    /** What the next press would play in Random and in Rotate, for the menu's words. */
+    fillNextBy: {
+      random: resolveFill('random', liveStyles, fillCursor).style,
+      rotate: resolveFill('rotate', liveStyles, fillCursor).style,
+    },
     hasFill: Boolean(track?.fills?.length),
     /** Fill at, the phrase length and Finish with Fill: app preferences. */
     fillAt,
