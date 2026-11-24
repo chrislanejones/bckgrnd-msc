@@ -1,7 +1,7 @@
 # ADR-016: Pattern edits are whole-lane revisions, swapped in by the engine at a bar boundary
 Date: 2026-11-04   Status: draft
 
-> Amendment proposed 11-24-2026 (`473d13c`). `process()` itself didn't meet this rule on melodic tracks: every tone note allocated and freed (2 to 23 times per render block). It does now. A voice holds its oscillators and detune list inline (`MAX_PARTIALS` = 12), and a chord over six notes plays its first six. `tests/no_alloc.rs` now covers tone stems, and audio is bit-identical.
+> Amendment proposed 11-24-2026 (`473d13c`). `process()` itself didn't meet this rule on melodic tracks: every tone note allocated and freed its voices' pitches, detune list and oscillators (2 to 23 allocations and frees in a render block that started notes). It does now. A voice holds its oscillators and detune list inline (`MAX_PARTIALS` = 12), and a chord over six notes plays its first six. `tests/no_alloc.rs` now covers tone stems, and audio is bit-identical.
 
 ## Context
 Night 4 makes the arrangement editable while it plays. React must not become a
