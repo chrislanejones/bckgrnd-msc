@@ -11,7 +11,7 @@
  * file only decides where things go. React holds no audio state and no musical clock.
  */
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useId, useMemo, useState } from 'react';
 import { useInstrument } from './lib/instrument';
 import { param } from './lib/contract';
 import { STEM_ORDER, soundingMap, stemState, stemStateLabel } from './lib/stems';
@@ -23,7 +23,8 @@ import { JogWheel } from './ui/JogWheel';
 import { LibraryPanel } from './ui/Library';
 import { PatternDrawer } from './ui/PatternDrawer';
 import { MixerChannel } from './ui/MixerChannel';
-import { SceneHeader, SceneStrip } from './ui/SceneStrip';
+import { SceneHeader, SceneStrip, useSceneNotice } from './ui/SceneStrip';
+import { PREF, readChoice, writeChoice } from './lib/prefs';
 import { CompareBar } from './ui/CompareBar';
 import { SCENE_SLOTS } from './lib/contract';
 import { PanicButton, TransportBar } from './ui/Transport';
@@ -70,6 +71,18 @@ export function App() {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [selected, setSelected] = useState<StemId>('kick');
   const [inspectorTab, setInspectorTab] = useState<InspectorTab>('master');
+  // Compare A/B folds into the scenes header (Night 9B): closed until chosen, remembered
+  // per viewer, and held open by a capture so a comparison never hides its own state.
+  const [compareOpen, setCompareOpen] = useState(() => readChoice(PREF.compareOpen, ['open', 'closed'], 'closed') === 'open');
+  const compareId = useId();
+  const compareShown = compareOpen || inst.compare !== null;
+  const toggleCompare = useCallback(() => {
+    setCompareOpen((open) => {
+      writeChoice(PREF.compareOpen, open ? 'closed' : 'open');
+      return !open;
+    });
+  }, []);
+  const [sceneStatus, sceneNotice] = useSceneNotice(inst.sceneStatus);
 
   const songStep = inst.songStep;
   const bar = inst.bar;
@@ -397,8 +410,15 @@ export function App() {
               className="scenes-panel"
               actions={
                 <SceneHeader
-                  status={inst.sceneStatus}
+                  status={sceneStatus}
                   {...(inst.hasFill ? { fillStyle: { style: inst.fillStyle, onStyle: inst.setFillStyle } } : {})}
+                  compare={{
+                    shown: compareShown,
+                    comparing: inst.compare !== null,
+                    controls: compareId,
+                    onToggle: toggleCompare,
+                    onUnavailable: sceneNotice,
+                  }}
                 />
               }
             >
@@ -420,6 +440,7 @@ export function App() {
                 onDuplicate={inst.duplicateSceneSlot}
                 onReset={inst.resetSceneSlot}
                 onCrash={inst.setSceneCrashSlot}
+                onUnavailable={sceneNotice}
                 {...(inst.hasFill
                   ? {
                       fill: {
@@ -440,17 +461,20 @@ export function App() {
                     }
                   : {})}
               >
-                <CompareBar
-                  compare={inst.compare}
-                  modified={inst.compareModified}
-                  request={inst.sceneRequest}
-                  disabled={inst.mixing ? 'Available after mix' : inst.sceneRestoring ? 'Restoring previous mix' : null}
-                  onCapture={inst.captureCompare}
-                  onListen={inst.listenCompare}
-                  onUpdate={inst.updateCompare}
-                  onKeep={inst.keepCompare}
-                  onExit={inst.exitCompare}
-                />
+                {compareShown ? (
+                  <CompareBar
+                    id={compareId}
+                    compare={inst.compare}
+                    modified={inst.compareModified}
+                    request={inst.sceneRequest}
+                    disabled={inst.mixing ? 'Available after mix' : inst.sceneRestoring ? 'Restoring previous mix' : null}
+                    onCapture={inst.captureCompare}
+                    onListen={inst.listenCompare}
+                    onUpdate={inst.updateCompare}
+                    onKeep={inst.keepCompare}
+                    onExit={inst.exitCompare}
+                  />
+                ) : null}
               </SceneStrip>
             </InstrumentPanel>
           ) : null}
