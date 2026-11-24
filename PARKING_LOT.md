@@ -362,10 +362,9 @@ not. Things to settle before or while building it:
 
 ## Found on Night 8 (11-19-2026)
 
-- **The host tracks one scene request at a time.** A refused newer launch or Rise
-  overwrites the record of a still-pending older one, so when the older one applies the
-  host ignores it (lanes not adopted, not shown active). The engine is now right; the host
-  isn't. Not reachable from the UI today. (Silas)
+- ~~**The host tracks one scene request at a time.**~~ Fixed 11-24-2026 (`49f896b`): one
+  record per request id (`RequestBook`). It was reachable: a scene canceled over a running
+  Rise blanked Drop and stopped the knobs following.
 - **Linked-lane event sequence changed.** A pending scene with lanes replaced by a request
   carrying its own lanes now sends `scene replaced` then `patterns cancelled` (33, reason
   10), not `patterns replaced` (34). NIGHT4_PROTOCOL should say what 33 vs 34 mean for
@@ -381,15 +380,17 @@ not. Things to settle before or while building it:
   checks pin it; a rename touches UI copy, docs and tests together. (Tara)
 - **`verify:web` doesn't run `verify-ui`**, so the Rise browser checks run only under
   `verify:desktop`. (Tara)
-- **At 1366 × 640 the inspector scrolls** (686 px in 562); needs a short-window layout. (Lacey)
-- **With Output open, the inspector scrolls at 1280 × 800 and 1024 × 768** (778 px). Opt-in
-  and remembered. (Lacey)
-- **At 1180 and 900 the scenes toolbar is 108 px, not 74**, because Compare A/B stacks there.
-  Rise no longer changes it. (Lacey)
+- ~~**At 1366 × 640 the inspector scrolls**~~ Fixed 11-24-2026 (`c5d9385`): 559 in 559.
+- ~~**With Output open, the inspector scrolls at 1280 × 800 and 1024 × 768**~~ Fixed
+  11-24-2026 (`c5d9385`): 686 in 686 at both.
+- **The scenes toolbar is 108 px at every mouse width.** Recommended: fold Compare A/B
+  behind a header toggle like Output, so the toolbar is 70 px by default and 108 only while
+  comparing. Measurements in SESSION_LOG (Night 9). Needs Chris's OK. (Lacey)
 - **On the phone, Rise on still adds a row** below Switch on; controls below shift down. (Lacey)
 - **Phone inspector sheet targets under 44 px:** knob value buttons (26), knob Reset (20),
   Echo time pills (32). The pattern editor's step grid wasn't audited. (Lacey)
 - **The MCP needs a resync before rc.2** from the same commit as the next desktop build.
+  Done on MCP branch `night9/mcp-v4` (11-24-2026); ships when Chris releases both.
   Audio is byte-identical to `main`, but four engine files differ, so the render-parity
   file check would fail. (Phase 5 audit)
 - **The Linux candidate needs a rebuild** before the .deb checks count: rc.3 (`19c93c5`)
@@ -397,10 +398,10 @@ not. Things to settle before or while building it:
 
 ## Found building Night 8 transitions (11-19-2026)
 
-- **`process()` already allocates on every tone note** (`trigger` clones the note's pitch
-  `Vec`; voicing builds a detune `Vec`): 374 alloc/free per 2,000 blocks of Warehouse.
-  Predates Night 8; the no-alloc test plays drums only for now. (Silas)
-- **The MCP refuses every v4 project** until it vendors the v4 contracts. Ship the MCP
+- ~~**`process()` already allocates on every tone note**~~ Fixed 11-24-2026 (`473d13c`):
+  voices hold oscillators inline; `no_alloc.rs` covers tone stems; 80 renders bit-identical.
+- **The MCP refuses every v4 project** until it vendors the v4 contracts. Fixed on MCP
+  branch `night9/mcp-v4` (11-24-2026), not released. Ship the MCP
   resync with the desktop build: `scripts/sync-engine.mjs:27` hard-codes
   `projectVersion: 3`; `src/projects.ts:87` `schema_version` and `project_sha256` change
   for migrated v3 files; recorded hashes need regenerating. npm publish is Chris's. (Vivek)
@@ -422,3 +423,28 @@ not. Things to settle before or while building it:
   a scene's crash; Duplicate keeps the target's own; a Rise + Fill withdraws a waiting
   plain Fill or Fill → Drop first; Fill → Drop still fires when Drop is already active; a
   scene launched over a pending Fill → Drop keeps its own timing and the fill plays on plain.
+
+## Found on Night 9 (11-24-2026)
+
+- **Listen to the four fill styles** (Classic, Simple, Busy, Syncopated) on each track kind,
+  with Fill, Fill → Drop and Rise + Fill. Not listened to. (Chris)
+- **The MCP plays Classic only.** It doesn't read `fillStyles`; renders never play fills,
+  so nothing is lost today. (ADR-024)
+- **A project doesn't record which fill style was played.** By design (app preference);
+  revisit if styles become part of a song. (ADR-024)
+- **Classic's open hat (0.55) on deep tracks is louder than some tracks' own open-hat peak**
+  (glass 0.4, cipher 0.26). On main before Night 9; Classic was kept byte for byte.
+- **Fill Style menu placement.** It sits in the Scenes header because the Fill row was full
+  at 900–1280 px; a native select styled like Next song, since controls.tsx has no select.
+  Worth a Lacey pass with the Compare fold. (Lacey)
+- **At 1366 × 640 with Output open the inspector still scrolls** (638 px in 562). Output is
+  opt-in; fixing it needs another fold or smaller knobs. (Lacey)
+- **Compare listens share the pending scene request with launches** (`requestLaunch`); check
+  any Compare move against the per-request book. (Lacey, Silas)
+- **The swapped-out-lanes list holds two lane sets.** A third swap before the next pattern
+  message would grow it on the audio path. Unconfirmed; needs a no-alloc test that lands
+  three lane sets in a row. (Silas)
+- **A chord over 6 notes now plays its first 6.** Patterns cap at 6 and the library peaks at
+  4; consider checking at track load. (Silas)
+- **The browser/installed-native render-parity leg** (`tools/verify-render-parity.mjs`,
+  needs `NATIVE_CDP`) wasn't run for the MCP sync; the Node parity was 48/48. (MCP)
