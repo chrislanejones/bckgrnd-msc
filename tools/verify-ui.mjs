@@ -1312,9 +1312,10 @@ try {
   }
 
   // Inspector, mouse: the master rack fits the window with nothing to scroll, at rest
-  // (Output folded) and on a stem. At 1440 x 900 it fits with Output open too.
-  // Knobs stay 48px (--knob-size, compact).
-  for (const [w, h] of [[1440, 900], [1280, 800], [1180, 800], [1024, 768]]) {
+  // (Output folded) and on a stem, down to 1366 x 640. It fits with Output open too,
+  // except below 680px tall, where Output stays an opt-in scroll. Knobs stay 48px
+  // (--knob-size, compact), 40px below 680px tall (the short-window rack).
+  for (const [w, h] of [[1440, 900], [1366, 640], [1280, 800], [1180, 800], [1024, 768]]) {
     const { page } = await open(w, h);
     const fit = () => page.evaluate(() => {
       const el = document.querySelector('.inspector');
@@ -1324,13 +1325,15 @@ try {
       [...document.querySelectorAll('.inspector .knob-dial')]
         .filter((d) => d.getClientRects().length > 0) // Output's folded knobs are not rendered
         .map((d) => `${Math.round(d.getBoundingClientRect().width)}x${Math.round(d.getBoundingClientRect().height)}`));
-    check(`${w}x${h}: inspector knobs are 48px`, dials.length > 0 && dials.every((d) => d === '48x48'), [...new Set(dials)].join(', '));
+    const dial = h < 680 ? '40x40' : '48x48';
+    check(`${w}x${h}: inspector knobs are ${dial.split('x')[0]}px`, dials.length > 0 && dials.every((d) => d === dial), [...new Set(dials)].join(', '));
     const master = await fit();
     check(`${w}x${h}: the master rack fits without scrolling`, master.scroll <= master.client, `${master.scroll}px of content in ${master.client}px`);
-    if (w === 1440) {
+    if (h >= 680) {
       await page.locator('.inspector-fold-toggle').click();
       const open = await fit();
       check(`${w}x${h}: the master rack fits with Output open`, open.scroll <= open.client, `${open.scroll}px of content in ${open.client}px`);
+      await page.locator('.inspector-fold-toggle').click();
     }
     await page.getByRole('button', { name: 'Inspect Lead' }).click();
     const stem = await fit();

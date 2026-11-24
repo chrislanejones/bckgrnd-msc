@@ -234,7 +234,16 @@ function MasterRack({
       <fieldset className="inspector-group inspector-echo">
         {/* Held open by the throw is an override, said in the heading like a held
             filter, so the Time label stays one short line beside the knobs. */}
-        <legend className="inspector-legend">{inst.echo ? 'Echo · held open by the throw' : 'Echo'}</legend>
+        <legend className="inspector-legend">
+          {inst.echo ? 'Echo · held open by the throw' : 'Echo'}
+          {/* A short window hides the word "Time" (styles.css), so "off" moves up here.
+              Hidden from screen readers, which hear it in the Time label. */}
+          {!echoOn ? (
+            <span className="inspector-short-only" aria-hidden="true">
+              {' · off'}
+            </span>
+          ) : null}
+        </legend>
         {/* The echo's state is said once, in the Time label, rather than as the same
             note under both knobs. Screen readers get it on each knob as well. */}
         <Segmented<number>
