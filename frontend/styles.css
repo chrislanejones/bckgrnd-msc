@@ -2159,6 +2159,60 @@ body {
   }
 }
 
+/* Short windows, with a mouse: the rack's rhythm tightens so it fits without scrolling.
+   Below 820px tall (1280 x 800, 1024 x 768) Output open fits too: the groups close up
+   to 6px, a heading sits on its knobs, the value pill drops to 24px, the compact
+   floor, and Echo's divisions lose their word "Time". Below 680px tall (1366 x 640) the dials also step down to 40px; the 48px
+   dial stays everywhere the rack fits at 48. Text sizes and colors do not change. */
+/* Words a heading carries only while a short window has hidden them elsewhere. */
+.inspector-short-only {
+  display: none;
+}
+
+@media (pointer: fine) and (min-width: 900px) and (max-height: 819.98px) {
+  .inspector-short-only {
+    display: inline;
+  }
+
+  /* Groups keep more air between them than inside them: 6px apart, the heading
+     flush on its knobs, told apart by weight and color rather than space. */
+  .inspector-body {
+    gap: var(--group-gap);
+  }
+
+  .inspector-legend {
+    margin-bottom: 0;
+    line-height: 1;
+  }
+
+  /* Echo's three rows of 24px divisions stand as tall as a knob once their word
+     "Time" goes, as "Fill at" does in a narrow scenes toolbar. The divisions keep it
+     as their group's name, and its "off" shows on the Echo heading instead. */
+  .inspector-echo > .segmented-block > .control-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
+  .inspector .knob {
+    gap: 1px;
+  }
+
+  .inspector .knob-value {
+    min-height: 1.5rem;
+    padding-block: 0;
+  }
+}
+
+@media (pointer: fine) and (min-width: 900px) and (max-height: 679.98px) {
+  .inspector {
+    --knob-size: 2.5rem;
+  }
+}
+
 /* ------------------------------------------------------------------------ */
 /* Pattern drawer                                                           */
 /* ------------------------------------------------------------------------ */
