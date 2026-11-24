@@ -333,6 +333,74 @@ const vec = s.sceneVector(applied);
 const back = s.mixFromVector(vec);
 check('mixFromVector inverts sceneVector', s.sameMix(s.copyMix(back), applied) && s.sceneVector(back).every((v, i) => v === vec[i]));
 
+// Night 9: the host keeps a record per request id (RequestBook). A newer request that
+// is refused or cancelled never clobbers an older pending one.
+const ask = (requestId, target, extra = {}) => ({ requestId, target, revision: 1, generation: 0, timing: 'bar', status: 'sending', mix: s.copyMix(factory(target)), ...extra });
+const said = (kind, id, a = 0, b = 0) => ({ kind, id, a, b });
+const fold = (book, ...events) => events.reduce((step, e) => s.foldBookEvent(step.book, e), { book });
+{
+  // The overwrite case: Sparse waits for its bar, a newer Drop is refused, Sparse lands.
+  let book = s.bookSend(s.EMPTY_BOOK, ask(1, 'sparse'));
+  book = fold(book, said(s.EVENT.sceneQueued, 1, 9)).book;
+  book = s.bookSend(book, ask(2, 'drop'));
+  check('a newer request is the one shown, and the older one is kept', book.shown.requestId === 2 && book.pending.map((r) => r.requestId).join() === '1,2');
+  const refused = s.foldBookEvent(book, said(s.EVENT.sceneRejected, 2, 3));
+  check('the newer one refused, the older pending one is shown again',
+    refused.next.status === 'rejected' && refused.resumed?.requestId === 1 && refused.book.shown.requestId === 1 && refused.book.shown.status === 'queued');
+  const lands = s.foldBookEvent(refused.book, said(s.EVENT.sceneApplied, 1));
+  check('and when it lands, it is the request shown, applied, and nothing is left pending',
+    lands.wasShown && lands.next.status === 'applied' && lands.book.shown.status === 'applied' && lands.book.pending.length === 0);
+  // The same with a refused Rise.
+  const rise = s.foldBookEvent(s.bookSend(refused.book, ask(3, 'drop', { build: { bars: 4 } })), said(s.EVENT.buildRejected, 3, 3));
+  check('a refused Rise over a waiting scene leaves the scene shown', rise.resumed?.requestId === 1 && rise.book.shown.requestId === 1);
+}
+{
+  // A scene queued over a running Rise, then cancelled: the Rise is still the one in hand.
+  let book = s.bookSend(s.EMPTY_BOOK, ask(10, 'drop', { build: { bars: 4 } }));
+  book = fold(book, said(s.EVENT.buildQueued, 10, 5), said(s.EVENT.buildStarted, 10, 5)).book;
+  book = fold(s.bookSend(book, ask(11, 'sparse')), said(s.EVENT.sceneQueued, 11, 6)).book;
+  check('a Rise under a queued scene is still found, and is the pending build', s.bookFind(book, 10)?.status === 'building' && s.bookBuild(book)?.requestId === 10);
+  const progress = s.foldBookEvent(book, said(s.EVENT.buildProgress, 10, 2));
+  check("the Rise's progress folds without moving what is shown", !progress.wasShown && progress.book.shown.requestId === 11 && s.bookFind(progress.book, 10).build.bar === 2);
+  const withdrawn = s.foldBookEvent(progress.book, said(s.EVENT.sceneCancelled, 11, 10));
+  check('the scene cancelled, the Rise is shown again, still rising at bar 2',
+    withdrawn.resumed?.requestId === 10 && withdrawn.book.shown.status === 'building' && withdrawn.book.shown.build.bar === 2);
+  const risen = s.foldBookEvent(withdrawn.book, said(s.EVENT.buildApplied, 10));
+  check('and the Rise lands as the shown request', risen.wasShown && risen.book.shown.status === 'applied' && risen.book.pending.length === 0);
+  // Committing instead: the scene lands, then the engine says the Rise was replaced.
+  const commit = fold(progress.book, said(s.EVENT.sceneApplied, 11), said(s.EVENT.buildReplaced, 10, 11)).book;
+  check('a scene committing over a Rise stays shown; the replaced Rise leaves the book',
+    commit.shown.requestId === 11 && commit.shown.status === 'applied' && commit.pending.length === 0 && s.bookBuild(commit) === null);
+}
+{
+  // An older request landing while a newer one is still being sent.
+  let book = fold(s.bookSend(s.EMPTY_BOOK, ask(20, 'sparse')), said(s.EVENT.sceneQueued, 20, 3)).book;
+  book = s.bookSend(book, ask(21, 'drop'));
+  const early = s.foldBookEvent(book, said(s.EVENT.sceneApplied, 20));
+  check('an older request landing under a newer one is reported, and the newer stays shown',
+    !early.wasShown && early.next.status === 'applied' && early.book.shown.requestId === 21 && early.book.pending.map((r) => r.requestId).join() === '21');
+  check('an event for a request the book never held changes nothing', s.foldBookEvent(book, said(s.EVENT.sceneApplied, 99)).book === book);
+  check('a late event for a settled request changes nothing', s.foldBookEvent(early.book, said(s.EVENT.sceneCancelled, 20, 10)).book === early.book);
+}
+
+// Night 9: a build's float32 bases read back as the store's own values.
+{
+  const mix = s.copyMix(factory('full'));
+  mix.params['fx.echoTime'] = 1 / 3;
+  mix.stems.kick.volume = 0.9;
+  const exact = s.sceneValues(mix);
+  const engineCopy = s.sceneVector(mix);
+  check('sceneValues lays a mix out as the vector does, in doubles', exact.length === 44 && exact.every((v, i) => Math.fround(v) === engineCopy[i]));
+  check('the float32 Echo time 1/8T is not a registry option, as read', engineCopy[32 + contract.sceneVector.indexOf('fx.echoTime')] !== 1 / 3);
+  const read = s.mixFromVector(s.exactValues(engineCopy, [exact]));
+  check('exactValues gives back 1/8T and 0.9 exactly', read.params['fx.echoTime'] === 1 / 3 && read.stems.kick.volume === 0.9);
+  const between = Float32Array.from(engineCopy);
+  between[0] = 0.5;
+  check('a value part way through a build keeps the engine number', s.exactValues(between, [exact])[0] === Math.fround(0.5));
+  const other = s.sceneValues({ ...mix, stems: { ...mix.stems, kick: { ...mix.stems.kick, volume: Math.fround(0.9) } } });
+  check('the first known mix that matches wins', s.exactValues(engineCopy, [exact, other])[0] === 0.9 && s.exactValues(engineCopy, [other, exact])[0] === Math.fround(0.9));
+}
+
 if (failed) {
   console.error(`\n${failed} scene check(s) failed.`);
   process.exit(1);
