@@ -23,8 +23,8 @@
  * Bar 9, then Filling into Drop, then Active.
  */
 
-import { useEffect, useId, useRef, useState } from 'react';
-import { MoreHorizontal, X, Zap } from 'lucide-react';
+import { useCallback, useEffect, useId, useRef, useState } from 'react';
+import { ChevronRight, MoreHorizontal, X, Zap } from 'lucide-react';
 import type { Scene, SceneSlotId } from '../lib/contract';
 import { SCENE_SLOTS } from '../lib/contract';
 import {
@@ -116,7 +116,12 @@ type Props = {
   onReset: (slot: SceneSlotId) => void;
   /** Crash on launch for one slot (project version 4). */
   onCrash: (slot: SceneSlotId, crash: boolean) => void;
-  /** Rendered at the end of the toolbar row (Compare A/B). */
+  /**
+   * A press on an unavailable fill button, with its reason: shown in the status line,
+   * so a touch user, who gets no tooltip, sees why (`useSceneNotice`).
+   */
+  onUnavailable?: (reason: string) => void;
+  /** Rendered at the end of the toolbar, a row of its own (Compare A/B, when unfolded). */
   children?: ReactNode;
 };
 
@@ -300,7 +305,7 @@ export function SceneStrip(props: Props) {
             <X size={12} aria-hidden="true" /> Cancel
           </button>
         </div>
-        {fill ? <FillTools fill={fill} ids={reasonIds} /> : null}
+        {fill ? <FillTools fill={fill} ids={reasonIds} onUnavailable={props.onUnavailable} /> : null}
         {props.children}
       </div>
       {fill ? <FillReasons fill={fill} ids={reasonIds} /> : null}
@@ -316,10 +321,13 @@ export function SceneStrip(props: Props) {
 export function SceneHeader({
   status,
   fillStyle,
+  compare,
 }: {
   status: string;
   /** Fill style, when the track has fills: the choice and how to change it. */
   fillStyle?: { style: FillChoice; next: Record<FillMode, FillStyle>; onStyle: (style: FillChoice) => void };
+  /** Compare A/B's fold: the toggle sits here, the row it opens ends the toolbar. */
+  compare?: CompareFold;
 }) {
   return (
     <>
@@ -328,11 +336,77 @@ export function SceneHeader({
         {status}
       </p>
       {fillStyle ? <FillStyleSelect {...fillStyle} /> : null}
+      {compare ? <CompareToggle {...compare} /> : null}
       <span className="scene-keys" title="Shift+1 to Shift+4 launch the four scenes">
         <kbd>Shift</kbd> <kbd>1–4</kbd>
       </span>
     </>
   );
+}
+
+/** Compare A/B's fold, as the header toggle needs it. */
+export type CompareFold = {
+  /** The row is showing: unfolded, or a capture exists. */
+  shown: boolean;
+  /** A capture exists, so the row stays until Keep current or Exit comparison. */
+  comparing: boolean;
+  /** The id of the row it shows. */
+  controls: string;
+  onToggle: () => void;
+  onUnavailable: (reason: string) => void;
+};
+
+/** Why the fold can't close: a comparison is under way and its state must stay in view. */
+const COMPARE_HELD = 'Compare A/B stays open while comparing: Keep current or Exit comparison';
+
+/**
+ * Compare A/B's fold toggle (Night 9B), in the panel header beside Fill style. Folded by
+ * default and remembered per viewer; a capture holds the row open, so which mix is
+ * playing (A · Listening, B · Modified) is never out of sight during a comparison.
+ * "Compare A/B" on a wide panel, "A/B" on a narrow one; the name is always the full one.
+ */
+function CompareToggle({ shown, comparing, controls, onToggle, onUnavailable }: CompareFold) {
+  const reasonId = useId();
+  return (
+    <>
+      <button
+        type="button"
+        className="compare-toggle tap"
+        aria-expanded={shown}
+        aria-controls={shown ? controls : undefined}
+        aria-disabled={comparing || undefined}
+        aria-describedby={comparing ? reasonId : undefined}
+        aria-label="Compare A/B"
+        title={comparing ? COMPARE_HELD : shown ? 'Fold Compare A/B' : 'Compare two mix snapshots'}
+        onClick={comparing ? () => onUnavailable(COMPARE_HELD) : onToggle}
+      >
+        <ChevronRight className="compare-toggle-chevron" aria-hidden="true" size={12} strokeWidth={2.5} />
+        <span className="compare-toggle-full" aria-hidden="true">Compare A/B</span>
+        <span className="compare-toggle-short" aria-hidden="true">A/B</span>
+      </button>
+      {comparing ? (
+        <span id={reasonId} hidden>
+          {COMPARE_HELD}
+        </span>
+      ) : null}
+    </>
+  );
+}
+
+/**
+ * The scenes status line with a short-lived notice over it: the reason an unavailable
+ * control can't be pressed, said where the panel already reports what happened. It
+ * gives way to the next real status, or after a few seconds.
+ */
+export function useSceneNotice(status: string): [string, (text: string) => void] {
+  const [notice, setNotice] = useState<{ text: string; over: string } | null>(null);
+  useEffect(() => {
+    if (!notice) return;
+    const t = window.setTimeout(() => setNotice(null), 4000);
+    return () => window.clearTimeout(t);
+  }, [notice]);
+  const notify = useCallback((text: string) => setNotice({ text, over: status }), [status]);
+  return [notice && notice.over === status ? notice.text : status, notify];
 }
 
 function queuedLine(r: SceneRequest, name: string): string {
@@ -392,7 +466,15 @@ function FillReasons({ fill, ids }: { fill: FillControls; ids: { fill: string; i
 }
 
 /** Fill's own row: Fill at, the phrase length (Phrase end only), Fill and Fill → Drop. */
-function FillTools({ fill, ids }: { fill: FillControls; ids: { fill: string; into: string } }) {
+function FillTools({
+  fill,
+  ids,
+  onUnavailable,
+}: {
+  fill: FillControls;
+  ids: { fill: string; into: string };
+  onUnavailable?: (reason: string) => void;
+}) {
   return (
     <div className="scene-fill-tools" role="group" aria-label="Fill">
       <Segmented<FillAt>
@@ -418,8 +500,8 @@ function FillTools({ fill, ids }: { fill: FillControls; ids: { fill: string; int
           <span className="scene-build-unit" aria-hidden="true">bars</span>
         </div>
       ) : null}
-      <FillButton fill={fill} reasonId={ids.fill} />
-      <FillIntoButton fill={fill} reasonId={ids.into} />
+      <FillButton fill={fill} reasonId={ids.fill} onUnavailable={onUnavailable} />
+      <FillIntoButton fill={fill} reasonId={ids.into} onUnavailable={onUnavailable} />
     </div>
   );
 }
@@ -466,7 +548,15 @@ function FillStyleSelect({ style, next, onStyle }: { style: FillChoice; next: Re
  * not dropped to the page when a queued fill starts playing under it, and the reason
  * (a Rise ending with the fill, say) is read as its description.
  */
-function FillButton({ fill, reasonId }: { fill: FillControls; reasonId: string }) {
+function FillButton({
+  fill,
+  reasonId,
+  onUnavailable,
+}: {
+  fill: FillControls;
+  reasonId: string;
+  onUnavailable?: (reason: string) => void;
+}) {
   const own = fillButtonJob(fill.job);
   const state = own ? own.status : 'idle';
   const phrase = fillPhrase(fill.at, fill.phraseBars);
@@ -481,7 +571,7 @@ function FillButton({ fill, reasonId }: { fill: FillControls; reasonId: string }
       aria-label={fillButtonAria(fill.job, fill.name, phrase)}
       aria-describedby={reason ? reasonId : undefined}
       title={reason ?? fillButtonTitle(fill.name, own ? own.phrase : phrase)}
-      onClick={off ? undefined : fill.onFill}
+      onClick={off ? (reason && onUnavailable ? () => onUnavailable(`Fill: ${reason}`) : undefined) : fill.onFill}
     >
       {fillButtonLabel(fill.job)}
     </button>
@@ -493,7 +583,15 @@ function FillButton({ fill, reasonId }: { fill: FillControls; reasonId: string }
  * "Fill · Bar 8 → Drop" while it waits, "Filling → Drop" while the fill plays; pressing it
  * again cancels it.
  */
-function FillIntoButton({ fill, reasonId }: { fill: FillControls; reasonId: string }) {
+function FillIntoButton({
+  fill,
+  reasonId,
+  onUnavailable,
+}: {
+  fill: FillControls;
+  reasonId: string;
+  onUnavailable?: (reason: string) => void;
+}) {
   const own = fillIntoJob(fill.job);
   const state = own ? own.status : 'idle';
   const phrase = fillPhrase(fill.at, fill.phraseBars);
@@ -508,7 +606,7 @@ function FillIntoButton({ fill, reasonId }: { fill: FillControls; reasonId: stri
       aria-label={aria}
       aria-describedby={reason ? reasonId : undefined}
       title={reason ?? aria}
-      onClick={reason !== null ? undefined : fill.onFillInto}
+      onClick={reason !== null ? () => onUnavailable?.(`Fill → ${fill.intoName}: ${reason}`) : fill.onFillInto}
     >
       {fillIntoLabel(fill.job, fill.intoName)}
     </button>

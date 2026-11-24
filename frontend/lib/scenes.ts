@@ -545,6 +545,21 @@ export function bookUpdate(book: RequestBook, next: SceneRequest): RequestBook {
   return { pending, shown: book.shown?.requestId === next.requestId ? next : book.shown };
 }
 
+/**
+ * Everything pending cancelled at once by the engine, for `reason` (Panic, an
+ * auto-mix): the book empties and the shown request reads cancelled. `closing` is the
+ * Rise among them, if one was waiting or running, even under a scene queued after it:
+ * the engine still sends the base it restores as it cancels, and the knobs must follow
+ * that base back although the Rise is no longer in the book.
+ */
+export function bookCancelAll(book: RequestBook, reason: number): { book: RequestBook; closing: SceneRequest | null } {
+  const shown = book.shown;
+  return {
+    book: { pending: [], shown: isPending(shown) ? { ...shown, status: 'cancelled', reason } : shown },
+    closing: bookBuild(book),
+  };
+}
+
 /** What one engine event did to the book. */
 export type BookStep = {
   book: RequestBook;

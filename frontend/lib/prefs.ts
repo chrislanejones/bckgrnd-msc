@@ -15,6 +15,8 @@ export const PREF = {
   riseBars: 'bckgrnd-msc:rise-bars',
   /** Finish with Fill on Rise: `on` or `off`. */
   riseFill: 'bckgrnd-msc:rise-fill',
+  /** Compare A/B unfolded in the scenes toolbar (Night 9): `open` or `closed`. */
+  compareOpen: 'bckgrnd-msc:compare-open',
 } as const;
 
 /** The stored choice for `key` if it is one of `choices`, else `fallback`. */

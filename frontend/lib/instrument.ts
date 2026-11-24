@@ -33,6 +33,7 @@ import {
   EMPTY_BOOK,
   accentStatus,
   bookBuild,
+  bookCancelAll,
   bookFind,
   bookSend,
   bookUpdate,
@@ -322,6 +323,12 @@ export function useInstrument() {
    * still moves the effect knobs (not the faders: the load resets those itself).
    */
   const abandonedBuild = useRef<number | null>(null);
+  /**
+   * A Rise that Panic or an auto-mix cancelled with everything else (`bookCancelAll`),
+   * until its outcome arrives. Its restoring base comes just before that and is
+   * followed as any base of the Rise is, though the Rise has left the book.
+   */
+  const closingBuild = useRef<number | null>(null);
   const renders = useRef(0);
   renders.current += 1;
   /** One line for assistive technology: discrete changes only, never every beat. */
@@ -836,6 +843,9 @@ export function useInstrument() {
           if (e.requestId === abandonedBuild.current && e.kind >= EVENT.buildApplied && e.kind <= EVENT.buildRejected) {
             abandonedBuild.current = null;
           }
+          if (e.requestId === closingBuild.current && e.kind >= EVENT.buildApplied && e.kind <= EVENT.buildRejected) {
+            closingBuild.current = null;
+          }
           const step = foldBookEvent(requestBook.current, { kind: e.kind, id: e.requestId, a: e.a, b: e.b });
           const { prev: current, next } = step;
           if (!current || !next || next === current) continue;
@@ -893,8 +903,9 @@ export function useInstrument() {
   launchOutcomeRef.current = launchOutcome;
   /** A Panic or an auto-mix: the engine cancels everything pending, for `reason`. */
   function cancelAll(book: RequestBook, reason: number): RequestBook {
-    const shown = book.shown;
-    return { pending: [], shown: isPending(shown) ? { ...shown, status: 'cancelled', reason } : shown };
+    const { book: next, closing } = bookCancelAll(book, reason);
+    closingBuild.current = closing?.requestId ?? null;
+    return next;
   }
   // Where a running build has moved the base (~30 Hz, then once more as it ends): the
   // knobs follow it, except the ones the user has moved since it started, which are
@@ -906,8 +917,9 @@ export function useInstrument() {
           followAbandonedRef.current(requestId, values);
           return;
         }
-        // The Rise shown, or one still running under a scene queued after it.
-        if (!bookFind(requestBook.current, requestId)?.build) return;
+        // The Rise shown, one still running under a scene queued after it, or one a
+        // Panic or an auto-mix cancelled, gliding back.
+        if (requestId !== closingBuild.current && !bookFind(requestBook.current, requestId)?.build) return;
         followBuildRef.current(requestId, values);
       }),
     [],

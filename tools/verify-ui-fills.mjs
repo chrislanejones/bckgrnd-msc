@@ -875,13 +875,15 @@ export async function fillChecks({ open, check }) {
   }
 
   // ---- The toolbar with a mouse at 1440, 1280 and 1180 (and the other compact widths
-  // Lacey's checks use): no row added, and never more than three rows of one 32px
-  // control (Switch on; Fill; Compare A/B), 108px. One row can't hold the scene and
+  // Lacey's checks use): no row added, and two rows of one 32px control (Switch on;
+  // Fill), 70px, with Compare A/B folded into the header (Night 9B, the default). Unfolded,
+  // Compare adds exactly its own row: 108px. One row can't hold the scene and
   // fill controls: squeezed as far as they go they need about 950px, and the panel is
   // 798px wide at 1440. At 375 and 320 (touch) the toolbar stacks a row per control by
   // design, so there it is measured, and held to 44px targets, labels that are never
   // cut short, and no sideways scroll. -------------------------------------------
-  const MOUSE_TOOLBAR_MAX = 108.5;
+  const MOUSE_TOOLBAR_MAX = 70.5;
+  const MOUSE_TOOLBAR_COMPARING = 108.5;
   const widths = [[1440, 900], [1280, 800], [1279, 800], [1200, 800], [1180, 800], [1100, 800], [1024, 768], [960, 800], [900, 800],
     [375, 812, { hasTouch: true, isMobile: true }], [320, 640, { hasTouch: true, isMobile: true }]];
   for (const [w, h, extra] of widths) {
@@ -940,8 +942,15 @@ export async function fillChecks({ open, check }) {
       if (w >= 900) {
         check(`${w}px: Rise, Finish with Fill, Phrase end and the widest labels add no row to the toolbar`,
           [rise.h, riseFill.h, phrase.h, widest.h].every((x) => x === base.h), `${base.h} / ${rise.h} / ${riseFill.h} / ${phrase.h} / ${widest.each.join(',')}px`);
-        check(`${w}px: the toolbar is at most three rows of 32px (${MOUSE_TOOLBAR_MAX}px), every option on`,
+        check(`${w}px: with Compare folded the toolbar is two rows of 32px (${MOUSE_TOOLBAR_MAX}px), every option on`,
           [base.h, phrase.h, widest.h].every((x) => x <= MOUSE_TOOLBAR_MAX), `${base.h} / ${phrase.h} / ${widest.h}px`);
+      }
+      // Unfold Compare A/B from the header: one row more, never two.
+      await page.getByRole('button', { name: 'Compare A/B' }).click();
+      const comparing = await toolbar(page);
+      if (w >= 900) {
+        check(`${w}px: Compare A/B unfolded adds its one row (${MOUSE_TOOLBAR_COMPARING}px at most)`,
+          comparing.h <= MOUSE_TOOLBAR_COMPARING && comparing.h > phrase.h, `${phrase.h} -> ${comparing.h}px`);
       }
       check(`${w}px: the fill buttons' widest words are not cut short`, !widest.cut, widest.cutWords.join(', '));
       if (w >= 375) {
@@ -957,10 +966,10 @@ export async function fillChecks({ open, check }) {
         menu !== null && menu.h >= (extra?.hasTouch ? 44 : 24) && menu.right <= w, JSON.stringify(menu));
       check(`${w}px: the page doesn't scroll sideways`, Object.values(all).every((m) => m.scroll <= w), Object.values(all).map((m) => m.scroll).join(','));
       if (extra?.hasTouch) {
-        const small = await page.evaluate(() => [...document.querySelectorAll('.scene-toolbar button')]
+        const small = await page.evaluate(() => [...document.querySelectorAll('.scene-toolbar button, .scenes-panel .panel-head button, .scenes-panel .panel-head select')]
           .filter((b) => b.getClientRects().length && (b.getBoundingClientRect().height < 44 || b.getBoundingClientRect().width < 44))
           .map((b) => `${b.getAttribute('aria-label') ?? b.textContent.trim()} ${Math.round(b.getBoundingClientRect().width)}x${Math.round(b.getBoundingClientRect().height)}`));
-        check(`${w}px touch: every scenes toolbar control is at least 44 x 44px`, small.length === 0, small.join(', '));
+        check(`${w}px touch: every scenes toolbar and header control is at least 44 x 44px, Compare unfolded`, small.length === 0, small.join(', '));
       }
       if (w === 375) {
         const shared = await page.evaluate(() => {
@@ -1077,12 +1086,19 @@ export async function fillChecks({ open, check }) {
       }));
       check('a11y: before Play, Fill and Fill → Drop are aria-disabled, focusable, and described by their reason',
         why.every((b) => !b.native && b.aria === 'true' && b.tab === 0 && b.described === `Unavailable: ${b.title}`), JSON.stringify(why));
-      const was = { fill: await k.fillBtn.getAttribute('data-state'), status: await k.statusText() };
+      // Pressing them starts nothing, but says why in the status line (Night 9B): a touch
+      // user gets no tooltip, so that line is where the reason shows.
+      const was = { fill: await k.fillBtn.getAttribute('data-state') };
       await k.fillBtn.click({ force: true });
+      await page.waitForTimeout(100);
+      const fillWhy = await k.statusText();
       await k.intoBtn.click({ force: true });
       await page.waitForTimeout(200);
-      check('a11y: and pressing them does nothing', (await k.fillBtn.getAttribute('data-state')) === was.fill && (await k.statusText()) === was.status
+      const intoWhy = await k.statusText();
+      check('a11y: and pressing them starts nothing', (await k.fillBtn.getAttribute('data-state')) === was.fill
         && (await k.intoBtn.getAttribute('data-state')) === 'idle');
+      check('a11y: but each press shows its reason in the status line',
+        fillWhy === `Fill: ${why[0].title}` && intoWhy?.endsWith(`: ${why[1].title}`) && intoWhy.startsWith('Fill → '), `${fillWhy} / ${intoWhy}`);
       // Crash on launch: a real checkbox in the pad's menu, with a visible focus ring.
       await k.slot(DROP).locator('.scene-menu-button').click();
       const box = page.getByRole('checkbox', { name: 'Crash on launch', exact: true });

@@ -13,6 +13,7 @@ import { isPending } from '../lib/scenes';
 import { cx } from './controls';
 
 export function CompareBar({
+  id,
   compare,
   modified,
   request,
@@ -23,6 +24,8 @@ export function CompareBar({
   onKeep,
   onExit,
 }: {
+  /** The row's id, which the header's fold toggle controls. */
+  id?: string;
   compare: Compare | null;
   /** The working mix differs from the one being heard. */
   modified: boolean;
@@ -85,7 +88,7 @@ export function CompareBar({
   };
 
   return (
-    <section className="compare-bar" aria-label="Compare A/B" aria-describedby="compare-hint">
+    <section id={id} className="compare-bar" aria-label="Compare A/B" aria-describedby="compare-hint">
       <p className="compare-title">
         Compare A/B <span className="compare-note">Session only</span>
       </p>

@@ -634,6 +634,40 @@ export async function riseRequestChecks({ open, check }) {
     await page.close();
   }
 
+  // ---- Panic with a scene queued over a running Rise: the Rise's restoring base still
+  // reaches the knobs, though Panic has cleared the book. ---------------------------
+  {
+    const { page, errors } = await open(1440, 1000);
+    const k = kit(page);
+    const tag = 'rise panic under a scene';
+    try {
+      await page.waitForSelector('.scene-slot');
+      await k.play();
+      await k.knobFill('Cutoff', 450);
+      const before = await k.mix();
+      await k.riseOver(4);
+      await k.nextBar();
+      await k.pad(3).click();
+      await k.waitLine(3, /^Rising · 2 of 4$/);
+      await page.getByRole('radio', { name: 'Launch on the next bar' }).click();
+      await k.nextBar();
+      await k.pad(1).click();
+      await k.waitState(1, ['sending', 'queued'], { timeout: 1500 });
+      const moved = differ(before, await k.mix());
+      await page.getByRole('button', { name: 'Panic', exact: true }).click();
+      await k.waitStatus(/^Panic: stopped, nothing queued, effects released$/);
+      await page.waitForTimeout(1200);
+      const after = await k.mix();
+      check(`${tag}: the knobs are back at their pre-Rise values`,
+        moved.length > 0 && differ(before, after).length === 0, show(after, differ(before, after)) || `${moved.length} had moved`);
+      check(`${tag}: no pad is left busy`, (await k.busy()).length === 0, JSON.stringify(await k.busy()));
+    } catch (e) {
+      check(`${tag}: the walk-through ran to the end`, false, String(e.message).split('\n')[0]);
+    }
+    check(`${tag}: no page errors`, errors.length === 0, errors.join('; '));
+    await page.close();
+  }
+
   // ---- Echo time 1/8T through a Rise and its cancel: exact values, never float32. ----
   {
     const { page, errors } = await open(1440, 1000);

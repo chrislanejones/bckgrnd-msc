@@ -447,6 +447,13 @@ const fold = (book, ...events) => events.reduce((step, e) => s.foldBookEvent(ste
   const commit = fold(progress.book, said(s.EVENT.sceneApplied, 11), said(s.EVENT.buildReplaced, 10, 11)).book;
   check('a scene committing over a Rise stays shown; the replaced Rise leaves the book',
     commit.shown.requestId === 11 && commit.shown.status === 'applied' && commit.pending.length === 0 && s.bookBuild(commit) === null);
+  // Panic with the scene still queued over the Rise: the book empties, but the Rise is
+  // handed back as closing, so its restoring base is still followed.
+  const panicked = s.bookCancelAll(progress.book, 5);
+  check('Panic over a Rise under a queued scene empties the book and reads the scene cancelled',
+    panicked.book.pending.length === 0 && panicked.book.shown.requestId === 11 && panicked.book.shown.status === 'cancelled' && panicked.book.shown.reason === 5);
+  check('and hands back the Rise as closing, so its restoring base reaches the knobs', panicked.closing?.requestId === 10);
+  check('Panic with no Rise pending has nothing closing', s.bookCancelAll(commit, 5).closing === null && s.bookCancelAll(s.EMPTY_BOOK, 5).closing === null);
 }
 {
   // An older request landing while a newer one is still being sent.
