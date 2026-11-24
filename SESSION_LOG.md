@@ -379,3 +379,18 @@ task branches; the MCP work is on `night9/mcp-v4` in bckgrnd-msc-mcp.
 Listening: the four fill styles on each track kind (none listened to). ADR-024 and the
 three amendments to accept. The Compare A/B fold. MCP release (version, changelog,
 npm publish) together with the next desktop build.
+
+# Night 9B session log (11-24-2026)
+
+Continued on `night9/run` from 5fed84b (PR #12). Chris approved the Compare A/B fold.
+
+| Task | Commits | Result |
+|---|---|---|
+| Random and Rotate | `224a7fb`, `c89f1fc` | Resolved when a fill is queued; Rotate cycles Classic → Simple → Busy → Syncopated; Random is seeded, never repeats, only the track's styles; a pick moves on only when a fill starts playing; menu and Fill button name the next pick |
+| Review: effective style | `224a7fb` | A track without `fillStyles` now says Classic, not the chosen style (CodeRabbit) |
+| Review: Panic under a Rise | `ba64537`, `fb672bf` | Panic or auto-mix with a scene queued over a running Rise no longer leaves the knobs half-risen (CodeRabbit); ADR-016/019 amendment wording fixed |
+| Compare A/B fold | `3a04c94`, `b2c5440` | Header toggle, remembered (`bckgrnd-msc:compare-open`, closed by default). Toolbar 70 px folded, 108 while comparing, 900–1440 |
+| Touch | `3a04c94` | 44 px taps for knob value, Reset, Echo time and inspector buttons; a press on an unavailable Fill shows the reason |
+
+No engine, contract or PHP changes since 5fed84b, so the audio parity above still holds.
+Gates for the final commit follow in the PR.
