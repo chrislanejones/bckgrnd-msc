@@ -30,12 +30,18 @@ import {
   EVENT,
   REASON,
   BUILD_BAR_CHOICES,
+  EMPTY_BOOK,
   accentStatus,
+  bookBuild,
+  bookFind,
+  bookSend,
+  bookUpdate,
   captureScene,
   copyMix,
   duplicateScene,
+  exactValues,
   factoryScenes,
-  foldSceneEvent,
+  foldBookEvent,
   isFillEvent,
   isFillPending,
   isLaunchEvent,
@@ -45,10 +51,12 @@ import {
   renameScene,
   resetScene,
   sameMix,
+  sceneValues,
   sceneVector,
   setSceneCrash,
   type BuildBars,
   type Compare,
+  type RequestBook,
   type SceneMix,
   type SceneRequest,
   type Timing,
@@ -252,10 +260,23 @@ export function useInstrument() {
     patterns: ScenePatterns;
     changedLanes: Set<LaneId>;
   } | null>(null);
-  /** The latest launch request, pending or just settled. */
+  /** The launch request the pads and Cancel speak for, pending or just settled (`RequestBook`). */
   const [sceneRequest, setSceneRequest] = useState<SceneRequest | null>(null);
   const sceneRequestRef = useRef<SceneRequest | null>(null);
   sceneRequestRef.current = sceneRequest;
+  /**
+   * Every launch the engine may still apply, by request id (`RequestBook`). A refused or
+   * cancelled newer request never clobbers an older pending one: each is folded by its
+   * own events until the engine settles it.
+   */
+  const requestBook = useRef<RequestBook>(EMPTY_BOOK);
+  /** The last request that landed, for its crash (`accentFired` follows its `applied`). */
+  const landedLast = useRef<SceneRequest | null>(null);
+  const setBook = (next: RequestBook) => {
+    requestBook.current = next;
+    sceneRequestRef.current = next.shown;
+    setSceneRequest(next.shown);
+  };
   const [sceneTiming, setSceneTimingState] = useState<Timing>('bar');
   /**
    * Build mode (Night 7): a pad press rises into its scene over this many bars instead
@@ -277,7 +298,9 @@ export function useInstrument() {
     touched: Set<number>;
     /** The render count when `last` was shown; the store only has it after a render. */
     shownAt: number;
-  }>({ requestId: -1, last: null, touched: new Set(), shownAt: 0 });
+    /** The mix the build set out from, in the store's own values (`sceneValues`). */
+    start: number[] | null;
+  }>({ requestId: -1, last: null, touched: new Set(), shownAt: 0, start: null });
   /**
    * A rise a track load interrupted. The engine cancels it on the Stop that comes
    * before the load and glides back to where it started, but its last base arrives
@@ -445,8 +468,7 @@ export function useInstrument() {
         if (!arranged) return;
         cancelTempoGlide();
         const deck = liveDeck;
-        const rising = sceneRequestRef.current;
-        abandonedBuild.current = rising?.build && isPending(rising) ? rising.requestId : null;
+        abandonedBuild.current = bookBuild(requestBook.current)?.requestId ?? null;
         engine.stop(deck);
         loadDeck(deck, arranged);
         engine.setMuted(0, false);
@@ -529,7 +551,7 @@ export function useInstrument() {
         setCued(arranged);
         // A launch queued for the outgoing track never lands; the worklet cancels it
         // and refuses new ones until the handover is done.
-        setSceneRequest((r) => (isPending(r) ? { ...r, status: 'cancelled', reason: 4 } : r));
+        setBook(cancelAll(requestBook.current, 4));
         releaseAllEffects();
         // Carry the user's faders and cuts across to the incoming track.
         for (let i = 0; i < STEM_ORDER.length; i += 1) {
@@ -706,8 +728,7 @@ export function useInstrument() {
     beforeScenes.current = null;
     // At once, not on the next render: an outcome for the old track's request that
     // arrives before then must not fold into it and show the old track's mix.
-    sceneRequestRef.current = null;
-    setSceneRequest(null);
+    setBook(EMPTY_BOOK);
     setCompare(null);
     setSceneStatus('');
   }
@@ -777,7 +798,7 @@ export function useInstrument() {
           if (e.kind === EVENT.accentFired) {
             // After the launch's `applied` (docs/NIGHT8_PROTOCOL.md): say the crash if it
             // was heard; one silent under a solo leaves "<name> active" as it is.
-            const r = sceneRequestRef.current;
+            const r = sceneRequestRef.current?.requestId === e.requestId ? sceneRequestRef.current : landedLast.current;
             const said = r?.requestId === e.requestId ? accentStatus(sceneNameRef.current(r.target), e.b) : null;
             if (said) setSceneStatus(said);
             continue;
@@ -787,41 +808,66 @@ export function useInstrument() {
           if (e.requestId === abandonedBuild.current && e.kind >= EVENT.buildApplied && e.kind <= EVENT.buildRejected) {
             abandonedBuild.current = null;
           }
-          const current = sceneRequestRef.current;
-          if (!current || current.requestId !== e.requestId) continue;
-          const next = foldSceneEvent(current, { kind: e.kind, id: e.requestId, a: e.a, b: e.b });
-          if (next === current) continue;
-          sceneRequestRef.current = next;
-          setSceneRequest(next);
+          const step = foldBookEvent(requestBook.current, { kind: e.kind, id: e.requestId, a: e.a, b: e.b });
+          const { prev: current, next } = step;
+          if (!current || !next || next === current) continue;
+          setBook(step.book);
           const name = sceneNameRef.current(next.target);
+          if (next.status === 'applied') landedLast.current = next;
+          if (!step.wasShown) {
+            // An older request the engine kept, landing while a newer one is shown (a
+            // Rise a scene was queued over, or a launch a refused one came after). Only
+            // its landing is news: it is what plays now.
+            if (next.status === 'applied') {
+              landedRef.current(next);
+              if (!next.build) showMixRef.current(next.mix);
+              setSceneStatus(`${name} active`);
+            }
+            continue;
+          }
           if (next.build) {
             buildOutcomeRef.current(next, current, e.b);
-            continue;
-          }
-          if (next.fillInto) {
+          } else if (next.fillInto) {
             fillIntoOutcomeRef.current(next, current, e.b);
-            continue;
+          } else {
+            launchOutcomeRef.current(next, name);
           }
-          if (next.status === 'queued') {
-            setSceneStatus(next.timing === 'now' ? `${name} queued` : `${name} queued for bar ${next.bar}`);
-          } else if (next.status === 'applied') {
-            landedRef.current(next);
-            showMixRef.current(next.mix);
-            setSceneStatus(next.target === 'restoreScene'
-              ? 'Scene cleared; previous mix restored'
-              : next.target === 'restore' ? 'Comparison closed; the earlier mix is back' : `${name} active`);
-          } else if (next.status === 'cancelled') {
-            // A cancel the user asked for needs no reason; any other says what did it.
-            const why = next.reason === undefined || next.reason === 10 ? '' : `: ${REASON[next.reason] ?? ''}`;
-            setSceneStatus(`${name} cancelled${why}`);
-          } else if (next.status === 'rejected') {
-            setSceneStatus(`${name} not launched: ${REASON[next.reason ?? 1] ?? 'refused'}`);
+          if (step.resumed) {
+            const resumed = step.resumed;
+            const still = resumed.status === 'building' ? 'still rising' : resumed.status === 'queued' ? 'still queued' : 'still on its way';
+            setSceneStatus((said) => `${said}; ${sceneNameRef.current(resumed.target)} ${still}`);
           }
         }
         for (const e of events) if (isFillEvent(e.kind)) fillEventRef.current(e);
       }),
     [],
   );
+
+  /** One launch outcome (a plain scene or Compare listen): the status line, and what lands. */
+  function launchOutcome(next: SceneRequest, name: string) {
+    if (next.status === 'queued') {
+      setSceneStatus(next.timing === 'now' ? `${name} queued` : `${name} queued for bar ${next.bar}`);
+    } else if (next.status === 'applied') {
+      landed(next);
+      showMix(next.mix);
+      setSceneStatus(next.target === 'restoreScene'
+        ? 'Scene cleared; previous mix restored'
+        : next.target === 'restore' ? 'Comparison closed; the earlier mix is back' : `${name} active`);
+    } else if (next.status === 'cancelled') {
+      // A cancel the user asked for needs no reason; any other says what did it.
+      const why = next.reason === undefined || next.reason === 10 ? '' : `: ${REASON[next.reason] ?? ''}`;
+      setSceneStatus(`${name} cancelled${why}`);
+    } else if (next.status === 'rejected') {
+      setSceneStatus(`${name} not launched: ${REASON[next.reason ?? 1] ?? 'refused'}`);
+    }
+  }
+  const launchOutcomeRef = useRef(launchOutcome);
+  launchOutcomeRef.current = launchOutcome;
+  /** A Panic or an auto-mix: the engine cancels everything pending, for `reason`. */
+  function cancelAll(book: RequestBook, reason: number): RequestBook {
+    const shown = book.shown;
+    return { pending: [], shown: isPending(shown) ? { ...shown, status: 'cancelled', reason } : shown };
+  }
   // Where a running build has moved the base (~30 Hz, then once more as it ends): the
   // knobs follow it, except the ones the user has moved since it started, which are
   // theirs (the engine stops driving them too). Display only: nothing is sent back.
@@ -829,11 +875,11 @@ export function useInstrument() {
     () =>
       engine.onBuildBase((requestId, values) => {
         if (requestId === abandonedBuild.current) {
-          showParamsRef.current(mixFromVector(values).params);
+          followAbandonedRef.current(requestId, values);
           return;
         }
-        const current = sceneRequestRef.current;
-        if (!current?.build || current.requestId !== requestId) return;
+        // The Rise shown, or one still running under a scene queued after it.
+        if (!bookFind(requestBook.current, requestId)?.build) return;
         followBuildRef.current(requestId, values);
       }),
     [],
@@ -851,11 +897,15 @@ export function useInstrument() {
   function followBuild(requestId: number, values: readonly number[]) {
     const shown = buildShown.current;
     if (shown.requestId !== requestId) {
-      buildShown.current = { requestId, last: null, touched: new Set(), shownAt: 0 };
+      buildShown.current = { requestId, last: null, touched: new Set(), shownAt: 0, start: null };
     }
     const state = buildShown.current;
-    const working = sceneVector(workingMix());
+    const held = sceneValues(workingMix());
+    const working = Float32Array.from(held);
     const next = Float32Array.from(values);
+    // The mix the build set out from: what the store holds when its first snapshot
+    // arrives. A cancel glides back to it.
+    state.start ??= held;
     // Until React has rendered the last snapshot, the store still holds the one before,
     // which would look like the user's hand.
     if (state.last && renders.current > state.shownAt) {
@@ -866,10 +916,27 @@ export function useInstrument() {
     for (const i of state.touched) next[i] = working[i]!;
     state.last = next;
     state.shownAt = renders.current;
-    showMix(mixFromVector(next));
+    // The engine speaks float32. Wherever it is only holding a value the store, the
+    // scene risen into or the starting mix already has, show that value itself, so a
+    // Rise never leaves a rounded copy behind (an Echo time that is no option at all).
+    const request = bookFind(requestBook.current, requestId);
+    const target = request ? sceneValues(request.mix) : held;
+    showMix(mixFromVector(exactValues(next, [held, target, state.start])));
   }
   const followBuildRef = useRef(followBuild);
   followBuildRef.current = followBuild;
+
+  /**
+   * A Rise a track load interrupted: its last bases still move the effect knobs (the
+   * load resets the faders itself), back to where the Rise set out from, exactly.
+   */
+  function followAbandoned(requestId: number, values: readonly number[]) {
+    const state = buildShown.current;
+    const known = [sceneValues(workingMix()), ...(state.requestId === requestId && state.start ? [state.start] : [])];
+    showParams(mixFromVector(exactValues(values, known)).params);
+  }
+  const followAbandonedRef = useRef(followAbandoned);
+  followAbandonedRef.current = followAbandoned;
 
   /**
    * One build outcome: the pad line comes from the request, the status line from here.
@@ -986,7 +1053,7 @@ export function useInstrument() {
       const now = copyMix(mix);
       sendMix(now);
       showMix(now);
-      setSceneRequest(null);
+      setBook({ ...requestBook.current, shown: null });
       landed({
         requestId: 0,
         target,
@@ -1014,8 +1081,7 @@ export function useInstrument() {
       mix: copyMix(mix),
       ...(sets ? { lanes: sets } : {}),
     };
-    sceneRequestRef.current = request;
-    setSceneRequest(request);
+    setBook(bookSend(requestBook.current, request));
     // The scene's lanes are compiled now, so the revision that plays is the one
     // launched even if the slot is captured again while it waits.
     const data = sets ? patterns.scenePayload(sets) : undefined;
@@ -1104,9 +1170,8 @@ export function useInstrument() {
       build: { bars, ...(withFill ? { fill: { fillId } } : {}) },
       ...(sets ? { lanes: sets } : {}),
     };
-    buildShown.current = { requestId, last: null, touched: new Set(), shownAt: 0 };
-    sceneRequestRef.current = request;
-    setSceneRequest(request);
+    buildShown.current = { requestId, last: null, touched: new Set(), shownAt: 0, start: null };
+    setBook(bookSend(requestBook.current, request));
     // Compiled now, as for a launch, so the lanes that land are the ones risen into even
     // if the slot is captured again while the build runs. They commit on its end bar.
     const data = sets ? patterns.scenePayload(sets) : undefined;
@@ -1515,8 +1580,7 @@ export function useInstrument() {
       fillInto: { fillId },
       ...(sets ? { lanes: sets } : {}),
     };
-    sceneRequestRef.current = request;
-    setSceneRequest(request);
+    setBook(bookSend(requestBook.current, request));
     setFill({ requestId: fillId, status: 'sending', kind: 'into', phrase, from: songStepRef.current, partner: sceneId });
     // Compiled now, as for a launch, so the lanes that land are the ones pressed for.
     const data = sets ? patterns.scenePayload(sets) : undefined;
@@ -1541,12 +1605,11 @@ export function useInstrument() {
     setFill(next);
     const linked = f.kind !== 'plain' && e.kind !== EVENT.fillUnlinked;
     if (linked) {
-      const r = sceneRequestRef.current;
-      if (e.kind === EVENT.fillStarted && r && r.requestId === next.partner && isPending(r)) {
+      const r = next.partner === undefined ? null : bookFind(requestBook.current, next.partner);
+      if (e.kind === EVENT.fillStarted && r && isPending(r)) {
         const filling = markFilling(r, next.requestId);
         if (filling !== r) {
-          sceneRequestRef.current = filling;
-          setSceneRequest(filling);
+          setBook(bookUpdate(requestBook.current, filling));
           setSceneStatus(`Filling into ${sceneName(r.target)}`);
         }
       }
@@ -1576,7 +1639,7 @@ export function useInstrument() {
     clearHeld('echo');
     clearHeld('filter');
     setFill(null);
-    setSceneRequest((r) => (isPending(r) ? { ...r, status: 'cancelled', reason: 5 } : r));
+    setBook(cancelAll(requestBook.current, 5));
     setPlaying(false);
     setMixing(null);
     setSceneStatus('Panic: stopped, nothing queued, effects released');
