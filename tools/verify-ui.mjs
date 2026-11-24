@@ -1014,7 +1014,21 @@ try {
       const beforeCutoff = await shown('Cutoff');
       const beforeRes = await shown('Resonance');
       const namesBefore = JSON.stringify(await names());
+      // Compare A/B folds into the scenes header (Night 9B): folded with nothing stored,
+      // unfolded by its toggle, and held open by a capture, with a press saying why.
+      const cmpToggle = page.getByRole('button', { name: 'Compare A/B' });
+      check('compare: folded with nothing stored, the toolbar two rows',
+        (await cmpToggle.getAttribute('aria-expanded')) === 'false' && (await page.locator('.compare-bar').count()) === 0);
+      await cmpToggle.click();
+      check('compare: the header toggle unfolds the row it controls',
+        (await cmpToggle.getAttribute('aria-expanded')) === 'true' &&
+          (await page.locator('.compare-bar').getAttribute('id')) === (await cmpToggle.getAttribute('aria-controls')));
       await page.getByRole('button', { name: 'Capture A' }).click();
+      await cmpToggle.click({ force: true });
+      const heldWhy = await page.locator('.scene-status').textContent();
+      check('compare: a capture holds the row open, and pressing the toggle says why',
+        (await cmpToggle.getAttribute('aria-disabled')) === 'true' && (await page.locator('.compare-bar').isVisible()) &&
+          /stays open while comparing/.test(heldWhy ?? ''), heldWhy);
       check('compare: Capture A, and A is what is heard', (await chipText(0)) === 'A · Listening', await chipText(0));
       await page.getByRole('slider', { name: 'Cutoff' }).fill('300');
       const bCutoff = await shown('Cutoff');
@@ -1115,6 +1129,7 @@ try {
       await page.waitForSelector('.scene-slot');
       await page.getByRole('button', { name: 'Play the track' }).click();
       await page.waitForFunction(() => document.querySelector('.app')?.getAttribute('data-playing') === 'yes');
+      await page.getByRole('button', { name: 'Compare A/B' }).click();
       await page.getByRole('button', { name: 'Capture A' }).click();
       await page.getByRole('button', { name: /^Auto mix/ }).click();
       await page.waitForFunction(() => document.querySelector('.scene-pad')?.disabled === true, null, { timeout: 8000 });
@@ -1129,6 +1144,10 @@ try {
       const fill = page.locator('.fill-button');
       check('mixing: Fill is disabled, and says why',
         (await fill.isDisabled()) && (await fill.getAttribute('title')) === 'Available after mix', await fill.getAttribute('title'));
+      // A press (a touch user's only way to ask: there is no tooltip) says it in the status line.
+      await fill.click({ force: true });
+      const fillWhy = (await page.locator('.scene-status').textContent())?.trim();
+      check('mixing: pressing Fill says why in the status line', fillWhy === 'Fill: Available after mix', fillWhy);
       await page.locator('body').click({ position: { x: 5, y: 600 } });
       await page.keyboard.press('Shift+Digit2');
       await page.waitForTimeout(200);
@@ -1444,6 +1463,23 @@ try {
     await page.locator('.inspector').getByText('Master', { exact: true }).click();
     const sheetKnobs = await page.locator('.inspector .knob').count();
     check('phone: the sheet has the master knobs', sheetKnobs === 14, `${sheetKnobs} knobs`);
+    // Night 9B: a finger's 44px on every knob value, Reset and pill in the sheet. The value
+    // and Reset keep their look and take the size as a hit area, so it is measured where
+    // a tap lands (elementFromPoint), 21px out from each control's center every way.
+    const smallHits = await page.evaluate(() => {
+      const misses = [];
+      for (const el of document.querySelectorAll('.inspector .knob-value, .inspector .knob-reset, .inspector .segment')) {
+        if (!el.getClientRects().length) continue;
+        el.scrollIntoView({ block: 'center' });
+        const b = el.getBoundingClientRect();
+        const x = b.left + b.width / 2;
+        const y = b.top + b.height / 2;
+        const lands = [[-21, 0], [21, 0], [0, -21], [0, 21]].every(([dx, dy]) => el.contains(document.elementFromPoint(x + dx, y + dy)));
+        if (!lands) misses.push(`${el.className.split(' ')[0]} ${el.getAttribute('aria-label') ?? el.textContent.trim()}`);
+      }
+      return misses;
+    });
+    check('phone: every knob value, Reset and pill in the sheet takes a 44px tap', smallHits.length === 0, smallHits.join(', '));
     const tabsBox = await page.locator('.view-tabs').boundingBox();
     check('phone: the sheet stops above the view tabs', Boolean(sheet && tabsBox && sheet.y + sheet.height <= tabsBox.y + 1), `${sheet && sheet.y + sheet.height} vs ${tabsBox && tabsBox.y}`);
     await page.getByRole('button', { name: 'Close the inspector' }).click({ position: { x: 10, y: 300 } });

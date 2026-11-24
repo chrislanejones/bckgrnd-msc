@@ -2104,6 +2104,11 @@ body {
     min-height: var(--control-md);
   }
 
+  /* Echo's divisions and the stem pills too: real 44px pills, not just a hit area. */
+  .inspector .segment {
+    min-height: var(--control-md);
+  }
+
   .inspector-head .segment {
     min-height: var(--control-md);
   }
@@ -3529,6 +3534,39 @@ html[data-control-drag="yes"] * {
   outline-offset: 2px;
 }
 
+/* Touch (Night 9B): the value and its Reset take a 44px finger without growing. The
+   value is a transparent pill, so it simply widens to 44px; each gets a 44px-tall hit
+   area from an invisible ::before, and Reset's reaches 12.8px around its 20px ring
+   (45.6px), so the pair sits as far apart and the two areas meet without overlapping.
+   Both reach about 9px above the readout, over the dial's empty bottom corners (the
+   dial keeps a 49px-tall hit), and as far below it, into the gap before the next row. */
+@media (pointer: coarse) {
+  .knob-readout {
+    gap: 0.8rem;
+  }
+
+  .knob-value,
+  .knob-reset {
+    position: relative;
+  }
+
+  .knob-value {
+    min-width: var(--control-md);
+  }
+
+  .knob-value::before {
+    content: "";
+    position: absolute;
+    inset: calc((var(--control-md) - 100%) / -2) 0;
+  }
+
+  .knob-reset::before {
+    content: "";
+    position: absolute;
+    inset: -0.8rem;
+  }
+}
+
 .knob-dial {
   position: relative;
   width: var(--knob);
@@ -3781,6 +3819,116 @@ html[data-control-drag="yes"] * {
 @media (pointer: coarse) {
   .fill-style-select {
     min-height: var(--control-md);
+  }
+}
+
+/* Compare A/B's fold (Night 9B): a header pill like Fill style beside it, so the
+   toolbar is two rows until Compare is wanted. The chevron turns as Output's does.
+   While a capture holds the row open the pill reads as on but inert (aria-disabled),
+   and a press says why in the status line. */
+.compare-toggle {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-height: 1.5rem;
+  padding: 0.1rem 0.7rem 0.1rem 0.5rem;
+  border: 1px solid var(--color-line);
+  border-radius: 999px;
+  background: var(--color-surface);
+  color: var(--color-fg);
+  font: inherit;
+  font-size: var(--text-label);
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.compare-toggle:hover:not([aria-disabled="true"]) {
+  border-color: color-mix(in srgb, var(--color-acid) 40%, var(--color-line));
+}
+
+.compare-toggle[aria-expanded="true"] {
+  border-color: color-mix(in srgb, var(--color-acid) 55%, var(--color-line));
+}
+
+.compare-toggle[aria-disabled="true"] {
+  cursor: default;
+}
+
+.compare-toggle-chevron {
+  flex: none;
+  color: var(--color-muted);
+  transition: transform 120ms ease-out;
+}
+
+.compare-toggle[aria-expanded="true"] .compare-toggle-chevron {
+  transform: rotate(90deg);
+}
+
+/* "A/B" until the panel has room for the full words (1440px and up with a mouse). */
+.compare-toggle-full {
+  display: none;
+}
+
+@container scenes (min-width: 47rem) {
+  .compare-toggle-full {
+    display: inline;
+  }
+
+  .compare-toggle-short {
+    display: none;
+  }
+}
+
+@media (pointer: coarse) {
+  .compare-toggle {
+    min-height: var(--control-md);
+    min-width: var(--control-md);
+    justify-content: center;
+  }
+}
+
+/* A narrow touch panel, and any phone-width one: Fill style and the A/B toggle share
+   one row under the title (A/B at its end), and the status takes its own full line
+   below them, next to the pads it reports on, rather than a sliver beside them. A
+   mouse at 900-1180px (a 34rem panel) keeps the one header row. */
+@media (pointer: coarse) {
+  @container scenes (max-width: 34rem) {
+    .scenes-panel .panel-actions {
+      flex-wrap: wrap;
+      row-gap: var(--group-gap);
+    }
+
+    .scenes-panel .scene-status {
+      flex: 1 0 100%;
+      order: 1;
+    }
+
+    .compare-toggle {
+      margin-inline-start: auto;
+    }
+  }
+}
+
+@container scenes (max-width: 26rem) {
+  .scenes-panel .panel-actions {
+    flex-wrap: wrap;
+    row-gap: var(--group-gap);
+  }
+
+  .scenes-panel .scene-status {
+    flex: 1 0 100%;
+    order: 1;
+  }
+
+  .compare-toggle {
+    margin-inline-start: auto;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .compare-toggle-chevron {
+    transition: none;
   }
 }
 
