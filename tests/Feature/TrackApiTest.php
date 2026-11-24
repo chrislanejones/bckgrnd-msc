@@ -36,6 +36,16 @@ final class TrackApiTest extends TestCase
         $this->assertCount(16, $response->json('activity.0.kick'));
     }
 
+    public function test_a_track_arrives_with_its_four_fill_styles_beside_it(): void
+    {
+        $response = $this->getJson('/api/tracks/warehouse')->assertOk();
+
+        $this->assertSame(['classic', 'simple', 'busy', 'syncopated'], array_column($response->json('fillStyles'), 'style'));
+        // The track keeps its one fill, Classic, so its hash as a project's source holds.
+        $this->assertCount(1, $response->json('track.fills'));
+        $this->assertSame($response->json('track.fills.0.id'), $response->json('fillStyles.0.id'));
+    }
+
     public function test_an_unknown_track_is_a_json_404(): void
     {
         $this->getJson('/api/tracks/nope')

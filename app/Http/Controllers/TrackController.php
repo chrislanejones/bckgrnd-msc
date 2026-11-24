@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers;
 
+use App\Support\Music\Fills;
 use App\Support\Music\Library;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -65,7 +66,9 @@ class TrackController extends Controller
      * One arranged track, ready for the engine.
      *
      * `activity` gives the UI's per-bar step rows so it can draw a stem's pattern
-     * without shipping all nine lanes to the client.
+     * without shipping all nine lanes to the client. `fillStyles` are the four fill
+     * styles (Fills::styles), kept beside the track so the track itself, a saved
+     * project's hashed source, is unchanged by them.
      */
     public function show(Request $request, string $id): JsonResponse
     {
@@ -89,6 +92,7 @@ class TrackController extends Controller
         return response()->json([
             'track' => $arranged->jsonSerialize(),
             'activity' => $activity,
+            'fillStyles' => Fills::styles($track),
         ]);
     }
 }
