@@ -3888,9 +3888,10 @@ html[data-control-drag="yes"] * {
   }
 }
 
-/* A narrow touch panel: Fill style and the A/B toggle share one 44px row under the
-   title (A/B at its end), and the status takes its own full line below them, next to
-   the pads it reports on, rather than a sliver beside two 44px controls. */
+/* A narrow touch panel, and any phone-width one: Fill style and the A/B toggle share
+   one row under the title (A/B at its end), and the status takes its own full line
+   below them, next to the pads it reports on, rather than a sliver beside them. A
+   mouse at 900-1180px (a 34rem panel) keeps the one header row. */
 @media (pointer: coarse) {
   @container scenes (max-width: 34rem) {
     .scenes-panel .panel-actions {
@@ -3906,6 +3907,22 @@ html[data-control-drag="yes"] * {
     .compare-toggle {
       margin-inline-start: auto;
     }
+  }
+}
+
+@container scenes (max-width: 26rem) {
+  .scenes-panel .panel-actions {
+    flex-wrap: wrap;
+    row-gap: var(--group-gap);
+  }
+
+  .scenes-panel .scene-status {
+    flex: 1 0 100%;
+    order: 1;
+  }
+
+  .compare-toggle {
+    margin-inline-start: auto;
   }
 }
 

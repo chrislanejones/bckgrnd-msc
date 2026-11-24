@@ -950,12 +950,19 @@ export async function fillChecks({ open, check }) {
       }));
       check('a11y: before Play, Fill and Fill → Drop are aria-disabled, focusable, and described by their reason',
         why.every((b) => !b.native && b.aria === 'true' && b.tab === 0 && b.described === `Unavailable: ${b.title}`), JSON.stringify(why));
-      const was = { fill: await k.fillBtn.getAttribute('data-state'), status: await k.statusText() };
+      // Pressing them starts nothing, but says why in the status line (Night 9B): a touch
+      // user gets no tooltip, so that line is where the reason shows.
+      const was = { fill: await k.fillBtn.getAttribute('data-state') };
       await k.fillBtn.click({ force: true });
+      await page.waitForTimeout(100);
+      const fillWhy = await k.statusText();
       await k.intoBtn.click({ force: true });
       await page.waitForTimeout(200);
-      check('a11y: and pressing them does nothing', (await k.fillBtn.getAttribute('data-state')) === was.fill && (await k.statusText()) === was.status
+      const intoWhy = await k.statusText();
+      check('a11y: and pressing them starts nothing', (await k.fillBtn.getAttribute('data-state')) === was.fill
         && (await k.intoBtn.getAttribute('data-state')) === 'idle');
+      check('a11y: but each press shows its reason in the status line',
+        fillWhy === `Fill: ${why[0].title}` && intoWhy?.endsWith(`: ${why[1].title}`) && intoWhy.startsWith('Fill → '), `${fillWhy} / ${intoWhy}`);
       // Crash on launch: a real checkbox in the pad's menu, with a visible focus ring.
       await k.slot(DROP).locator('.scene-menu-button').click();
       const box = page.getByRole('checkbox', { name: 'Crash on launch', exact: true });
