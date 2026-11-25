@@ -468,3 +468,18 @@ not. Things to settle before or while building it:
   49 of 56 px). Watch for missed drags on the phone. (Lacey, Chris by use)
 - **On the phone the scenes status line keeps its own row when empty** (about 19 px).
   Collapsing it would make the header jump. (Lacey)
+
+## Found in Night 10 performance layout, round 1 (11-24-2026)
+
+- **No "Queued:" readout yet.** The brief's "Queued: none" line has no home of its own: the
+  scenes status line reports the last outcome ("Drop queued"), not what is waiting. A
+  derived "Queued: Drop · Bar 9 / none" from `sceneRequest` and the fill job would fit the
+  status line's slot without a new row. Wording and priority (scene vs fill vs Rise) are
+  open. (Lacey, Chris)
+- **The Fill length control has little header room at 1280.** The Fill style menu and
+  Compare A/B already leave the status line about 140 px there. A Beat · Bar pair (about
+  80 px) would squeeze it further. Dropping the Shift 1–4 tag at mouse widths (the pads keep
+  `aria-keyshortcuts` and their tooltips) would win that room back. (Lacey, fills agent)
+- **Release FX's disabled check names Echo and Filter only.** When Beat Repeat lands, it
+  needs `!inst.repeatHeld` too, or Release FX stays disabled while only Repeat is held.
+  (Silas)
