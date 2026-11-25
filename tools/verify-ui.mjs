@@ -15,6 +15,7 @@ import { chromium } from 'playwright';
 import { existsSync } from 'node:fs';
 import { riseChecks } from './verify-ui-rise.mjs';
 import { fillChecks } from './verify-ui-fills.mjs';
+import { recordingChecks } from './verify-ui-recording.mjs';
 
 const baseUrl = process.argv[2] ?? 'http://127.0.0.1:8080';
 const executablePath =
@@ -1186,6 +1187,9 @@ try {
 
   // ---- Fills (Night 8: Fill at, Fill → Drop, Rise + Fill, prefs): tools/verify-ui-fills.mjs.
   await fillChecks({ open, check });
+
+  // ---- Performance recording (docs/PERFORMANCE_EVENTS.md): tools/verify-ui-recording.mjs.
+  await recordingChecks({ open, check });
 
   // ---- Tablet: the library is an overlay opened from the transport. -----------
   {
