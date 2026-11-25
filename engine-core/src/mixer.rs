@@ -492,6 +492,19 @@ impl Master {
         }
     }
 
+    /// The per-stem echo sends accumulated for this sample so far (Beat Repeat records
+    /// and replays them).
+    #[inline]
+    pub fn pending_send(&self) -> f32 {
+        self.send_acc
+    }
+
+    /// Replace this sample's accumulated echo sends (Beat Repeat's replayed ones).
+    #[inline]
+    pub fn set_pending_send(&mut self, send: f32) {
+        self.send_acc = send;
+    }
+
     pub fn echo_on(&self) -> bool {
         self.echo_on
     }

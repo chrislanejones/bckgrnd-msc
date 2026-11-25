@@ -68,6 +68,7 @@ mod fills;
 mod gesture;
 mod mixer;
 mod patterns;
+mod repeat;
 mod scheduler;
 mod scratch;
 mod tone;
@@ -93,10 +94,15 @@ pub mod limits {
 pub use track::{DrumStep, Fill, NoteEvent, Perc, Stem, Track, TrackKind, FILL_STEPS, STEPS};
 
 /// Performance gestures (`docs/NIGHT3_PROTOCOL.md`, Gestures): the kinds, the
-/// capacity, the lease, and what Filter Hold does.
+/// capacity, the lease, and what Filter Hold does. Beat Repeat's divisions and ramps
+/// are `docs/NIGHT10_PROTOCOL.md`.
 pub mod perform {
-    pub use crate::gesture::{kind, LEASE_SECONDS, MAX_GESTURES};
+    pub use crate::gesture::{ended, kind, LEASE_SECONDS, MAX_GESTURES};
     pub use crate::mixer::{FILTER_HOLD_OPEN, FILTER_HOLD_Q, FILTER_HOLD_TRIM};
+    pub use crate::repeat::{
+        DEFAULT_DIVISION as REPEAT_DEFAULT_DIVISION, DIVISIONS as REPEAT_DIVISIONS,
+        RELEASE_SECONDS as REPEAT_RELEASE_SECONDS, SEAM_SECONDS as REPEAT_SEAM_SECONDS,
+    };
 }
 
 /// The scene vector's layout, the timing, event and reason codes, and the validator,
@@ -498,8 +504,12 @@ pub struct Engine {
     /// Echo Throw gesture; not leased, and not released by Stop or a track load (the
     /// UI holds the latch), only by `release_gestures` and `panic`.
     echo_latch: bool,
-    /// Held Echo Throw and Filter Hold overrides, over the base values in `master`.
+    /// Held Echo Throw, Filter Hold and Beat Repeat overrides, over the base values in
+    /// `master`.
     gestures: gesture::Gestures,
+    /// Beat Repeat's stutter, between the stem sum and the master chain. Follows whether
+    /// a kind 3 gesture is held; its division is a live setting, never saved.
+    repeat: repeat::Repeat,
     /// Whether any stem was soloed on the previous sample, to catch entering solo.
     solo_was: bool,
     /// The all-cut gate, 0..1, and how far it moves per sample. See `render_sample`.
@@ -606,6 +616,7 @@ impl Engine {
             levels: vec![0.0; 8],
             echo_latch: false,
             gestures: gesture::Gestures::new(sr),
+            repeat: repeat::Repeat::new(sr),
             solo_was: false,
             cut_gate: 1.0,
             cut_step: 1.0 / (CUT_FADE_SECONDS * sr).max(1.0),
@@ -638,6 +649,8 @@ impl Engine {
         self.let_go_of_the_platter();
         self.transport.start();
         self.transitions.reset();
+        // The grid starts over at step 0: a held Beat Repeat captures again there.
+        self.repeat.restart();
     }
 
     pub fn stop(&mut self) {
@@ -716,6 +729,7 @@ impl Engine {
     pub fn brake(&mut self) {
         self.transport.brake();
         if self.transport.braking() {
+            self.end_repeat_for_platter();
             self.interrupt(reason::TRANSPORT);
         }
         // A riser on a clock grinding to a halt sounds broken, so the transition
@@ -741,6 +755,7 @@ impl Engine {
             return;
         }
         self.interrupt(reason::TRANSPORT);
+        self.end_repeat_for_platter();
         self.scratch
             .capture(self.ring.left.len(), self.ring.write, self.ring.filled);
         self.scratch_resume = self.transport.playing;
@@ -811,6 +826,7 @@ impl Engine {
         if self.scratch.held() || !self.transport.backspin() {
             return;
         }
+        self.end_repeat_for_platter();
         self.interrupt(reason::TRANSPORT);
         self.transitions.release();
         match self.ring.take(1.35, self.sample_rate) {
@@ -1343,7 +1359,7 @@ impl Engine {
     }
 
     /// Begin a temporary override (`docs/NIGHT3_PROTOCOL.md`, Gestures): kind 1 Echo
-    /// Throw, 2 Filter Hold. False (nothing changed) for an unknown kind, a token
+    /// Throw, 2 Filter Hold, 3 Beat Repeat (`docs/NIGHT10_PROTOCOL.md`). False (nothing changed) for an unknown kind, a token
     /// already held, or when four are already held. The override expires after 3 s
     /// of rendered audio unless [`Engine::gesture_renew`] is called (event 21).
     pub fn gesture_begin(&mut self, token: u32, kind: u8) -> bool {
@@ -1367,6 +1383,25 @@ impl Engine {
     /// Restart `token`'s 3 s lease. False when the token is not held.
     pub fn gesture_renew(&mut self, token: u32) -> bool {
         self.gestures.renew(token)
+    }
+
+    /// Beat Repeat's division as a note value: 4, 8 (the default) or 16. A live
+    /// setting, not part of the mix, a scene or a project. False (nothing changed) for
+    /// any other value. While a repeat is engaged, the new division captures again on
+    /// its next grid line.
+    pub fn set_repeat_division(&mut self, division: u8) -> bool {
+        self.repeat.set_division(division)
+    }
+
+    /// Beat Repeat's division.
+    pub fn repeat_division(&self) -> u8 {
+        self.repeat.division()
+    }
+
+    /// Whether Beat Repeat is looping its slice now (held, past the grid line and the
+    /// first pass). Not whether one is held: that is the gesture.
+    pub fn repeat_looping(&self) -> bool {
+        self.repeat.looping()
     }
 
     /// End every override, and the latched echo throw, leaving the working mix as it
@@ -1435,6 +1470,12 @@ impl Engine {
             }
             let onset = self.transport.tick();
             if let Some(step) = onset {
+                // 0. A held Beat Repeat engages on its grid line, before this onset's
+                //    sample is rendered, so the slice starts on it.
+                if self.repeat.held() && !self.transport.in_gesture() {
+                    let eighth = self.eighth_samples();
+                    self.repeat.on_onset(step, eighth);
+                }
                 // The order on a boundary is fixed (NIGHT3_PROTOCOL.md, Timing):
                 // 1. Apply a pattern edit due here, then commit the scene (with any
                 //    lanes it sets, which win over the edit's for the same lane), so
@@ -1661,6 +1702,31 @@ impl Engine {
         })
     }
 
+    /// The eighth the transport is playing now, in samples, as its clock counts them: each
+    /// step lasts its length rounded up to a whole sample.
+    #[inline(never)]
+    fn eighth_samples(&self) -> f64 {
+        let sr = self.sample_rate as f64;
+        let len = |step: usize| {
+            (self.transport.step_seconds(step) as f64 * sr)
+                .max(1.0)
+                .ceil()
+        };
+        len(0) + len(1)
+    }
+
+    /// A brake, backspin or scratch takes the deck: a held Beat Repeat ends, reported as
+    /// `gesture expired` (21) with `b` 1, so the host lets go of it too.
+    fn end_repeat_for_platter(&mut self) {
+        if self.gestures.end_kind(
+            gesture::kind::BEAT_REPEAT,
+            gesture::ended::PLATTER,
+            &mut self.scheduler.events,
+        ) {
+            self.apply_overrides();
+        }
+    }
+
     /// End every held gesture (not the latch) and put the base back.
     fn release_overrides(&mut self) {
         self.gestures.clear();
@@ -1677,6 +1743,12 @@ impl Engine {
         }
         self.master
             .set_filter_hold(self.gestures.holds(gesture::kind::FILTER_HOLD));
+        let repeat = self.gestures.holds(gesture::kind::BEAT_REPEAT);
+        if repeat && !self.repeat.held() {
+            self.repeat.hold();
+        } else if !repeat && self.repeat.held() {
+            self.repeat.release();
+        }
     }
 
     /// Advance every voice and bus by one sample.
@@ -1790,12 +1862,20 @@ impl Engine {
             sum_l += c.bus.left;
             sum_r += c.bus.right;
         }
-        self.master.process_with_returns(
-            (sum_l + fx_l) * gate + direct_l,
-            (sum_r + fx_r) * gate + direct_r,
-            (return_l + fx_l) * gate + direct_l,
-            (return_r + fx_r) * gate + direct_r,
-        )
+        let dry_l = (sum_l + fx_l) * gate + direct_l;
+        let dry_r = (sum_r + fx_r) * gate + direct_r;
+        let ret_l = (return_l + fx_l) * gate + direct_l;
+        let ret_r = (return_r + fx_r) * gate + direct_r;
+        // Beat Repeat sits here, after the stem sum and before the master chain, so the
+        // filter, the echo, the reverb and their held overrides act on the stutter and
+        // its tails stay natural. Inactive, it is not touched: a true bypass.
+        if self.repeat.active() {
+            let send = self.master.pending_send();
+            let [dl, dr, rl, rr, sd] = self.repeat.process([dry_l, dry_r, ret_l, ret_r, send]);
+            self.master.set_pending_send(sd);
+            return self.master.process_with_returns(dl, dr, rl, rr);
+        }
+        self.master.process_with_returns(dry_l, dry_r, ret_l, ret_r)
     }
 
     /// Set every target a scene holds, in one place, and report `applied` on `step`
@@ -2215,6 +2295,9 @@ mod staging_tests;
 
 #[cfg(test)]
 mod fill_tests;
+
+#[cfg(test)]
+mod repeat_tests;
 
 #[cfg(test)]
 mod tests {

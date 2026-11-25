@@ -448,3 +448,43 @@ fn a_scene_committing_over_a_running_build_parks_the_builds_lanes() {
     assert!(rig.saw(event::BUILD_REPLACED, 1) && rig.saw(event::PATTERNS_CANCELLED, 20));
     assert!(rig.saw(event::PATTERNS_APPLIED, 22) && rig.saw(event::SCENE_APPLIED, 9));
 }
+
+/// Beat Repeat (Night 10, kind 3): its slice buffer is allocated with the engine, so
+/// holding one through every division (each change captures again), alongside Filter
+/// Hold and Echo Throw, through its lease renewals, a seek, the release and a second
+/// hold, allocates and frees nothing. The gesture calls are counted too.
+#[test]
+fn a_held_beat_repeat_across_divisions_allocates_and_frees_nothing() {
+    use bckgrnd_msc_engine::perform::kind;
+    let mut rig = Rig::with_track(library("warehouse"));
+    assert!(rig.call("begin", |e| e.gesture_begin(30, kind::BEAT_REPEAT)));
+    assert!(rig.call("begin", |e| e.gesture_begin(31, kind::FILTER_HOLD)));
+    assert!(rig.call("begin", |e| e.gesture_begin(32, kind::ECHO_THROW)));
+    for d in [8u8, 4, 16, 8] {
+        assert!(rig.call("division", |e| e.set_repeat_division(d)));
+        for _ in 0..(48_000 / 128) {
+            rig.block();
+        }
+        assert!(rig.e.repeat_looping(), "1/{d} never looped");
+        assert!(rig.call("renew", |e| e.gesture_renew(30)));
+        rig.call("renew", |e| e.gesture_renew(31));
+        rig.call("renew", |e| e.gesture_renew(32));
+    }
+    rig.call("seek", |e| e.jump(64));
+    for _ in 0..200 {
+        rig.block();
+    }
+    assert!(rig.call("end", |e| e.gesture_end(30)));
+    for _ in 0..50 {
+        rig.block();
+    }
+    assert!(rig.call("begin", |e| e.gesture_begin(33, kind::BEAT_REPEAT)));
+    for _ in 0..400 {
+        rig.block();
+    }
+    rig.call("release fx", |e| e.release_gestures());
+    for _ in 0..50 {
+        rig.block();
+    }
+    assert!(rig.allocs.is_empty(), "allocated: {:?}", rig.allocs);
+}
