@@ -103,7 +103,7 @@ export async function recordingChecks({ open, check }) {
         canceled !== undefined && log.some((l) => l.requestId === canceled.requestId && l.status === 'queued') && log.filter((l) => l.requestId === canceled.requestId).every((l) => !l.recorded),
         log.map((l) => `${l.requestId}:${l.status}`).join(' '));
       check('recording: the header names the track, 16 steps a bar',
-        doc?.format === 'bckgrnd-msc/performance' && doc.version === 1 && typeof doc.track === 'string' && doc.stepsPerBar === 16 && doc.startedAtStep >= 0);
+        doc?.format === 'bckgrnd-msc/performance' && doc.version === 1 && typeof doc.track === 'string' && doc.stepsPerBar === 16 && Number.isInteger(doc.startedAtStep) && doc.startedAtStep >= -1 && doc.startedAtStep <= 255, JSON.stringify({ track: doc?.track, startedAtStep: doc?.startedAtStep }));
 
       // A transport Stop ends a take by itself; Clear empties it.
       at = 'transport Stop';

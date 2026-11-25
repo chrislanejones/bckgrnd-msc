@@ -136,7 +136,7 @@ export type PerformanceRecording = {
   track: string;
   bpm: number;
   stepsPerBar: typeof STEPS_PER_BAR;
-  /** The song step sounding when Record was pressed; -1 if the transport was stopped. */
+  /** The song step sounding when Record was pressed; -1 if none had sounded yet (stopped, or before Play's first onset). */
   startedAtStep: number;
   /** Why the take ended; null while it is still recording. */
   stoppedBy: StopReason | null;

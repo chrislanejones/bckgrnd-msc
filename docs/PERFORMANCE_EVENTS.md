@@ -39,7 +39,7 @@ snapshot or an export, and nothing saves it.
 |---|---|
 | `track` | The track id the take was recorded on. A track change ends the take. |
 | `bpm` | The tempo when Record was pressed. Positions are musical, so tempo changes move nothing. |
-| `startedAtStep` | The song step sounding when Record was pressed. -1 if the transport was stopped. |
+| `startedAtStep` | The song step sounding when Record was pressed. -1 if no step had sounded yet: stopped, or pressed with Play before its first onset. |
 | `stoppedBy` | `user`, `stop`, `panic`, `track`, `mix` or `cap`. Null while recording. |
 | `truncated` | True when the cap ended the take. |
 | `events` | In the order the engine applied them. At most 10,000. |
