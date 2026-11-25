@@ -117,7 +117,7 @@ export async function recordingChecks({ open, check }) {
       const seen = await page.evaluate(() => ({
         state: window.__BCKGRND_RECORDING__?.state(),
         status: document.querySelector('.scene-status')?.textContent?.trim(),
-        log: (window.__BCKGRND_RECORDING__?.log() ?? []).slice(-8).map((l) => `${l.requestId}:${l.kind}:${l.status}`).join(' '),
+        log: (window.__BCKGRND_RECORDING__?.log() ?? []).slice(-8).map((l) => `${l.requestId}:${l.kind}:${l.status}${l.detail ? `(${l.detail})` : ''}`).join(' '),
       })).catch(() => ({}));
       check('recording: the walk-through ran to the end', false, `at ${at}: ${String(e.message).split('\n')[0]} | ${JSON.stringify(seen)}`);
     }

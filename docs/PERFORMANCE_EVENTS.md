@@ -122,7 +122,7 @@ Start replaces any earlier take. Stop keeps the take. Clear drops it.
 
 | Interruption | What happens to a take that is recording |
 |---|---|
-| Transport Stop (including a brake that comes to rest) | Ends it, `stoppedBy: "stop"`. Play starts at step 0, so positions after it would mean a new take. |
+| Transport Stop (including a brake that comes to rest) | Ends it, `stoppedBy: "stop"`. Play starts at step 0, so positions after it would mean a new take. Detected from the engine's telemetry going from playing to stopped after Start, not from the UI's `playing` flag, which Play sets before the engine confirms it. |
 | Panic | Ends it, `stoppedBy: "panic"`, before the engine's cancels arrive. They are logged and never recorded. |
 | Track load (Play on another track, Open project) | Ends it, `stoppedBy: "track"`. A take names one track. |
 | Auto-mix, including continuous mix | Ends it as the mix begins, `stoppedBy: "mix"`. Everything queued is canceled by the engine anyway. |

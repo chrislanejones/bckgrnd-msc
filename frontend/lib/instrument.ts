@@ -1801,18 +1801,34 @@ export function useInstrument() {
     [recorder],
   );
 
-  // Stop, a track change and an auto-mix end the take (Panic says so itself, first).
+  // A track change and an auto-mix end the take (Panic says so itself, first).
   const recordedTrack = useRef<string | null>(null);
   useEffect(() => {
     if (recorder.state !== 'recording') return;
     if (mixing) recorder.interrupt('mix');
     else if (track?.id !== recordedTrack.current) recorder.interrupt('track');
-    else if (!playing) recorder.interrupt('stop');
-  }, [recorder, playing, mixing, track?.id]);
+  }, [recorder, mixing, track?.id]);
+
+  // A transport Stop ends it too: the engine's own frames going from playing to stopped
+  // after Start. Not the `playing` state, which Play sets ahead of the engine, so a frame
+  // from before Play would read as a Stop.
+  const recordSawPlaying = useRef(false);
+  const framePlaying = useRef(false);
+  useEffect(
+    () =>
+      engine.subscribe((t) => {
+        framePlaying.current = t.playing;
+        if (t.playing) recordSawPlaying.current = true;
+        else if (recordSawPlaying.current && recorder.state === 'recording') recorder.interrupt('stop');
+      }),
+    [recorder],
+  );
 
   const startRecording = () => {
     if (!track) return;
     recordedTrack.current = track.id;
+    // Armed if the engine's last frame was playing; otherwise by its first one that is.
+    recordSawPlaying.current = framePlaying.current;
     recorder.start(track.id, bpm, songStepRef.current);
   };
   const stopRecording = () => recorder.stop('user');
