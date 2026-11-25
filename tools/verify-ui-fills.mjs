@@ -1089,11 +1089,15 @@ export async function fillChecks({ open, check }) {
       // Pressing them starts nothing, but says why in the status line (Night 9B): a touch
       // user gets no tooltip, so that line is where the reason shows.
       const was = { fill: await k.fillBtn.getAttribute('data-state') };
+      // Wait for the line each step expects, never a fixed delay (CodeRabbit, PR #12).
+      const statusNot = (prev) => page.waitForFunction(
+        (p) => (document.querySelector('.scene-status')?.textContent?.trim() ?? '') !== p, prev, RT);
+      const exactly = (text) => new RegExp(`^${text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`);
       await k.fillBtn.click({ force: true });
-      await page.waitForTimeout(100);
+      await k.waitStatus(/^Fill: /);
       const fillWhy = await k.statusText();
       await k.intoBtn.click({ force: true });
-      await page.waitForTimeout(200);
+      await k.waitStatus(/^Fill → /);
       const intoWhy = await k.statusText();
       check('a11y: and pressing them starts nothing', (await k.fillBtn.getAttribute('data-state')) === was.fill
         && (await k.intoBtn.getAttribute('data-state')) === 'idle');
@@ -1102,16 +1106,16 @@ export async function fillChecks({ open, check }) {
       // The notice goes at the first real status change, and stays gone when the status
       // comes back to the line it was shown over (CodeRabbit, PR #12).
       await k.pad(1).click();
-      await page.waitForTimeout(150);
+      await statusNot(intoWhy);
       const over = await k.statusText();
       await k.fillBtn.click({ force: true });
-      await page.waitForTimeout(100);
+      await k.waitStatus(/^Fill: /);
       const shown = await k.statusText();
       await k.pad(2).click();
-      await page.waitForTimeout(150);
+      await statusNot(shown);
       const moved = await k.statusText();
       await k.pad(1).click();
-      await page.waitForTimeout(150);
+      await k.waitStatus(exactly(over)).catch(() => {});
       const back = await k.statusText();
       check('a11y: a reason notice does not come back when the status returns to its line',
         shown.startsWith('Fill: ') && moved !== shown && back === over, `${over} / ${shown} / ${moved} / ${back}`);
