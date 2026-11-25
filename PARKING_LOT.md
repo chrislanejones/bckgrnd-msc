@@ -502,3 +502,11 @@ not. Things to settle before or while building it:
   change, but a tempo glide would then capture again on every grid line. (Silas)
 - ~~**The temporary Repeat pad and division picker**~~ replaced by Lacey's `RepeatSlot` in the
   Hold FX row at the Night 10 merge.
+- **On the phone, a stopped take squeezes the track name.** The Record dot and its Clear
+  button take 92 px in the save cell; the phone's second transport row has about 49 px to
+  spare, so "Warehouse" shows as "W…" until the take is cleared or re-recorded. Idle and
+  recording (the dot alone) fit. A fix moves the take controls into the Perform view or a
+  menu, or gives the phone transport another row (`--transport-h`). (Lacey)
+- **The Repeat pad is 54 px, its row's pads 52.** It is not the icon (54 with and without
+  the glyph's layout fixes) and not the hint's line box. The row is bottom-aligned, so its
+  top sits 2 px high. (Lacey)

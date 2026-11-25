@@ -575,12 +575,113 @@ body {
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  min-width: 0;
 }
 
 @media (max-width: 899.98px) {
   .transport-status {
     grid-area: save;
+  }
+}
+
+/* 900-1279px: beside the Record dot, the save status is its icon and
+   colored dot, as on the phone, so the track name keeps its room. Its words stay its
+   text and its name. */
+@media (min-width: 900px) and (max-width: 1279.98px) {
+  .transport-status .save-status-icon {
+    display: block;
+  }
+
+  .transport-status .save-status .status-text {
+    display: none;
+  }
+}
+
+/* The Record toggle: a dot (hollow idle, solid red recording or stopped) and "Rec"
+   where the bar has room. Red is the universal record color, used for the dot alone. */
+.record {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.record-toggle,
+.record-clear {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  min-width: var(--control-sm);
+  min-height: var(--control-sm);
+  padding: 0 0.6rem;
+  border: 1px solid var(--color-line);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--color-fg);
+  font-size: var(--text-label);
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.record-clear {
+  padding: 0;
+  color: var(--color-muted);
+}
+
+.record-toggle:hover,
+.record-clear:hover {
+  border-color: color-mix(in srgb, var(--color-acid) 45%, var(--color-line));
+}
+
+.record-dot {
+  width: 0.625rem;
+  height: 0.625rem;
+  border: 2px solid var(--color-muted);
+  border-radius: 999px;
+}
+
+.record[data-state="recording"] .record-toggle {
+  border-color: var(--color-danger);
+}
+
+.record[data-state="recording"] .record-dot,
+.record[data-state="stopped"] .record-dot {
+  border-color: var(--color-danger);
+  background: var(--color-danger);
+}
+
+.record[data-state="recording"] .record-dot {
+  animation: record-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes record-pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .record[data-state="recording"] .record-dot {
+    animation: none;
+  }
+}
+
+/* Dot alone where the track name needs the room (38px spare at 1280, 49 on a phone). */
+@media (max-width: 1365.98px) {
+  .record-word {
+    display: none;
+  }
+
+  .record-toggle {
+    padding: 0;
+  }
+}
+
+@media (pointer: coarse), (max-width: 899.98px) {
+  .record-toggle,
+  .record-clear {
+    min-width: var(--control-md);
+    min-height: var(--control-md);
   }
 }
 
