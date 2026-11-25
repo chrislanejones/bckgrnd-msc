@@ -29,6 +29,7 @@ import { PREF, readChoice, writeChoice } from './lib/prefs';
 import { CompareBar } from './ui/CompareBar';
 import { SCENE_SLOTS } from './lib/contract';
 import { PanicButton, TransportBar } from './ui/Transport';
+import { RecordToggle } from './ui/RecordToggle';
 
 type View = 'perform' | 'mix' | 'edit';
 
@@ -264,6 +265,7 @@ export function App() {
         liveDeck={inst.liveDeck}
         onTogglePlay={() => void inst.togglePlay()}
         onPanic={phone ? undefined : inst.panic}
+        record={<RecordToggle recording={inst.recording} />}
         libraryToggle={
           libraryDocked
             ? undefined

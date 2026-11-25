@@ -520,8 +520,6 @@ not. Things to settle before or while building it:
   one, check the `landed` rule. (recording, Silas)
 - **A seek isn't noted in the developer log.** It would need a hook in `app.tsx`. The take
   itself is right; only the log is quieter. (recording)
-- **The Repeat pad sits 2 px taller than Echo and Filter** in the Hold FX row at some
-  widths. Optional polish. (Lacey)
 - **A pattern-editor velocity check was flaky once** in verify:desktop (Lacey round 2) and
   passed on rerun. Watch it. (Tara)
 - **MCP PR #2's base is `night6/linux-release-candidate`,** which is 8 commits ahead of
@@ -534,3 +532,20 @@ not. Things to settle before or while building it:
   the existing status words in `frontend/lib/scenes.ts` (`RequestStatus`, `FillStatus`).
   House style is `canceled`. Renaming the v1 value is free until takes are saved, but
   doing it alone would split it from `scenes.ts`. Rename both or neither. (Chris, Silas)
+- **The Record dot uses `--color-danger`,** which DESIGN_PHILOSOPHY reserves for errors.
+  It's the usual record red and appears only on the dot. If the rule stays strict, the dot
+  needs its own token. (Chris, Lacey)
+- **On the phone, a stopped take squeezes the track name.** The Record dot and its Clear
+  button take 92 px in the save cell; the phone's second transport row has about 49 px to
+  spare, so "Warehouse" shows as "W…" until the take is cleared or re-recorded. Idle and
+  recording (the dot alone) fit. A fix moves the take controls into the Perform view or a
+  menu, or gives the phone transport another row (`--transport-h`). (Lacey)
+- **The Repeat pad is 54 px, its row's pads 52.** It is not the icon (54 with and without
+  the glyph's layout fixes) and not the hint's line box. The row is bottom-aligned, so its
+  top sits 2 px high. (Lacey)
+- ~~**verify-ui-repeat's "losing pointer capture releases it" is intermittent.**~~ Fixed in
+  the test. Chrome makes a capture active only on the next pointer event, and releasing a
+  capture that is still pending fires no `lostpointercapture`; the check now moves once
+  and waits for `gotpointercapture`. 23 of 24 standalone runs passed after the fix. The one
+  failure was before the Panic check was split, so it isn't named; the Panic check now
+  also waits for the engine's Stop. (Tara)

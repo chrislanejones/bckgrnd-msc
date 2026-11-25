@@ -124,6 +124,56 @@ export async function recordingChecks({ open, check }) {
     check('recording: no page errors', errors.length === 0, errors.join('; '));
     await page.close();
   }
+
+  // The Record indicator in the transport (Night 10, round 3): the same take through the UI.
+  {
+    const { page, errors } = await open(1280, 800);
+    const k = kit(page);
+    const toggle = page.locator('.record-toggle');
+    const name = () => toggle.getAttribute('aria-label');
+    try {
+      const word = await page.locator('.record-word').isVisible();
+      check('record ui: idle, a hollow dot alone at 1280, not pressed',
+        (await page.locator('.record').getAttribute('data-state')) === 'idle' && (await toggle.getAttribute('aria-pressed')) === 'false'
+          && (await name()) === 'Record the performance' && !word, `${await name()}, word ${word}`);
+      await k.play();
+      await toggle.click();
+      await page.waitForFunction(() => window.__BCKGRND_RECORDING__.state() === 'recording', null, RT);
+      check('record ui: pressing it records, pressed, and says so', (await toggle.getAttribute('aria-pressed')) === 'true'
+        && /^Recording · 0 events$/.test((await name()) ?? ''), await name());
+      await k.pad(SPARSE).click();
+      await k.waitCount(1);
+      await page.waitForFunction(() => /^Recording · 1 event$/.test(document.querySelector('.record-toggle')?.getAttribute('aria-label') ?? ''), null, RT);
+      check('record ui: the count is in its name and tooltip', /1 event/.test((await toggle.getAttribute('title')) ?? ''), await toggle.getAttribute('title'));
+      // Keyboard: Enter on the focused toggle stops the take.
+      await toggle.focus();
+      await page.keyboard.press('Enter');
+      await page.waitForFunction(() => window.__BCKGRND_RECORDING__.state() === 'stopped', null, RT);
+      const clear = page.getByRole('button', { name: /^Clear the take/ });
+      check('record ui: Enter stops it; stopped shows the take and a Clear button',
+        (await toggle.getAttribute('aria-pressed')) === 'false' && (await page.locator('.record').getAttribute('data-state')) === 'stopped'
+          && /last take 1 event/.test((await name()) ?? '') && (await clear.count()) === 1, await name());
+      await clear.click();
+      check('record ui: Clear empties it back to idle',
+        (await k.rec('state')) === 'idle' && (await k.rec('recording')) === null && (await page.getByRole('button', { name: /^Clear the take/ }).count()) === 0
+          && (await name()) === 'Record the performance');
+    } catch (e) {
+      check('record ui: the walk-through ran to the end', false, String(e.message).split('\n')[0]);
+    }
+    check('record ui: no page errors', errors.length === 0, errors.join('; '));
+    await page.close();
+  }
+  {
+    const { page } = await open(1440, 900);
+    check('record ui: 1440 has room for the word Rec', await page.locator('.record-word').isVisible());
+    await page.close();
+  }
+  {
+    const { page } = await open(390, 844, { hasTouch: true, isMobile: true });
+    const b = await page.locator('.record-toggle').boundingBox();
+    check('record ui: on a phone the toggle is at least 44px', b !== null && b.width >= 44 && b.height >= 44, b ? `${Math.round(b.width)}x${Math.round(b.height)}` : 'missing');
+    await page.close();
+  }
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
