@@ -79,10 +79,18 @@ export async function repeatChecks({ open, check }) {
     check('repeat: a pointer cancel releases it', (await pressed()) === 'false' && (await releaseFx.isDisabled()));
     await page.mouse.up();
 
-    // Lost capture releases it.
+    // Lost capture releases it. Chrome makes a capture active (gotpointercapture) only
+    // on the next pointer event; releasing a capture that is still pending fires no
+    // lostpointercapture at all, so move once and wait for the capture to be active.
     await page.mouse.move(at.x, at.y);
+    await pad.evaluate((el) => {
+      el.dataset.gotCapture = '';
+      el.addEventListener('gotpointercapture', () => (el.dataset.gotCapture = '1'), { once: true });
+    });
     await page.mouse.down();
     await waitPressed('true');
+    await page.mouse.move(at.x + 1, at.y + 1);
+    await page.waitForFunction((name) => document.querySelector(`[aria-label="${name}"]`)?.dataset.gotCapture === '1', PAD, T);
     await pad.evaluate((el) => el.releasePointerCapture(1));
     // Chrome delivers lostpointercapture with the next pointer event.
     await page.mouse.move(at.x + 2, at.y + 2);
@@ -166,8 +174,10 @@ export async function repeatChecks({ open, check }) {
     await waitPressed('true');
     await page.getByRole('button', { name: 'Panic', exact: true }).click();
     await waitPressed('false').catch(() => {});
-    check('repeat: Panic clears a held repeat and stops',
-      (await pressed()) === 'false' && (await page.locator('.app').getAttribute('data-playing')) === 'no');
+    // The transport shows stopped once the engine reports its Stop, a moment later.
+    await page.waitForFunction(() => document.querySelector('.app')?.getAttribute('data-playing') === 'no', null, T).catch(() => {});
+    check('repeat: Panic clears a held repeat', (await pressed()) === 'false');
+    check('repeat: Panic stops the transport', (await page.locator('.app').getAttribute('data-playing')) === 'no');
     await touch('touchEnd', at);
 
     // The division: picked, sent, remembered across a reload.
