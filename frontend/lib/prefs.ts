@@ -17,6 +17,8 @@ export const PREF = {
   riseFill: 'bckgrnd-msc:rise-fill',
   /** Compare A/B unfolded in the scenes toolbar (Night 9): `open` or `closed`. */
   compareOpen: 'bckgrnd-msc:compare-open',
+  /** Beat Repeat's division (Night 10): 4, 8 or 16. */
+  repeatDivision: 'bckgrnd-msc:repeat-division',
 } as const;
 
 /** The stored choice for `key` if it is one of `choices`, else `fallback`. */

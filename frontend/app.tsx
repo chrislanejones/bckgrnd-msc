@@ -17,6 +17,7 @@ import { param } from './lib/contract';
 import { STEM_ORDER, soundingMap, stemState, stemStateLabel } from './lib/stems';
 import type { StemId, TrackSummary } from './lib/types';
 import { InstrumentPanel, PerformancePad, Segmented, cx } from './ui/controls';
+import { RepeatSlot } from './ui/HoldFx';
 import { DeckWave } from './ui/Deck';
 import { Inspector, type InspectorTab } from './ui/Inspector';
 import { JogWheel } from './ui/JogWheel';
@@ -51,6 +52,7 @@ function useMedia(query: string): boolean {
 const LOOP_OPTIONS = (param('performance.loopBars').options ?? [])
   .filter((o) => o.value !== 0)
   .map((o) => ({ value: o.value, label: o.label, aria: `Loop ${o.label} bar${o.value === 1 ? '' : 's'}` }));
+/** Beat Repeat's divisions (Night 10): a live setting, not a contract parameter. */
 
 import { useProjects } from './lib/projects';
 import { ProjectMenu } from './ui/ProjectMenu';
@@ -530,7 +532,13 @@ export function App() {
                       onHoldStart={() => inst.holdEffect('filter')}
                       onHoldEnd={() => inst.releaseEffect('filter')}
                     />
-                    {/* Beat Repeat's slot: <RepeatSlot {...RepeatControls} /> from ui/HoldFx.tsx */}
+                    <RepeatSlot
+                      held={inst.repeatHeld}
+                      division={inst.repeatDivision}
+                      onHoldStart={() => inst.holdEffect('repeat')}
+                      onHoldEnd={() => inst.releaseEffect('repeat')}
+                      onDivision={inst.setRepeatDivision}
+                    />
                   </div>
                 </div>
                 <div className="deck-pad-row deck-foot">
@@ -549,7 +557,7 @@ export function App() {
                     <button
                       type="button"
                       className="text-button"
-                      disabled={!inst.echo && !inst.filterHeld}
+                      disabled={!inst.echo && !inst.filterHeld && !inst.repeatHeld}
                       onClick={inst.releaseAllEffects}
                     >
                       Release FX

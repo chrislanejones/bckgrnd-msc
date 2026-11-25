@@ -480,6 +480,23 @@ not. Things to settle before or while building it:
   Compare A/B already leave the status line about 140 px there. A Beat · Bar pair (about
   80 px) would squeeze it further. Dropping the Shift 1–4 tag at mouse widths (the pads keep
   `aria-keyshortcuts` and their tooltips) would win that room back. (Lacey, fills agent)
-- **Release FX's disabled check names Echo and Filter only.** When Beat Repeat lands, it
+- ~~**Release FX's disabled check names Echo and Filter only.**~~ Done in the Night 10 merge. When Beat Repeat lands, it
   needs `!inst.repeatHeld` too, or Release FX stays disabled while only Repeat is held.
   (Silas)
+
+## Found in Night 10 Beat Repeat (11-24-2026)
+
+- **Listen to Beat Repeat** at 1/4 to 1/32, its seams (2.5 ms dips) and the 8 ms release,
+  with Filter Hold and Echo Throw over it. (Chris)
+- **The transport rounds every step up to a whole sample.** `Transport::tick` sets
+  `to_next = step_len - 1` and drops the fraction, so steps are `ceil(step_len)` long and
+  the tempo runs a little slow (about 0.02% at 123 BPM, 44.1 kHz). Beat Repeat matches the
+  clock as it is. Fixing the clock changes every render. (Silas, ADR if fixed)
+- **Picking a track doesn't clear a held Echo or Filter on screen.** `selectTrack` stops
+  the deck, which ends every gesture in the engine, but only Beat Repeat's pad is cleared
+  there; the others show held until the finger lifts. (Lacey/Silas)
+- **A tempo change or bend while a repeat is held** keeps the captured slice length, so
+  the stutter drifts off the new grid until release. It could capture again on a tempo
+  change, but a tempo glide would then capture again on every grid line. (Silas)
+- ~~**The temporary Repeat pad and division picker**~~ replaced by Lacey's `RepeatSlot` in the
+  Hold FX row at the Night 10 merge.

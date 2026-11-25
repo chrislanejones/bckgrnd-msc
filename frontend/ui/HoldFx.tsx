@@ -7,9 +7,8 @@
  * and holds none of its own, so it renders only once the instrument exposes Repeat.
  */
 
+import type { RepeatDivision } from '../lib/engine';
 import { PerformancePad, Segmented } from './controls';
-
-export type RepeatDivision = 4 | 8 | 16;
 
 const DIVISIONS: Array<{ value: RepeatDivision; label: string; aria: string }> = [
   { value: 4, label: '1/4', aria: 'Repeat every quarter note' },

@@ -15,6 +15,7 @@ import { chromium } from 'playwright';
 import { existsSync } from 'node:fs';
 import { riseChecks } from './verify-ui-rise.mjs';
 import { fillChecks } from './verify-ui-fills.mjs';
+import { repeatChecks } from './verify-ui-repeat.mjs';
 
 const baseUrl = process.argv[2] ?? 'http://127.0.0.1:8080';
 const executablePath =
@@ -1186,6 +1187,9 @@ try {
 
   // ---- Fills (Night 8: Fill at, Fill → Drop, Rise + Fill, prefs): tools/verify-ui-fills.mjs.
   await fillChecks({ open, check });
+
+  // ---- Beat Repeat (Night 10: the held pad, its releases, the division pref): tools/verify-ui-repeat.mjs.
+  await repeatChecks({ open, check });
 
   // ---- Tablet: the library is an overlay opened from the transport. -----------
   {

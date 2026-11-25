@@ -6,10 +6,10 @@
 //! removes it, so whatever the base is *now* (a knob moved, a scene committed while it
 //! was held) is what is heard after.
 //!
-//! The two Night 3 kinds control disjoint parameters (Echo Throw: the echo's throw
-//! send, dry/wet and feedback; Filter Hold: the tape filter's cutoff and resonance),
-//! and every override of one kind applies the same treatment. So "the most recently
-//! begun wins for any parameter it controls" reduces to "the parameter is overridden
+//! The kinds control disjoint parameters (Echo Throw: the echo's throw send, dry/wet
+//! and feedback; Filter Hold: the tape filter's cutoff and resonance; Beat Repeat,
+//! Night 10: the pre-master stutter in `repeat`), and every override of one kind
+//! applies the same treatment. So "the most recently begun wins for any parameter it controls" reduces to "the parameter is overridden
 //! while any gesture of its kind is active", and ending one token reveals the next of
 //! the same kind (identical values) or the base. A future kind that overlaps another
 //! needs a begin order here; nothing else changes.
@@ -32,6 +32,16 @@ pub mod kind {
     pub const ECHO_THROW: u8 = 1;
     /// Filter Hold: a dark, resonant filter treatment.
     pub const FILTER_HOLD: u8 = 2;
+    /// Beat Repeat: loop one grid slice of the pre-master signal (`docs/NIGHT10_PROTOCOL.md`).
+    pub const BEAT_REPEAT: u8 = 3;
+}
+
+/// The `b` field of `gesture expired` (21): why the engine ended the gesture.
+pub mod ended {
+    /// Its lease ran out.
+    pub const LEASE: f64 = 0.0;
+    /// A brake, backspin or scratch took over the deck (Beat Repeat only).
+    pub const PLATTER: f64 = 1.0;
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -66,7 +76,11 @@ impl Gestures {
     /// Begin an override. False (and nothing changed) for an unknown kind, a token
     /// already active, or when all [`MAX_GESTURES`] slots are taken.
     pub fn begin(&mut self, token: u32, kind: u8) -> bool {
-        if !matches!(kind, kind::ECHO_THROW | kind::FILTER_HOLD) || self.find(token).is_some() {
+        if !matches!(
+            kind,
+            kind::ECHO_THROW | kind::FILTER_HOLD | kind::BEAT_REPEAT
+        ) || self.find(token).is_some()
+        {
             return false;
         }
         let lease = self.lease;
@@ -102,6 +116,22 @@ impl Gestures {
         }
     }
 
+    /// End every override of `kind`, reporting each as `gesture expired` (21) with `b`
+    /// = `why`, since the host did not ask for it. True if there was one.
+    pub fn end_kind(&mut self, kind: u8, why: f64, events: &mut EventRing) -> bool {
+        let mut any = false;
+        for slot in self.slots.iter_mut() {
+            if let Some(g) = slot {
+                if g.kind == kind {
+                    events.push(event::GESTURE_EXPIRED, g.token, g.kind as f64, why);
+                    *slot = None;
+                    any = true;
+                }
+            }
+        }
+        any
+    }
+
     /// End every override. True if there was one.
     pub fn clear(&mut self) -> bool {
         let any = self.slots.iter().any(Option::is_some);
@@ -124,7 +154,7 @@ impl Gestures {
         for slot in self.slots.iter_mut() {
             if let Some(g) = slot {
                 if g.lease <= samples {
-                    events.push(event::GESTURE_EXPIRED, g.token, g.kind as f64, 0.0);
+                    events.push(event::GESTURE_EXPIRED, g.token, g.kind as f64, ended::LEASE);
                     *slot = None;
                     expired = true;
                 } else {
@@ -144,7 +174,7 @@ mod tests {
     fn capacity_tokens_and_kinds_are_enforced() {
         let mut g = Gestures::new(48_000.0);
         assert!(!g.begin(1, 0), "unknown kind");
-        assert!(!g.begin(1, 3), "unknown kind");
+        assert!(!g.begin(1, 4), "unknown kind");
         for t in 0..4 {
             assert!(g.begin(t, kind::FILTER_HOLD));
         }
