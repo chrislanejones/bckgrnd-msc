@@ -52,7 +52,6 @@ function useMedia(query: string): boolean {
 const LOOP_OPTIONS = (param('performance.loopBars').options ?? [])
   .filter((o) => o.value !== 0)
   .map((o) => ({ value: o.value, label: o.label, aria: `Loop ${o.label} bar${o.value === 1 ? '' : 's'}` }));
-/** Beat Repeat's divisions (Night 10): a live setting, not a contract parameter. */
 
 import { useProjects } from './lib/projects';
 import { ProjectMenu } from './ui/ProjectMenu';
