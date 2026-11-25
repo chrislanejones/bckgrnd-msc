@@ -63,8 +63,9 @@ export const FILL_STYLE_HINT: Record<FillStyle, string> = {
   syncopated: 'offbeat accents, 3 + 3 + 2',
 };
 
-/** The Fill button's name for a style: "Classic fill". */
-export const fillStyleName = (style: FillStyle): string => `${FILL_STYLE_LABEL[style]} fill`;
+/** The Fill button's name for a style: "Classic fill", or "Classic beat fill" for a beat. */
+export const fillStyleName = (style: FillStyle, length: FillLength = 'bar'): string =>
+  `${FILL_STYLE_LABEL[style]}${length === 'beat' ? ' beat' : ''} fill`;
 
 /**
  * The engine's index for `style` among the fills it was loaded with: its place in
@@ -75,6 +76,30 @@ export function fillIndex(styles: readonly Fill[] | undefined, style: FillStyle)
   const i = styles?.findIndex((f) => f.style === style) ?? -1;
   return i >= 0 ? i : FILL_INDEX;
 }
+
+// ---- Fill length: a bar, or only its last beat (Night 10) ----------------------------
+
+/**
+ * Fill length: the whole bar (Night 3's fill), or only its last beat, steps 12-15, with
+ * the bar's first three beats left to the groove. An app preference like Fill style;
+ * independent of it (Random and Rotate pick the style the same way for either).
+ */
+export type FillLength = 'bar' | 'beat';
+export const FILL_LENGTHS: readonly FillLength[] = ['bar', 'beat'];
+export const DEFAULT_FILL_LENGTH: FillLength = 'bar';
+export const FILL_LENGTH_LABEL: Record<FillLength, string> = { bar: 'Bar', beat: 'Beat' };
+/** What the engine is sent as `length`: 0 the bar, 1 its last beat. */
+export const fillLengthCode = (length: FillLength | undefined): 0 | 1 => (length === 'beat' ? 1 : 0);
+/** Why Beat can't be chosen for this track: it was exported without beat fills. */
+export const NO_BEAT_FILLS = "this track's library has no beat fills: fills play the bar";
+
+/**
+ * The length a press plays: the preference, or Bar when the track has no beat fills
+ * (a library exported before Night 10). The fill is then named Bar too: the host names
+ * what plays, as it does for a style it lacks (ADR-024).
+ */
+export const effectiveLength = (length: FillLength, beats: readonly Fill[] | undefined): FillLength =>
+  length === 'beat' && beats?.length ? 'beat' : 'bar';
 
 // ---- Fill choice: a style, or Random / Rotate (Night 9) ------------------------------
 
@@ -148,6 +173,25 @@ export function resolveFill(choice: FillChoice, styles: readonly Fill[] | undefi
   return { style, index: fillIndex(styles, style) };
 }
 
+/**
+ * `resolveFill` for a fill of `length`: a beat fill picks its style among the track's
+ * beat fills, the same way, and its index is past the four bar fills (`withFillStyles`
+ * sends the engine the bar fills, then the beat fills). Without beat fills it is the
+ * bar fill's pick.
+ */
+export function resolveFillAt(
+  choice: FillChoice,
+  styles: readonly Fill[] | undefined,
+  beats: readonly Fill[] | undefined,
+  length: FillLength,
+  cursor: FillCursor,
+  seed = FILL_SEED,
+): FillPick {
+  if (effectiveLength(length, beats) === 'bar' || !styles?.length) return resolveFill(choice, styles, cursor, seed);
+  const pick = resolveFill(choice, beats, cursor, seed);
+  return { style: pick.style, index: styles.length + pick.index };
+}
+
 /** The cursor after a fill picked with `choice` started playing `style`. */
 export function advanceFill(cursor: FillCursor, choice: FillChoice, style: FillStyle): FillCursor {
   return {
@@ -166,16 +210,21 @@ export function fillChoiceLabel(choice: FillChoice, next: FillStyle): string {
  * The Fill button's name: the style that will play ("Busy fill"), and in Random or
  * Rotate the mode too ("Busy fill, by Rotate").
  */
-export const fillChoiceName = (choice: FillChoice, style: FillStyle): string =>
-  isFillMode(choice) ? `${fillStyleName(style)}, by ${FILL_MODE_LABEL[choice]}` : fillStyleName(style);
+export const fillChoiceName = (choice: FillChoice, style: FillStyle, length: FillLength = 'bar'): string =>
+  isFillMode(choice) ? `${fillStyleName(style, length)}, by ${FILL_MODE_LABEL[choice]}` : fillStyleName(style, length);
 
 /**
- * The arrangement as the engine is sent it: with the four styles as its fills, so
- * `fillIndex` picks one. The arrangement itself is left as it is (it is a project's
- * hashed source); without styles it goes unchanged and index 0 is its own fill.
+ * The arrangement as the engine is sent it: with the four styles as its fills, then
+ * the four beat fills (Night 10), so `fillIndex` and `resolveFillAt` pick one. The
+ * arrangement itself is left as it is (it is a project's hashed source); without
+ * styles it goes unchanged and index 0 is its own fill.
  */
-export function withFillStyles(arranged: TrackArrangement, styles: readonly Fill[] | undefined): TrackArrangement {
-  return styles?.length ? { ...arranged, fills: [...styles] } : arranged;
+export function withFillStyles(
+  arranged: TrackArrangement,
+  styles: readonly Fill[] | undefined,
+  beats?: readonly Fill[],
+): TrackArrangement {
+  return styles?.length ? { ...arranged, fills: [...styles, ...(beats ?? [])] } : arranged;
 }
 
 /** What the engine is sent as `phrase`: 0 for the next bar. */
@@ -199,7 +248,12 @@ export type FillJob = FillRequest & {
   style?: FillStyle;
   /** The menu's choice it was resolved from: Random and Rotate move on when it starts. */
   choice?: FillChoice;
+  /** `beat`: only the bar's last beat (Night 10). Kept as sent, like `style`. Absent: the bar. */
+  length?: FillLength;
 };
+
+/** The words a beat fill adds after the style's word on the buttons: "Busy beat". */
+const beatWord = (job: FillJob): string => (job.length === 'beat' ? ' beat' : '');
 
 const STEPS_PER_BAR = 16;
 const SONG_STEPS = 256;
@@ -266,7 +320,11 @@ export function fillButtonLabel(job: FillJob | null): string {
   if (!own) return 'Drum fill';
   // A style other than Classic names itself in place of the word Fill ("Busy · Bar 8"),
   // which keeps the widest words on the fill row. Classic keeps Night 8's words.
-  const word = own.style ? FILL_STYLE_WORD[own.style] : 'Fill';
+  // A beat fill says so after the style's word ("Busy beat · Bar 8"); Classic's is
+  // "Beat fill", so it never reads "Fill beat".
+  const word = own.length === 'beat' && (!own.style || own.style === 'classic')
+    ? 'Beat fill'
+    : `${own.style ? FILL_STYLE_WORD[own.style] : 'Fill'}${beatWord(own)}`;
   if (own.status === 'playing') return `${word} playing`;
   if (own.status === 'sending') return `${word}…`;
   if (own.late) return `${word} · Next phrase`;
@@ -274,14 +332,22 @@ export function fillButtonLabel(job: FillJob | null): string {
 }
 
 /** The Fill button's name for assistive technology. `phrase` is the current Fill at. */
-export function fillButtonAria(job: FillJob | null, name: string, phrase: number): string {
+export function fillButtonAria(job: FillJob | null, name: string, phrase: number, length: FillLength = 'bar'): string {
   const own = fillButtonJob(job);
   if (own?.status === 'playing') return `${name} is playing`;
   if (own) {
-    if (own.phrase === 0 || !own.bar) return `Cancel the queued ${name}`;
+    if (own.phrase === 0 || !own.bar) {
+      return own.length === 'beat' && own.bar ? `Cancel the queued ${name}, on the last beat of bar ${own.bar}` : `Cancel the queued ${name}`;
+    }
+    const where = own.length === 'beat' ? `on the last beat of bar ${own.bar}` : `at the end of bar ${own.bar}`;
     return own.late
       ? `Cancel the queued ${name}, at the end of the next phrase, bar ${own.bar}`
-      : `Cancel the queued ${name}, at the end of bar ${own.bar}`;
+      : `Cancel the queued ${name}, ${where}`;
+  }
+  if (length === 'beat') {
+    return phrase === 0
+      ? `${name} for one beat, the last beat of this bar or the next`
+      : `${name} for one beat, the last beat before the next ${phrase}-bar phrase line`;
   }
   return phrase === 0
     ? `${name} for one bar, from the next bar`
@@ -289,15 +355,23 @@ export function fillButtonAria(job: FillJob | null, name: string, phrase: number
 }
 
 /** The Fill button's tooltip when it can be pressed. */
-export const fillButtonTitle = (name: string, phrase: number): string =>
-  phrase === 0 ? `${name}: one bar, from the next bar` : `${name}: one bar, ending on the ${phrase}-bar phrase line`;
+export const fillButtonTitle = (name: string, phrase: number, length: FillLength = 'bar'): string =>
+  length === 'beat'
+    ? phrase === 0
+      ? `${name}: the last beat of the bar, this bar's if it hasn't started`
+      : `${name}: the last beat before the ${phrase}-bar phrase line`
+    : phrase === 0
+      ? `${name}: one bar, from the next bar`
+      : `${name}: one bar, ending on the ${phrase}-bar phrase line`;
 
 /** The status line when a plain fill is queued (again, after a loop change). */
 export function fillQueuedStatus(job: FillJob): string {
-  if (job.phrase === 0 || !job.bar) return `Fill queued for bar ${job.bar ?? ''}`.trim();
+  const what = job.length === 'beat' ? 'Beat fill' : 'Fill';
+  const bar = job.length === 'beat' && job.bar ? `the last beat of bar ${job.bar}` : `bar ${job.bar ?? ''}`.trim();
+  if (job.phrase === 0 || !job.bar) return `${what} queued for ${bar}`;
   return job.late
-    ? `Fill queued for bar ${job.bar}, the end of the next phrase`
-    : `Fill queued for bar ${job.bar}, the end of the phrase`;
+    ? `${what} queued for ${bar}, the end of the next phrase`
+    : `${what} queued for ${bar}, the end of the phrase`;
 }
 
 /** The pending Fill into, if the job is one. */
@@ -310,13 +384,20 @@ export function fillIntoLabel(job: FillJob | null, scene: string): string {
   if (!own) return `Fill → ${scene}`;
   if (own.status === 'playing') return `Filling → ${scene}`;
   if (own.status === 'sending' || !own.bar) return `Fill → ${scene}…`;
-  return own.late ? `Fill · Next phrase → ${scene}` : `Fill · Bar ${own.bar} → ${scene}`;
+  // A beat fill reads "Beat · Bar 8 → Drop": the same width as the bar fill's words.
+  const word = own.length === 'beat' ? 'Beat' : 'Fill';
+  return own.late ? `${word} · Next phrase → ${scene}` : `${word} · Bar ${own.bar} → ${scene}`;
 }
 
 /** The Fill → Drop button's name for assistive technology. */
-export function fillIntoAria(job: FillJob | null, scene: string, phrase: number): string {
+export function fillIntoAria(job: FillJob | null, scene: string, phrase: number, length: FillLength = 'bar'): string {
   const own = fillIntoJob(job);
   if (!own) {
+    if (length === 'beat') {
+      return phrase === 0
+        ? `Fill into ${scene}: a beat fill on the bar's last beat, then ${scene} on the downbeat`
+        : `Fill into ${scene}: a beat fill on the last beat of the ${phrase}-bar phrase`;
+    }
     return phrase === 0
       ? `Fill into ${scene}: a fill on the next bar, then ${scene}`
       : `Fill into ${scene} at the end of the ${phrase}-bar phrase`;

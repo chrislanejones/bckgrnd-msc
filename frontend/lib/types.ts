@@ -85,6 +85,12 @@ export type TrackResponse = {
    * is unchanged. Missing on libraries exported before Night 9.
    */
   fillStyles?: Fill[];
+  /**
+   * The four one-beat fills (Night 10, `Fills::beatStyles`), in the same style order:
+   * 16-step bars silent before step 12, played with fill length 1. Beside the track
+   * like `fillStyles`. Missing on libraries exported before Night 10.
+   */
+  beatFillStyles?: Fill[];
 };
 
 export type Preset = {

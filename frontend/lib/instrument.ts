@@ -63,26 +63,32 @@ import {
   type Timing,
 } from './scenes';
 import {
+  DEFAULT_FILL_LENGTH,
   DEFAULT_FILL_STYLE,
   DEFAULT_PHRASE_BARS,
   FILL_CHOICES,
   FILL_CURSOR,
+  FILL_LENGTHS,
+  NO_BEAT_FILLS,
   PHRASE_BAR_CHOICES,
   buildRefusal,
   advanceFill,
+  effectiveLength,
   fillChoiceName,
   fillIntoCancelled,
   fillIntoRefusal,
+  fillLengthCode,
   fillPhrase,
   fillQueuedStatus,
   fillRefusal,
   fillStyleName,
   foldFillJob,
   markFilling,
-  resolveFill,
+  resolveFillAt,
   withFillStyles,
   type FillAt,
   type FillJob,
+  type FillLength,
   type FillChoice,
   type FillCursor,
   type PhraseBars,
@@ -238,6 +244,11 @@ export function useInstrument() {
    * fills, beside the arrangement rather than in it (the arrangement is hashed).
    */
   const fillStylesCache = useRef(new Map<string, Fill[]>());
+  /** Each track's four beat fills (Night 10), by track id: sent after the four styles. */
+  const beatFillsCache = useRef(new Map<string, Fill[]>());
+  /** The fills the engine is loaded with for `arranged`: its styles, then its beat fills. */
+  const engineTrack = (arranged: TrackArrangement) =>
+    withFillStyles(arranged, fillStylesCache.current.get(arranged.id), beatFillsCache.current.get(arranged.id));
 
   /**
    * Each deck's loaded-track generation. Every load bumps it and tells the worklet,
@@ -247,7 +258,7 @@ export function useInstrument() {
   const generations = useRef<Record<DeckId, number>>({ a: 0, b: 0 });
   const loadDeck = useCallback((deck: DeckId, arranged: TrackArrangement) => {
     generations.current[deck] += 1;
-    engine.loadTrack(deck, withFillStyles(arranged, fillStylesCache.current.get(arranged.id)), generations.current[deck]);
+    engine.loadTrack(deck, engineTrack(arranged), generations.current[deck]);
   }, []);
 
   // ---- Patterns ---------------------------------------------------------------
@@ -359,12 +370,22 @@ export function useInstrument() {
   const [fillStyle, setFillStyleState] = useState<FillChoice>(() => readChoice(PREF.fillStyle, FILL_CHOICES, DEFAULT_FILL_STYLE));
   const [fillCursor, setFillCursor] = useState<FillCursor>(FILL_CURSOR);
   /**
+   * Fill length (Night 10): the whole bar, or only its last beat. An app preference,
+   * Bar by default; a fill already queued keeps the length it was sent with.
+   */
+  const [fillLength, setFillLengthState] = useState<FillLength>(() => readChoice(PREF.fillLength, FILL_LENGTHS, DEFAULT_FILL_LENGTH));
+  /**
    * What the next press plays on the live track: the effective style (Classic when the
    * library has no such style) and its engine index. Shown before the press, and sent
    * by it; the cursor moves on only once that fill starts.
    */
   const liveStyles = track ? fillStylesCache.current.get(track.id) : undefined;
-  const fillPick = resolveFill(fillStyle, liveStyles, fillCursor);
+  const liveBeats = track ? beatFillsCache.current.get(track.id) : undefined;
+  /** The length a press plays: Bar when the track has no beat fills (named Bar too). */
+  const playLength = effectiveLength(fillLength, liveBeats);
+  /** A queued fill's length for its job: only a beat fill says so. */
+  const jobLength = playLength === 'beat' ? { length: 'beat' as const } : {};
+  const fillPick = resolveFillAt(fillStyle, liveStyles, liveBeats, playLength, fillCursor);
   /**
    * Held effects, by kind, with the token the engine knows them by. Temporary
    * overrides only: none of this is part of the working mix or the project.
@@ -393,8 +414,9 @@ export function useInstrument() {
   const loadArrangement = useCallback(async (id: string): Promise<TrackArrangement | null> => {
     const cached = arrangementCache.current.get(id);
     if (cached) return cached;
-    const { track: arranged, fillStyles } = await fetchTrack(id);
+    const { track: arranged, fillStyles, beatFillStyles } = await fetchTrack(id);
     if (fillStyles?.length) fillStylesCache.current.set(id, fillStyles);
+    if (beatFillStyles?.length) beatFillsCache.current.set(id, beatFillStyles);
     arrangementCache.current.set(id, arranged);
     return arranged;
   }, []);
@@ -601,7 +623,7 @@ export function useInstrument() {
         setMixing(arranged.name);
         generations.current[incoming] += 1;
         const mixGeneration = generations.current[incoming];
-        engine.mix(incoming, withFillStyles(arranged, fillStylesCache.current.get(arranged.id)), bpm, swing, () => {
+        engine.mix(incoming, engineTrack(arranged), bpm, swing, () => {
           setMixing(null);
           setTrack(arranged);
           resetScenesFor(arranged);
@@ -988,7 +1010,7 @@ export function useInstrument() {
     const bars = next.build!.bars;
     if (next.status === 'queued') {
       setSceneStatus(next.build!.fill
-        ? `${name} rises over ${bars} bars from bar ${next.bar}, ending with a fill`
+        ? `${name} rises over ${bars} bars from bar ${next.bar}, ending with a ${fillRef.current?.length === 'beat' ? 'beat ' : ''}fill`
         : `${name} rises over ${bars} bars from bar ${next.bar}`);
     } else if (next.status === 'building' && prev.status !== 'building') {
       setSceneStatus(`${name} rising over ${bars} bars`);
@@ -1198,7 +1220,7 @@ export function useInstrument() {
       if (isFillPending(waiting) && waiting.kind !== 'rise' && waiting.status !== 'playing') {
         void engine.cancelFill(waiting.requestId);
       }
-      setFill({ requestId: fillId, status: 'sending', kind: 'rise', phrase: 0, from: songStepRef.current, partner: requestId, style: fillPick.style, choice: fillStyle });
+      setFill({ requestId: fillId, status: 'sending', kind: 'rise', phrase: 0, from: songStepRef.current, partner: requestId, style: fillPick.style, choice: fillStyle, ...jobLength });
     }
     const request: SceneRequest = {
       requestId,
@@ -1223,7 +1245,7 @@ export function useInstrument() {
       request.generation,
       undefined,
       data ? { requestId: nextRequestId.current++, data } : undefined,
-      { accent, ...(withFill ? { fill: { requestId: fillId, index: fillPick.index } } : {}) },
+      { accent, ...(withFill ? { fill: { requestId: fillId, index: fillPick.index, length: fillLengthCode(playLength) } } : {}) },
     );
   }
 
@@ -1556,6 +1578,12 @@ export function useInstrument() {
     writeChoice(PREF.phraseBars, bars);
   }
 
+  /** Fill length: Bar or Beat. Remembered. A fill already queued keeps the length it was sent with. */
+  function setFillLength(length: FillLength) {
+    setFillLengthState(length);
+    writeChoice(PREF.fillLength, length);
+  }
+
   /** Fill style. Remembered. A fill already queued keeps the style it was sent with. */
   function setFillStyle(style: FillChoice) {
     setFillStyleState(style);
@@ -1576,8 +1604,8 @@ export function useInstrument() {
     if (!playing || mixing || !track?.fills?.length) return;
     const id = nextRequestId.current++;
     const phrase = fillPhrase(fillAt, phraseBars);
-    setFill({ requestId: id, status: 'sending', kind: 'plain', phrase, from: songStepRef.current, style: fillPick.style, choice: fillStyle });
-    engine.queueFill(id, fillPick.index, generations.current[liveDeck], phrase);
+    setFill({ requestId: id, status: 'sending', kind: 'plain', phrase, from: songStepRef.current, style: fillPick.style, choice: fillStyle, ...jobLength });
+    engine.queueFill(id, fillPick.index, generations.current[liveDeck], phrase, fillLengthCode(playLength));
   }
 
   /**
@@ -1628,11 +1656,12 @@ export function useInstrument() {
       ...(sets ? { lanes: sets } : {}),
     };
     setBook(bookSend(requestBook.current, request));
-    setFill({ requestId: fillId, status: 'sending', kind: 'into', phrase, from: songStepRef.current, partner: sceneId, style: fillPick.style, choice: fillStyle });
+    setFill({ requestId: fillId, status: 'sending', kind: 'into', phrase, from: songStepRef.current, partner: sceneId, style: fillPick.style, choice: fillStyle, ...jobLength });
     // Compiled now, as for a launch, so the lanes that land are the ones pressed for.
     const data = sets ? patterns.scenePayload(sets) : undefined;
     engine.queueFillInto(fillId, sceneId, fillPick.index, sceneVector(request.mix), request.generation, {
       phrase,
+      length: fillLengthCode(playLength),
       accent: scene.crash ? SCENE_ACCENT.crash : SCENE_ACCENT.none,
       ...(data ? { patterns: { requestId: nextRequestId.current++, data } } : {}),
     });
@@ -1669,7 +1698,7 @@ export function useInstrument() {
       return;
     }
     if (e.kind === EVENT.fillQueued) setSceneStatus(fillQueuedStatus(next));
-    if (e.kind === EVENT.fillStarted) setSceneStatus('Fill playing');
+    if (e.kind === EVENT.fillStarted) setSceneStatus(next.length === 'beat' ? 'Beat fill playing' : 'Fill playing');
     if (e.kind === EVENT.fillCancelled) {
       const message = e.a === 10 ? 'Fill cancelled' : `Fill cancelled: ${REASON[e.a] ?? ''}`;
       setSceneStatus((previous) => previous.includes('cancelled') ? `${previous} · ${message}` : message);
@@ -1801,6 +1830,7 @@ export function useInstrument() {
     setFillAt,
     setPhraseBars,
     setFillStyle,
+    setFillLength,
     setRiseFill,
     panic,
     brake,
@@ -1877,12 +1907,22 @@ export function useInstrument() {
      * The fill's name: while pending, the style it was sent with ("Busy fill"); at rest,
      * the style the next press plays ("Busy fill, by Rotate").
      */
-    fillName: isFillPending(fill) && fill.style ? fillStyleName(fill.style) : fillChoiceName(fillStyle, fillPick.style),
+    fillName: isFillPending(fill) && fill.style
+      ? fillStyleName(fill.style, fill.length)
+      : fillChoiceName(fillStyle, fillPick.style, playLength),
     fillStyle,
+    /**
+     * Fill length (Night 10), the preference: `bar` or `beat`. On a track without beat
+     * fills a press plays the bar (`fillLengthUnavailable` says why) and the preference
+     * stays as it is for the next track.
+     */
+    fillLength,
+    /** Why Beat can't play on this track, or null. */
+    fillLengthUnavailable: track && !liveBeats?.length ? NO_BEAT_FILLS : null,
     /** What the next press would play in Random and in Rotate, for the menu's words. */
     fillNextBy: {
-      random: resolveFill('random', liveStyles, fillCursor).style,
-      rotate: resolveFill('rotate', liveStyles, fillCursor).style,
+      random: resolveFillAt('random', liveStyles, liveBeats, playLength, fillCursor).style,
+      rotate: resolveFillAt('rotate', liveStyles, liveBeats, playLength, fillCursor).style,
     },
     hasFill: Boolean(track?.fills?.length),
     /** Fill at, the phrase length and Finish with Fill: app preferences. */

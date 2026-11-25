@@ -98,6 +98,8 @@ type Inbound =
        */
       fillId?: number;
       fillIndex?: number;
+      /** That fill's length: 0 (or absent) the last bar, 1 its last beat (Night 10). */
+      fillLength?: number;
       /** 1: a crash on the onset it lands (docs/NIGHT8_PROTOCOL.md). */
       accent?: number;
     }
@@ -119,7 +121,7 @@ type Inbound =
       deck?: DeckId;
       /** 0 the next bar, or 2, 4, 8 or 16: end on that phrase line (docs/NIGHT8_PROTOCOL.md). */
       phrase?: number;
-      /** 0, one bar. The only length so far. */
+      /** 0 (or absent) one bar, 1 only its last beat (Night 10). */
       length?: number;
     }
   | { type: 'cancelFill'; requestId: number }
@@ -135,7 +137,7 @@ type Inbound =
       index: number;
       /** 0 the next bar, or 2, 4, 8 or 16: the fill ends on that phrase line. */
       phrase?: number;
-      /** 0, one bar. The only length so far. */
+      /** 0 (or absent) one bar, 1 only its last beat (Night 10). */
       length?: number;
       values: ArrayLike<number>;
       deck?: DeckId;
@@ -217,9 +219,12 @@ function fillPhrase(phrase: number | undefined): number {
   return phrase === 0 || phrase === 2 || phrase === 4 || phrase === 8 || phrase === 16 ? phrase : 255;
 }
 
-/** A fill's length for the engine: 0 (or absent), one bar; anything else 255 (`invalid`). */
+/**
+ * A fill's length for the engine: 0 (or absent) one bar, 1 only its last beat (Night
+ * 10); anything else 255 (`invalid`).
+ */
 function fillLength(length: number | undefined): number {
-  return length === undefined || length === 0 ? 0 : 255;
+  return length === undefined || length === 0 ? 0 : length === 1 ? 1 : 255;
 }
 
 /** A scene's accent for the engine: 0 (or absent) none, 1 crash; anything else 255 (`invalid`). */
@@ -714,7 +719,7 @@ class EngineProcessor extends AudioWorkletProcessor {
     const bars = b === 2 || b === 4 || b === 8 ? b : 0;
     const fi = message.fillIndex ?? 0;
     const fillIndex = Number.isInteger(fi) && fi >= 0 ? fi : 0xffffffff;
-    const verdict = engine.queue_build_with(
+    const verdict = engine.queue_build_with_length(
       requestId,
       bars,
       this.buildTarget,
@@ -722,6 +727,7 @@ class EngineProcessor extends AudioWorkletProcessor {
       fillId,
       fillIndex >>> 0,
       accentCode(message.accent),
+      fillLength(message.fillLength),
     );
     if (verdict === 0) {
       this.buildPendingId = requestId;
