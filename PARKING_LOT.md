@@ -468,3 +468,20 @@ not. Things to settle before or while building it:
   49 of 56 px). Watch for missed drags on the phone. (Lacey, Chris by use)
 - **On the phone the scenes status line keeps its own row when empty** (about 19 px).
   Collapsing it would make the header jump. (Lacey)
+
+## Found in Night 10 Beat Repeat (11-24-2026)
+
+- **Listen to Beat Repeat** at 1/4 to 1/32, its seams (2.5 ms dips) and the 8 ms release,
+  with Filter Hold and Echo Throw over it. (Chris)
+- **The transport rounds every step up to a whole sample.** `Transport::tick` sets
+  `to_next = step_len - 1` and drops the fraction, so steps are `ceil(step_len)` long and
+  the tempo runs a little slow (about 0.02% at 123 BPM, 44.1 kHz). Beat Repeat matches the
+  clock as it is. Fixing the clock changes every render. (Silas, ADR if fixed)
+- **Picking a track doesn't clear a held Echo or Filter on screen.** `selectTrack` stops
+  the deck, which ends every gesture in the engine, but only Beat Repeat's pad is cleared
+  there; the others show held until the finger lifts. (Lacey/Silas)
+- **A tempo change or bend while a repeat is held** keeps the captured slice length, so
+  the stutter drifts off the new grid until release. It could capture again on a tempo
+  change, but a tempo glide would then capture again on every grid line. (Silas)
+- **The temporary Repeat pad and division picker** sit in the Deck pads and foot, plain.
+  (Lacey)

@@ -13,6 +13,7 @@
 
 import { useCallback, useEffect, useId, useMemo, useState } from 'react';
 import { useInstrument } from './lib/instrument';
+import { REPEAT_DIVISIONS, type RepeatDivision } from './lib/engine';
 import { param } from './lib/contract';
 import { STEM_ORDER, soundingMap, stemState, stemStateLabel } from './lib/stems';
 import type { StemId, TrackSummary } from './lib/types';
@@ -51,6 +52,8 @@ function useMedia(query: string): boolean {
 const LOOP_OPTIONS = (param('performance.loopBars').options ?? [])
   .filter((o) => o.value !== 0)
   .map((o) => ({ value: o.value, label: o.label, aria: `Loop ${o.label} bar${o.value === 1 ? '' : 's'}` }));
+/** Beat Repeat's divisions (Night 10): a live setting, not a contract parameter. */
+const REPEAT_OPTIONS = REPEAT_DIVISIONS.map((d) => ({ value: d, label: `1/${d}`, aria: `Repeat every 1/${d} note` }));
 
 import { useProjects } from './lib/projects';
 import { ProjectMenu } from './ui/ProjectMenu';
@@ -501,6 +504,16 @@ export function App() {
                   onHoldStart={() => inst.holdEffect('filter')}
                   onHoldEnd={() => inst.releaseEffect('filter')}
                 />
+                {/* Beat Repeat (Night 10): plain for now; the performance-area layout
+                    restyles and places it. */}
+                <PerformancePad
+                  label="Repeat"
+                  hint="hold"
+                  ariaLabel="Beat repeat, while held"
+                  latched={inst.repeatHeld}
+                  onHoldStart={() => inst.holdEffect('repeat')}
+                  onHoldEnd={() => inst.releaseEffect('repeat')}
+                />
                 <PerformancePad
                   label="Bend +"
                   hint="hold"
@@ -525,6 +538,13 @@ export function App() {
                 onPick={inst.pickLoop}
                 options={LOOP_OPTIONS}
               />
+              <Segmented<RepeatDivision>
+                radio
+                label={`Repeat · 1/${inst.repeatDivision}`}
+                value={inst.repeatDivision}
+                onPick={inst.setRepeatDivision}
+                options={REPEAT_OPTIONS}
+              />
               {/* Three different exits, kept apart: Cancel scene (in the scene strip)
                   restores the previous mix, Release FX (here, at the end of the deck's
                   bottom row, apart from the held pads) lets go of held effects, and
@@ -534,7 +554,7 @@ export function App() {
                 <button
                   type="button"
                   className="text-button"
-                  disabled={!inst.echo && !inst.filterHeld}
+                  disabled={!inst.echo && !inst.filterHeld && !inst.repeatHeld}
                   onClick={inst.releaseAllEffects}
                 >
                   Release FX

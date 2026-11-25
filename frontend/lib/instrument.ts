@@ -14,8 +14,8 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { engine, GESTURE_KIND, SCENE_ACCENT, SCENE_TIMING } from './engine';
-import type { Deck as DeckId, EngineEvent as WireEvent, SceneAccent } from './engine';
+import { DEFAULT_REPEAT_DIVISION, engine, GESTURE_KIND, REPEAT_DIVISIONS, SCENE_ACCENT, SCENE_TIMING } from './engine';
+import type { Deck as DeckId, EngineEvent as WireEvent, RepeatDivision, SceneAccent } from './engine';
 import { emptyFlags, fetchLibrary, fetchTrack } from './api';
 import {
   defaultSend,
@@ -179,6 +179,15 @@ function useStable<T extends Record<string, (...args: never[]) => unknown>>(acti
 
 /** The order a stem-swapping continuous mix steps the groups through. */
 const CONTINUOUS_MASKS: Mask[] = ['full', 'nodrums', 'nomusic'];
+
+/** The held effects (temporary overrides), and the engine gesture each one is. */
+export type HeldKind = 'echo' | 'filter' | 'repeat';
+const HELD_KINDS: readonly HeldKind[] = ['echo', 'filter', 'repeat'];
+const HELD_GESTURE: Record<HeldKind, (typeof GESTURE_KIND)[keyof typeof GESTURE_KIND]> = {
+  echo: GESTURE_KIND.echoThrow,
+  filter: GESTURE_KIND.filterHold,
+  repeat: GESTURE_KIND.beatRepeat,
+};
 
 /** Paint the mute flags for a group shortcut. */
 function paintMutes(mask: Mask, drums: StemId[], music: StemId[]): Record<StemId, boolean> {
@@ -369,10 +378,19 @@ export function useInstrument() {
    * Held effects, by kind, with the token the engine knows them by. Temporary
    * overrides only: none of this is part of the working mix or the project.
    */
-  const [held, setHeld] = useState<{ echo: boolean; filter: boolean }>({ echo: false, filter: false });
-  const heldTokens = useRef<{ echo: number | null; filter: number | null }>({ echo: null, filter: null });
-  const leaseTimers = useRef<{ echo: number | null; filter: number | null }>({ echo: null, filter: null });
+  const [held, setHeld] = useState<Record<HeldKind, boolean>>({ echo: false, filter: false, repeat: false });
+  const heldTokens = useRef<Record<HeldKind, number | null>>({ echo: null, filter: null, repeat: null });
+  const leaseTimers = useRef<Record<HeldKind, number | null>>({ echo: null, filter: null, repeat: null });
   const nextToken = useRef(1);
+  /**
+   * Beat Repeat's division (Night 10). How you perform, not what the song is: kept in
+   * localStorage, never in a project, and sent to the engine on load and on change.
+   */
+  const [repeatDivision, setRepeatDivisionState] = useState<RepeatDivision>(() =>
+    readChoice(PREF.repeatDivision, REPEAT_DIVISIONS, DEFAULT_REPEAT_DIVISION));
+  useEffect(() => {
+    engine.setRepeatDivision(repeatDivision);
+  }, [repeatDivision]);
 
   useEffect(() => {
     let cancelled = false;
@@ -477,6 +495,7 @@ export function useInstrument() {
       // follows rather than waiting for a release that may never come.
       clearHeld('echo');
       clearHeld('filter');
+      clearHeld('repeat');
       return;
     }
     try {
@@ -505,6 +524,8 @@ export function useInstrument() {
         const deck = liveDeck;
         abandonedBuild.current = bookBuild(requestBook.current)?.requestId ?? null;
         engine.stop(deck);
+        // The stop and the load end a held Beat Repeat in the engine.
+        clearHeld('repeat');
         loadDeck(deck, arranged);
         engine.setMuted(0, false);
         setTrack(arranged);
@@ -1479,9 +1500,7 @@ export function useInstrument() {
     engine.nudge(dir);
   }
 
-  // ---- Held effects (Echo Throw, Filter Hold) -----------------------------
-
-  type HeldKind = 'echo' | 'filter';
+  // ---- Held effects (Echo Throw, Filter Hold, Beat Repeat) -----------------
 
   function clearHeld(kind: HeldKind) {
     const timer = leaseTimers.current[kind];
@@ -1504,7 +1523,7 @@ export function useInstrument() {
     setHeld((h) => ({ ...h, [kind]: true }));
     leaseTimers.current[kind] = window.setInterval(() => engine.gestureRenew(token), 1000);
     void engine
-      .gestureBegin(token, kind === 'echo' ? GESTURE_KIND.echoThrow : GESTURE_KIND.filterHold)
+      .gestureBegin(token, HELD_GESTURE[kind])
       .then((accepted) => {
         if (!accepted && heldTokens.current[kind] === token) clearHeld(kind);
       });
@@ -1523,15 +1542,23 @@ export function useInstrument() {
     engine.releaseGestures();
     clearHeld('echo');
     clearHeld('filter');
+    clearHeld('repeat');
   }
 
-  // A lease that ran out (a lost release, a frozen tab) shows as let go.
+  /** Beat Repeat's division. Remembered; a held repeat captures again on its next line. */
+  function setRepeatDivision(division: RepeatDivision) {
+    setRepeatDivisionState(division);
+    writeChoice(PREF.repeatDivision, division);
+  }
+
+  // A lease that ran out (a lost release, a frozen tab), or a Beat Repeat a brake,
+  // backspin or scratch ended, shows as let go.
   useEffect(
     () =>
       engine.onSceneEvents((events) => {
         for (const e of events) {
           if (e.kind === EVENT.gestureExpired) {
-            for (const kind of ['echo', 'filter'] as const) {
+            for (const kind of HELD_KINDS) {
               if (heldTokens.current[kind] === e.requestId) clearHeldRef.current(kind);
             }
           }
@@ -1691,6 +1718,7 @@ export function useInstrument() {
     cancelTempoGlide();
     clearHeld('echo');
     clearHeld('filter');
+    clearHeld('repeat');
     setFill(null);
     setBook(cancelAll(requestBook.current, 5));
     setPlaying(false);
@@ -1856,6 +1884,11 @@ export function useInstrument() {
     echo: held.echo,
     /** A Filter Hold is being held. */
     filterHeld: held.filter,
+    /** A Beat Repeat is being held. */
+    repeatHeld: held.repeat,
+    /** Beat Repeat's division (4, 8 or 16), remembered per viewer. */
+    repeatDivision,
+    setRepeatDivision,
     loopBars,
     // project
     project,
