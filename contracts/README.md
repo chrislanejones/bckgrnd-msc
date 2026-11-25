@@ -11,6 +11,7 @@ should all agree on these files. None of them should keep a private copy.
 | [`snapshot.schema.json`](snapshot.schema.json) | Portable snapshot v1: project identity/revision, renderer version, source dependency SHA256 and complete project v4 (v3 inside is migrated on read). | Browser, native storage and MCP shared runtime |
 | [`patterns.json`](patterns.json) | The nine lanes a project may override (kind, stem, engine index, id prefix, editable or not), the musical unit, and pattern limits. | `frontend/lib/patterns.ts`, `App\Support\Project\Patterns`, the engine's tests |
 | [`scenes.json`](scenes.json) | The four scene slots, the parameters a scene holds (`sceneVector`, also the engine's vector order) and the factory recipes. | The same, plus `engine-core/tests` |
+| [`performance.json`](performance.json) | A performance recording, version 1: the scenes, fills, Rises and Fill intos the engine applied, at engine steps. Not part of a project. Details: [`docs/PERFORMANCE_EVENTS.md`](../docs/PERFORMANCE_EVENTS.md). | `frontend/lib/recording.ts`, `tools/check-recording.mjs` |
 
 ## Saved data vs. telemetry
 

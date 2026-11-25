@@ -1,0 +1,126 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://bckgrnd-msc/contracts/performance.json",
+  "$comment": "A performance recording, version 1 (docs/PERFORMANCE_EVENTS.md). Only actions the engine applied, each at the engine step it applied on. Separate from the project format: a recording is never part of a project, a snapshot or an export. Written by frontend/lib/recording.ts. Kept to the JSON Schema subset tools/check-recording.mjs validates: type, const, enum, required, properties, additionalProperties, minimum, maximum, maxItems, items, oneOf, $ref.",
+  "title": "bckgrnd-msc performance recording",
+  "type": "object",
+  "required": ["format", "version", "track", "bpm", "stepsPerBar", "startedAtStep", "stoppedBy", "truncated", "events"],
+  "additionalProperties": false,
+  "properties": {
+    "format": { "const": "bckgrnd-msc/performance" },
+    "version": { "const": 1 },
+    "track": { "type": "string", "$comment": "The track id the take was recorded on. A track change ends the take." },
+    "bpm": { "type": "number", "minimum": 1, "$comment": "Tempo when Record was pressed. Positions are musical, so tempo changes do not move them." },
+    "stepsPerBar": { "const": 16 },
+    "startedAtStep": { "type": "integer", "minimum": -1, "maximum": 255, "$comment": "The song step sounding when Record was pressed; -1 if no step had sounded yet (stopped, or before Play's first onset)." },
+    "stoppedBy": { "enum": [null, "user", "stop", "panic", "track", "mix", "cap"] },
+    "truncated": { "type": "boolean", "$comment": "True when the 10,000-event cap ended the take." },
+    "events": { "type": "array", "maxItems": 10000, "items": { "$ref": "#/$defs/event" } }
+  },
+  "$defs": {
+    "reservedKinds": {
+      "$comment": "Kinds a later version may add (Beat Repeat, filter and echo holds, other gestures). A v1 reader refuses them; a v1 writer never writes them.",
+      "enum": ["repeat", "filter", "echo", "gesture"]
+    },
+    "event": {
+      "oneOf": [
+        { "$ref": "#/$defs/scene" },
+        { "$ref": "#/$defs/fill" },
+        { "$ref": "#/$defs/rise" },
+        { "$ref": "#/$defs/fillInto" }
+      ]
+    },
+    "seq": { "type": "integer", "minimum": 1 },
+    "requestId": { "type": "integer", "minimum": 1 },
+    "step": { "type": "integer", "minimum": 0, "maximum": 255 },
+    "bar": { "type": "integer", "minimum": 1, "maximum": 16 },
+    "beat": { "type": "integer", "minimum": 1, "maximum": 4 },
+    "sixteenth": { "type": "integer", "minimum": 1, "maximum": 4 },
+    "offGrid": { "const": true },
+    "slot": { "enum": ["full", "sparse", "build", "drop"] },
+    "scene": {
+      "type": "object",
+      "required": ["seq", "kind", "requestId", "step", "bar", "beat", "sixteenth", "slot", "name", "timing", "crash"],
+      "additionalProperties": false,
+      "properties": {
+        "seq": { "$ref": "#/$defs/seq" },
+        "kind": { "const": "scene" },
+        "requestId": { "$ref": "#/$defs/requestId" },
+        "step": { "$ref": "#/$defs/step" },
+        "bar": { "$ref": "#/$defs/bar" },
+        "beat": { "$ref": "#/$defs/beat" },
+        "sixteenth": { "$ref": "#/$defs/sixteenth" },
+        "offGrid": { "$ref": "#/$defs/offGrid" },
+        "slot": { "$ref": "#/$defs/slot" },
+        "name": { "type": "string" },
+        "timing": { "enum": ["now", "beat", "bar"] },
+        "crash": { "type": "boolean" }
+      }
+    },
+    "fill": {
+      "type": "object",
+      "required": ["seq", "kind", "requestId", "step", "bar", "beat", "sixteenth", "style", "phraseBars", "link", "outcome"],
+      "additionalProperties": false,
+      "properties": {
+        "seq": { "$ref": "#/$defs/seq" },
+        "kind": { "const": "fill" },
+        "requestId": { "$ref": "#/$defs/requestId" },
+        "step": { "$ref": "#/$defs/step" },
+        "bar": { "$ref": "#/$defs/bar" },
+        "beat": { "$ref": "#/$defs/beat" },
+        "sixteenth": { "$ref": "#/$defs/sixteenth" },
+        "offGrid": { "$ref": "#/$defs/offGrid" },
+        "style": { "type": ["string", "null"] },
+        "phraseBars": { "enum": [0, 2, 4, 8, 16] },
+        "link": { "enum": ["none", "fillInto", "rise"] },
+        "partner": { "$ref": "#/$defs/requestId" },
+        "outcome": { "enum": ["played", "cutShort", "open"] },
+        "endStep": { "$ref": "#/$defs/step" },
+        "reason": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "rise": {
+      "type": "object",
+      "required": ["seq", "kind", "requestId", "step", "bar", "beat", "sixteenth", "slot", "name", "bars", "withFill", "outcome", "crash"],
+      "additionalProperties": false,
+      "properties": {
+        "seq": { "$ref": "#/$defs/seq" },
+        "kind": { "const": "rise" },
+        "requestId": { "$ref": "#/$defs/requestId" },
+        "step": { "$ref": "#/$defs/step" },
+        "bar": { "$ref": "#/$defs/bar" },
+        "beat": { "$ref": "#/$defs/beat" },
+        "sixteenth": { "$ref": "#/$defs/sixteenth" },
+        "offGrid": { "$ref": "#/$defs/offGrid" },
+        "slot": { "$ref": "#/$defs/slot" },
+        "name": { "type": "string" },
+        "bars": { "enum": [2, 4, 8] },
+        "withFill": { "type": "boolean" },
+        "fillRequestId": { "$ref": "#/$defs/requestId" },
+        "outcome": { "enum": ["landed", "cancelled", "replaced", "open"] },
+        "endStep": { "$ref": "#/$defs/step" },
+        "reason": { "type": "integer", "minimum": 1 },
+        "crash": { "type": "boolean" }
+      }
+    },
+    "fillInto": {
+      "type": "object",
+      "required": ["seq", "kind", "requestId", "step", "bar", "beat", "sixteenth", "slot", "name", "fillRequestId", "crash"],
+      "additionalProperties": false,
+      "properties": {
+        "seq": { "$ref": "#/$defs/seq" },
+        "kind": { "const": "fillInto" },
+        "requestId": { "$ref": "#/$defs/requestId" },
+        "step": { "$ref": "#/$defs/step" },
+        "bar": { "$ref": "#/$defs/bar" },
+        "beat": { "$ref": "#/$defs/beat" },
+        "sixteenth": { "$ref": "#/$defs/sixteenth" },
+        "offGrid": { "$ref": "#/$defs/offGrid" },
+        "slot": { "$ref": "#/$defs/slot" },
+        "name": { "type": "string" },
+        "fillRequestId": { "$ref": "#/$defs/requestId" },
+        "crash": { "type": "boolean" }
+      }
+    }
+  }
+}

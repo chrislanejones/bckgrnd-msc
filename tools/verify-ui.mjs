@@ -16,6 +16,7 @@ import { existsSync } from 'node:fs';
 import { riseChecks } from './verify-ui-rise.mjs';
 import { fillChecks } from './verify-ui-fills.mjs';
 import { repeatChecks } from './verify-ui-repeat.mjs';
+import { recordingChecks } from './verify-ui-recording.mjs';
 
 const baseUrl = process.argv[2] ?? 'http://127.0.0.1:8080';
 const executablePath =
@@ -1190,6 +1191,9 @@ try {
 
   // ---- Beat Repeat (Night 10: the held pad, its releases, the division pref): tools/verify-ui-repeat.mjs.
   await repeatChecks({ open, check });
+
+  // ---- Performance recording (docs/PERFORMANCE_EVENTS.md): tools/verify-ui-recording.mjs.
+  await recordingChecks({ open, check });
 
   // ---- Tablet: the library is an overlay opened from the transport. -----------
   {
