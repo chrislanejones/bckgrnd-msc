@@ -394,3 +394,82 @@ Continued on `night9/run` from 5fed84b (PR #12). Chris approved the Compare A/B 
 
 No engine, contract or PHP changes since 5fed84b, so the audio parity above still holds.
 Gates for the final commit follow in the PR.
+
+# Night 10 / 10B session log (11-25-2026)
+
+Branch `night10/run`, worktree `~/ai-repo/bckgrnd-night10`, from `night9/run` at
+`9611412` (PR #12, not merged yet). Spec: the Night 10B brief (Beat Repeat first,
+recording second, one-beat fills moved to Night 11). Written up in
+[docs/NIGHT10_SPEC.md](docs/NIGHT10_SPEC.md).
+
+## Who owned what
+
+| Area | Owner | Branch |
+|---|---|---|
+| PR #12 review fixes, `.env` packaging | main session | `night9/run` |
+| Beat Repeat engine, worklet, host wiring, NIGHT10_PROTOCOL | Silas | `night10/beat-repeat` |
+| Performance event contract v1, recording session | recording agent | `night10/recording` |
+| Performance surface, state language, Repeat slot, Record indicator | Lacey | `night10/perf-ui` |
+| ADR-025 (Beat Repeat), ADR-026 (performance take) | Dara | files on `night10/run` |
+| One-beat fills | fills agent | `night10/beat-fills` (parked) |
+
+## Work
+
+| Task | Commits | Result |
+|---|---|---|
+| PR #12: double Panic under a Rise | `c57013d` | A second cancel with no Rise no longer drops one still closing (CodeRabbit) |
+| PR #12: stale reason notice | `c57013d` | A press's reason notice clears when the status line moves on (CodeRabbit) |
+| PR #12: fixed delays in fill checks | `9611412` | Checks wait for the expected status line (CodeRabbit) |
+| `.env` in a packaged build | `fecea69` | NativePHP copies `.env` by design; the deny-list now strips secret-shaped keys, pinned by `NativeEnvCleanupTest`. No secrets read |
+| **Beat Repeat** | `f8129d1`, `729ede4` | Gesture kind 3, 1/4 · 1/8 · 1/16 (default 1/8), next grid line, 2.5 ms seams, 8 ms release. Wasm **+5,029 B (+2.1%)** |
+| **Performance events v1** | `7948116`, `cd1014f`, `76cafcc`, `65808fa`, `fa219a5` | Applied scene, fill and Rise events at song steps; Start, Stop, Clear in memory; developer log |
+| Performance surface | `a8d0119`, `2f9e05f` | One surface for Scenes and Deck, Hold FX row, rest/queued/active/held states. Toolbar still 70 px |
+| Record indicator | `81347f3` | Hollow, pulsing or solid dot in the save cell; Clear when stopped; 44 px on touch |
+| Repeat check flake | `c007db9` | The lost-capture check released a capture still pending (Chrome fires no event then). Fixed in the test; **23 of 24** standalone runs pass |
+| ADRs | `0e6e860`, `39ac28d` | ADR-025 and ADR-026, both **draft** |
+
+## Decisions
+
+| Decision | Why |
+|---|---|
+| Beat Repeat loops the pre-master feed (after the stem sum, before the master chain) | One slice of the whole mix, and the master chain still shapes it. ADR-025 |
+| The Repeat division is a viewer preference, not mix state | It's a performance setting, like the Fill style. Not in scenes, projects or renders |
+| A brake, backspin or scratch ends a repeat (event 21, `b = 1`) | The platter takes the deck; a held loop over it would fight the gesture |
+| A take records only applied events | Queued, canceled and replaced requests were never heard. ADR-026 |
+| A take ends on Stop, Panic, a track change or auto-mix | One take is one uninterrupted run of one track. Cue and seek keep it |
+| `cancelled` stays in the v1 contract | It matches `scenes.ts`'s status words; renaming only the contract would split them. Parked |
+
+## Order deviations
+
+| Spec said | Did | Why |
+|---|---|---|
+| Night 10 plan: one-beat fills (10C) | Moved to Night 11 | The Night 10B brief replaced the plan |
+| Agents in parallel | Lacey round 3 and ADR-026 waited about 3.5 hours | Rate limit (resets 5:10 am); resumed at 8:38 am |
+
+## Skipped or not claimed
+
+| Item | Why |
+|---|---|
+| Listening to Beat Repeat | Chris's ears; not claimed |
+| npm publish, Netlify deploy, Linux rc.4 | Chris's steps |
+| Browser/installed-native render parity leg | Needs `NATIVE_CDP`; Node parity only |
+| Replay, timeline, export of a take | Nights 12–14 by plan |
+
+## Final gates (`3fda197`, under heavy)
+
+| Gate | Result |
+|---|---|
+| cargo fmt --check | Pass |
+| clippy --all-targets -D warnings | Pass |
+| cargo test --release (no_alloc included) | **344 pass**, 0 fail, 1 ignored (as before) |
+| Beat Repeat bypass | **80 of 80 renders bit-identical** (Silas, `f8129d1`) |
+| build:netlify (engine, worklet, app, static) | Pass |
+| typecheck | Pass |
+| lint | 0 errors; 5 warnings, all on main before Night 10 |
+| verify:web | **9 of 9 stages ok** (contract, scenes, recording, editing, typecheck, lint, dist audit, static library/audio, static projects) |
+| verify:desktop | **11 of 11 stages ok**; 1,224 ok checks; PHPUnit 308 tests, 19,072 assertions |
+| verify-ui-repeat standalone | 23 of 24 after `c007db9` |
+| Installed native app | Skipped (needs `VERIFY_NATIVE=1` and the installed app) |
+
+The first gate run stopped during verify:desktop at a 10-minute limit set by mistake;
+verify:desktop was rerun alone and passed.

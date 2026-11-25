@@ -72,6 +72,19 @@ return [
         'NATIVEPHP_AZURE_ENDPOINT',
         'NATIVEPHP_AZURE_CERTIFICATE_PROFILE_NAME',
         'NATIVEPHP_AZURE_CODE_SIGNING_ACCOUNT_NAME',
+        // The build copies .env into the app and strips only what is listed here, so
+        // anything secret-shaped goes too (Night 10). APP_KEY and BCKGRND_* stay.
+        '*_PASSWORD',
+        '*_TOKEN',
+        '*_API_KEY',
+        'MAIL_*',
+        'STRIPE_*',
+        'OPENAI_*',
+        'ANTHROPIC_*',
+        'NETLIFY_*',
+        'NPM_*',
+        'SENTRY_*',
+        'CODEBERG_*',
     ],
 
     // Keep public/build: the packaged webview serves the frontend from it.

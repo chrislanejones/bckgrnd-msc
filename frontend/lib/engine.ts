@@ -117,9 +117,14 @@ export const ENGINE_REASON = {
   linked: 11,
 } as const;
 
-/** Held-gesture kinds (docs/NIGHT3_PROTOCOL.md, Gestures). */
-export const GESTURE_KIND = { echoThrow: 1, filterHold: 2 } as const;
+/** Held-gesture kinds (docs/NIGHT3_PROTOCOL.md, Gestures; Beat Repeat: NIGHT10_PROTOCOL.md). */
+export const GESTURE_KIND = { echoThrow: 1, filterHold: 2, beatRepeat: 3 } as const;
 export type GestureKind = (typeof GESTURE_KIND)[keyof typeof GESTURE_KIND];
+
+/** Beat Repeat's division as a note value: 1/4, 1/8 (the default) or 1/16. */
+export type RepeatDivision = 4 | 8 | 16;
+export const REPEAT_DIVISIONS: readonly RepeatDivision[] = [4, 8, 16];
+export const DEFAULT_REPEAT_DIVISION: RepeatDivision = 8;
 
 /**
  * One outcome from the audio thread. What `a` and `b` mean depends on `kind`;
@@ -134,7 +139,7 @@ export type GestureKind = (typeof GESTURE_KIND)[keyof typeof GESTURE_KIND];
  * | sceneReplaced | request id that replaced it | 0 |
  * | fillStarted | step | 0 |
  * | fillEnded | step the track's drums resume on (-1 when cut short) | 0, or the reason it was cut short |
- * | gestureExpired | gesture kind (`GESTURE_KIND`) | 0 |
+ * | gestureExpired | gesture kind (`GESTURE_KIND`) | 0 the lease ran out, 1 a brake, backspin or scratch ended a Beat Repeat |
  * | patternsQueued | predicted bar (1-based) | predicted step |
  * | patternsApplied | step it landed on (-1 off the grid: stopped, stop, panic, a jump) | 0 |
  * | patternsCancelled, patternsRejected | reason (`ENGINE_REASON`) | 0 |
@@ -898,6 +903,15 @@ export class EngineHost {
 
   setSwing(value: number): void {
     this.postParam('swing', { type: 'swing', value });
+  }
+
+  /**
+   * Beat Repeat's division, on both decks (docs/NIGHT10_PROTOCOL.md). A live setting:
+   * never part of the mix, a scene or a project. While a repeat is held, the new
+   * division captures again on its next grid line.
+   */
+  setRepeatDivision(division: RepeatDivision): void {
+    this.postParam('repeatDivision', { type: 'repeatDivision', value: division });
   }
 
   setBands(low: number, mid: number, high: number): void {

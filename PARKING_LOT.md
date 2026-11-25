@@ -468,3 +468,84 @@ not. Things to settle before or while building it:
   49 of 56 px). Watch for missed drags on the phone. (Lacey, Chris by use)
 - **On the phone the scenes status line keeps its own row when empty** (about 19 px).
   Collapsing it would make the header jump. (Lacey)
+
+## Found in Night 10 performance layout, round 1 (11-24-2026)
+
+- **No "Queued:" readout yet (checked in round 2: not cheap).** The scenes header has
+  about 0 px to spare at 1440 and 1280; the status line only takes room when it has
+  text. A permanent "Queued: none" would wrap the header to a second row. The brief's "Queued: none" line has no home of its own: the
+  scenes status line reports the last outcome ("Drop queued"), not what is waiting. A
+  derived "Queued: Drop · Bar 9 / none" from `sceneRequest` and the fill job would fit the
+  status line's slot without a new row. Wording and priority (scene vs fill vs Rise) are
+  open. (Lacey, Chris)
+- **The Fill length control has little header room at 1280.** The Fill style menu and
+  Compare A/B already leave the status line about 140 px there. A Beat · Bar pair (about
+  80 px) would squeeze it further. Dropping the Shift 1–4 tag at mouse widths (the pads keep
+  `aria-keyshortcuts` and their tooltips) would win that room back. (Lacey, fills agent)
+- ~~**Release FX's disabled check names Echo and Filter only.**~~ Done in the Night 10 merge. When Beat Repeat lands, it
+  needs `!inst.repeatHeld` too, or Release FX stays disabled while only Repeat is held.
+  (Silas)
+
+## Found in Night 10 Beat Repeat (11-24-2026)
+
+- **Listen to Beat Repeat** at 1/4, 1/8 and 1/16, its seams (2.5 ms dips) and the 8 ms release,
+  with Filter Hold and Echo Throw over it. (Chris)
+- **The transport rounds every step up to a whole sample.** `Transport::tick` sets
+  `to_next = step_len - 1` and drops the fraction, so steps are `ceil(step_len)` long and
+  the tempo runs a little slow (about 0.02% at 123 BPM, 44.1 kHz). Beat Repeat matches the
+  clock as it is. Fixing the clock changes every render. (Silas, ADR if fixed)
+- **Picking a track doesn't clear a held Echo or Filter on screen.** `selectTrack` stops
+  the deck, which ends every gesture in the engine, but only Beat Repeat's pad is cleared
+  there; the others show held until the finger lifts. (Lacey/Silas)
+- **A tempo change or bend while a repeat is held** keeps the captured slice length, so
+  the stutter drifts off the new grid until release. It could capture again on a tempo
+  change, but a tempo glide would then capture again on every grid line. (Silas)
+- ~~**The temporary Repeat pad and division picker**~~ replaced by Lacey's `RepeatSlot` in the
+  Hold FX row at the Night 10 merge.
+
+## Found in Night 10B (11-25-2026)
+
+- **One-beat fills are parked for Night 11** on `night10/beat-fills` at `db3a946`, untested.
+  Its bypass hash check must be rerun: Silas's Beat Repeat harness overwrote the scratch
+  hash files it used in `~/ai-repo/bckgrnd-night10-hash` (restored; his own harness now
+  lives in `~/ai-repo/bckgrnd-night10-repeat-hash`). (fills agent, Silas)
+- **A take has no elapsed position.** v1 records song steps (0–255), which wrap at the top
+  and jump on cue, seek and loops; `seq` gives order, not time. A timeline needs either a
+  monotonic onset counter on the event ring (shared with the MCP, so a contract change) or
+  host-side counting from telemetry. (Night 12, ADR-026)
+- **Repeat, Filter, Echo and gesture events aren't recorded.** The kinds are reserved in
+  `contracts/performance.json` and refused by `recording.ts`. (Night 12)
+- **`buildApplied.b` is 0 when the host's Rise lands**, because the host sends no separate
+  landing vector. The recorder treats any `buildApplied` as landed. If a Rise ever sends
+  one, check the `landed` rule. (recording, Silas)
+- **A seek isn't noted in the developer log.** It would need a hook in `app.tsx`. The take
+  itself is right; only the log is quieter. (recording)
+- **A pattern-editor velocity check was flaky once** in verify:desktop (Lacey round 2) and
+  passed on rerun. Watch it. (Tara)
+- **MCP PR #2's base is `night6/linux-release-candidate`,** which is 8 commits ahead of
+  main and was never merged; the latest release is v0.3.1. Chris: rebase onto main, or
+  merge the release-candidate branch first. (Chris, MCP)
+- **A packaged build copies `.env`.** NativePHP strips only `cleanup_env_keys`; Night 10
+  widened that deny-list (`*_PASSWORD`, `*_TOKEN`, `*_API_KEY`, provider prefixes) and
+  pinned it in `NativeEnvCleanupTest`. Build Linux rc.4 from a secret-free `.env`. (Chris)
+- **The take's Rise outcome is spelled `cancelled`** (`contracts/performance.json`), matching
+  the existing status words in `frontend/lib/scenes.ts` (`RequestStatus`, `FillStatus`).
+  House style is `canceled`. Renaming the v1 value is free until takes are saved, but
+  doing it alone would split it from `scenes.ts`. Rename both or neither. (Chris, Silas)
+- **The Record dot uses `--color-danger`,** which DESIGN_PHILOSOPHY reserves for errors.
+  It's the usual record red and appears only on the dot. If the rule stays strict, the dot
+  needs its own token. (Chris, Lacey)
+- **On the phone, a stopped take squeezes the track name.** The Record dot and its Clear
+  button take 92 px in the save cell; the phone's second transport row has about 49 px to
+  spare, so "Warehouse" shows as "W…" until the take is cleared or re-recorded. Idle and
+  recording (the dot alone) fit. A fix moves the take controls into the Perform view or a
+  menu, or gives the phone transport another row (`--transport-h`). (Lacey)
+- **The Repeat pad is 54 px, its row's pads 52.** It is not the icon (54 with and without
+  the glyph's layout fixes) and not the hint's line box. The row is bottom-aligned, so its
+  top sits 2 px high. (Lacey)
+- ~~**verify-ui-repeat's "losing pointer capture releases it" is intermittent.**~~ Fixed in
+  the test. Chrome makes a capture active only on the next pointer event, and releasing a
+  capture that is still pending fires no `lostpointercapture`; the check now moves once
+  and waits for `gotpointercapture`. 23 of 24 standalone runs passed after the fix. The one
+  failure was before the Panic check was split, so it isn't named; the Panic check now
+  also waits for the engine's Stop. (Tara)

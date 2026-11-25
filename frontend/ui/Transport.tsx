@@ -129,6 +129,7 @@ export function TransportBar({
   onPanic,
   libraryToggle,
   inspectorToggle,
+  record,
 }: {
   track: TrackArrangement;
   playing: boolean;
@@ -145,6 +146,12 @@ export function TransportBar({
   libraryToggle?: { open: boolean; onToggle: () => void };
   /** Present when the inspector can give its column back to the decks; hides it. */
   inspectorToggle?: { open: boolean; onToggle: () => void };
+  /**
+   * The Record indicator (Night 10), when recording is available: a small chip that
+   * shares the save status's cell, so the bar gains no column and the phone's grid
+   * keeps its areas. Budget: about 4.5rem with its word, 2rem as a dot alone.
+   */
+  record?: ReactNode;
 }) {
   const part = Math.floor(bar / 4);
   return (
@@ -223,13 +230,25 @@ export function TransportBar({
 
       <MasterMeter />
 
-      {projects ?? <div className="save-status">
-        {edited ? (
-          <StatusIndicator state="warn" label="Edited · not saved" />
+      {(() => {
+        const save = projects ?? (
+          <div className="save-status">
+            {edited ? (
+              <StatusIndicator state="warn" label="Edited · not saved" />
+            ) : (
+              <StatusIndicator state="idle" label="Track as written" />
+            )}
+          </div>
+        );
+        return record ? (
+          <div className="transport-status">
+            {record}
+            {save}
+          </div>
         ) : (
-          <StatusIndicator state="idle" label="Track as written" />
-        )}
-      </div>}
+          save
+        );
+      })()}
 
       {onPanic ? <PanicButton onPanic={onPanic} /> : null}
 

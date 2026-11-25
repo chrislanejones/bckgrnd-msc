@@ -208,7 +208,7 @@ call and posts them to the UI only when there are any, as
 | 13 | fill ended | step the track's drums resume on (-1 when cut short) | 0 when it played its bar, else the reason it was cut short |
 | 14 | fill cancelled | reason | 0 |
 | 15 | fill rejected | reason | 0 |
-| 21 | gesture expired (lease ran out); `requestId` is the token | gesture kind | 0 |
+| 21 | gesture expired (lease ran out); `requestId` is the token | gesture kind | 0 (Night 10: 1 when a brake, backspin or scratch ended a Beat Repeat) |
 
 Reasons: 1 invalid, 2 stopped, 3 transport, 4 track, 5 panic, 6 mixing, 7 not
 playing, 8 already playing, 9 stale generation, 10 cancelled by the user.
@@ -268,6 +268,9 @@ cancellation table above.
   `{type: 'cancelFill', requestId}`; events come back on `sceneEvents`.
 
 ## Gestures (temporary overrides)
+
+Night 10 adds kind 3, **Beat Repeat**, on the same machinery: see
+`docs/NIGHT10_PROTOCOL.md`.
 
 - Two kinds in Night 3: **Echo Throw** (the existing throw: send, feedback, return
   held open within safe limits) and **Filter Hold** (a defined dark, resonant

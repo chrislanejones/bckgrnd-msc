@@ -46,6 +46,7 @@ async function withServer(cmd, args, url, fn) {
 
 step('contract', 'node', ['tools/check-contract.mjs']);
 step('scenes', 'node', ['tools/check-scenes.mjs']);
+step('recording', 'node', ['tools/check-recording.mjs']);
 step('editing', 'node', ['tools/check-editing.mjs']);
 step('typecheck', process.execPath, ['node_modules/typescript/bin/tsc', '--noEmit']);
 step('lint', process.execPath, ['node_modules/eslint/bin/eslint.js', '.']);

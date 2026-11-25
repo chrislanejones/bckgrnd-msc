@@ -37,6 +37,14 @@
   --transport-h: 4.25rem;
   --raised: linear-gradient(var(--color-raised), var(--color-surface));
   --raised-shadow: inset 0 1px 0 rgba(243, 239, 230, 0.06), 0 2px 0 #000;
+  /* Performance states (Night 10), one language across scenes, fills and pads:
+     queued = dashed acid border that pulses toward --state-queued-dim;
+     active (running or latched) = acid border, --state-active-ring, --state-active-tint;
+     held (a hand is down) = filled acid with --state-held-glow. */
+  --state-queued-dim: color-mix(in srgb, var(--color-acid) 35%, var(--color-line));
+  --state-active-tint: color-mix(in srgb, var(--color-acid) 7%, var(--color-surface));
+  --state-active-ring: 0 0 0 1px var(--color-acid) inset;
+  --state-held-glow: 0 0 1rem color-mix(in srgb, var(--color-acid) 35%, transparent);
 
   /*
    * Density (docs/DESIGN_PHILOSOPHY.md, "Density"). Every pixel of vertical space must
@@ -561,6 +569,122 @@ body {
   }
 }
 
+/* The Record indicator's cell (Night 10): it shares the save status's grid cell, so
+   recording adds no column to the bar. On the phone the pair takes the save area. */
+.transport-status {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+@media (max-width: 899.98px) {
+  .transport-status {
+    grid-area: save;
+  }
+}
+
+/* 900-1279px: beside the Record dot, the save status is its icon and
+   colored dot, as on the phone, so the track name keeps its room. Its words stay its
+   text and its name. */
+@media (min-width: 900px) and (max-width: 1279.98px) {
+  .transport-status .save-status-icon {
+    display: block;
+  }
+
+  .transport-status .save-status .status-text {
+    display: none;
+  }
+}
+
+/* The Record toggle: a dot (hollow idle, solid red recording or stopped) and "Rec"
+   where the bar has room. Red is the universal record color, used for the dot alone. */
+.record {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.record-toggle,
+.record-clear {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  min-width: var(--control-sm);
+  min-height: var(--control-sm);
+  padding: 0 0.6rem;
+  border: 1px solid var(--color-line);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--color-fg);
+  font-size: var(--text-label);
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.record-clear {
+  padding: 0;
+  color: var(--color-muted);
+}
+
+.record-toggle:hover,
+.record-clear:hover {
+  border-color: color-mix(in srgb, var(--color-acid) 45%, var(--color-line));
+}
+
+.record-dot {
+  width: 0.625rem;
+  height: 0.625rem;
+  border: 2px solid var(--color-muted);
+  border-radius: 999px;
+}
+
+.record[data-state="recording"] .record-toggle {
+  border-color: var(--color-danger);
+}
+
+.record[data-state="recording"] .record-dot,
+.record[data-state="stopped"] .record-dot {
+  border-color: var(--color-danger);
+  background: var(--color-danger);
+}
+
+.record[data-state="recording"] .record-dot {
+  animation: record-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes record-pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .record[data-state="recording"] .record-dot {
+    animation: none;
+  }
+}
+
+/* Dot alone where the track name needs the room (38px spare at 1280, 49 on a phone). */
+@media (max-width: 1365.98px) {
+  .record-word {
+    display: none;
+  }
+
+  .record-toggle {
+    padding: 0;
+  }
+}
+
+@media (pointer: coarse), (max-width: 899.98px) {
+  .record-toggle,
+  .record-clear {
+    min-width: var(--control-md);
+    min-height: var(--control-md);
+  }
+}
+
 /* Syne is wide: below 1280px the wordmark steps down so the track name and Panic
    keep their room. (Measured with the bundled fonts, not a fallback.) */
 @media (max-width: 1279.98px) {
@@ -964,11 +1088,37 @@ body {
   translate: 0 1px;
 }
 
+/* Held: filled acid with a glow, whether a finger or a key holds it. (No transform: the
+   pad must not move under a captured pointer.) */
 .pad[aria-pressed="true"] {
   border-color: var(--color-acid);
   background: var(--color-acid);
   color: var(--color-acid-ink);
-  box-shadow: 0 0 1rem color-mix(in srgb, var(--color-acid) 35%, transparent);
+  box-shadow: var(--state-held-glow);
+}
+
+.pad[aria-pressed="true"] /* A label with a glyph lays out as one flex line no taller than the text, and the glyph
+   takes no pointer events, so a press always lands on the pad's own label. */
+.pad-label:has(.pad-icon) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.3rem;
+}
+
+.pad-icon {
+  display: block;
+  pointer-events: none;
+}
+
+.pad-icon > svg {
+  display: block;
+  width: 0.75rem;
+  height: 0.75rem;
+}
+
+.pad-hint {
+  opacity: 0.8;
 }
 
 .pad-label {
@@ -1319,7 +1469,7 @@ body {
   }
 }
 
-/* The jog wheel beside its six pads in a 2 x 3 block, centered on the wheel. */
+/* The jog wheel beside the pad column, centered on the wheel. */
 .deck-row {
   --jog: clamp(min(11rem, var(--jog-max)), 30cqi, var(--jog-max));
   display: grid;
@@ -1327,27 +1477,44 @@ body {
   grid-template-areas: "jog pads";
   align-items: center;
   gap: var(--space-6);
-  padding: 0 0 var(--section-gap);
 }
 
+/*
+ * The pad column (Night 10): three rows on one five-column grid, so every row keeps
+ * the same column rhythm. The deck's own gestures; Hold FX, the momentary effects
+ * (Echo, Filter, then Beat Repeat at column three with its division across four and
+ * five); and Loop, with Release FX in column five. Loop used to be a row under the jog
+ * as well; inside this column it costs nothing, since the jog column is the taller.
+ */
 .deck-pads {
   grid-area: pads;
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--section-gap);
+}
+
+.deck-group {
+  display: grid;
   gap: var(--group-gap);
 }
 
-/* Loop and Release FX share the deck's bottom row: the loop lengths on the left, the
-   safety exit at the far end, apart from the gesture pads. */
-.deck-foot {
-  display: flex;
-  flex-wrap: wrap;
+.deck-pad-row {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   align-items: end;
-  gap: var(--group-gap) var(--space-4);
+  gap: var(--group-gap);
+}
+
+.hold-fx > .repeat-division {
+  grid-column: span 2;
+  align-self: center;
+}
+
+.repeat-division .segment {
+  min-height: var(--button-sm-h);
 }
 
 .deck-foot > .segmented-block {
-  flex: 1 1 18rem;
+  grid-column: span 4;
 }
 
 .deck-foot .segment {
@@ -1355,7 +1522,36 @@ body {
 }
 
 .deck-foot > .deck-safety {
-  margin-inline-start: auto;
+  justify-content: stretch;
+}
+
+.deck-foot > .deck-safety > .text-button {
+  width: 100%;
+  min-height: var(--button-sm-h);
+  /* One line at 1024 too, where a column is about 86px. */
+  padding-inline: var(--space-2);
+  white-space: nowrap;
+}
+
+/* A phone-width deck: three columns, the division and Loop each a full row. */
+@container (max-width: 30rem) {
+  .deck-pad-row {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .hold-fx > .repeat-division,
+  .deck-foot > .segmented-block {
+    grid-column: 1 / -1;
+  }
+
+  .deck-foot > .deck-safety {
+    grid-column: 1 / -1;
+    justify-content: flex-end;
+  }
+
+  .deck-foot > .deck-safety > .text-button {
+    width: auto;
+  }
 }
 
 @container (max-width: 34rem) {
@@ -1365,6 +1561,53 @@ body {
     grid-template-areas:
       "jog"
       "pads";
+  }
+}
+
+/*
+ * The performance surface (Night 10): the Scenes panel (the transition group: scenes,
+ * Fill, Fill → Drop, Rise) and the Deck panel (the momentary group: pads, Hold FX,
+ * Loop) read as one area. They share one border and are split by a single rule, not a
+ * gap between two cards. On a phone this holds in Perform, the one view showing both.
+ */
+.performance {
+  display: grid;
+  gap: var(--workspace-pad);
+  min-width: 0;
+}
+
+@media (min-width: 900px) {
+  .performance {
+    gap: 0;
+  }
+
+  .performance > .scenes-panel:has(+ .deck-panel) {
+    border-bottom-left-radius: 0;
+    border-bottom-right-radius: 0;
+  }
+
+  .performance > .scenes-panel + .deck-panel {
+    border-top-color: color-mix(in srgb, var(--color-line) 70%, transparent);
+    border-top-left-radius: 0;
+    border-top-right-radius: 0;
+    margin-top: -1px;
+  }
+}
+
+@media (max-width: 899.98px) {
+  .app[data-view="perform"] .performance {
+    gap: 0;
+  }
+
+  .app[data-view="perform"] .performance > .scenes-panel:has(+ .deck-panel) {
+    border-bottom-left-radius: 0;
+    border-bottom-right-radius: 0;
+  }
+
+  .app[data-view="perform"] .performance > .scenes-panel + .deck-panel {
+    border-top-left-radius: 0;
+    border-top-right-radius: 0;
+    margin-top: -1px;
   }
 }
 
@@ -4061,8 +4304,8 @@ html[data-control-drag="yes"] * {
 .scene-slot[data-state="active"] .scene-pad,
 .scene-slot[data-state="modified"] .scene-pad {
   border-color: var(--color-acid);
-  box-shadow: 0 0 0 1px var(--color-acid) inset, var(--raised-shadow);
-  background: color-mix(in srgb, var(--color-acid) 7%, var(--color-surface));
+  box-shadow: var(--state-active-ring), var(--raised-shadow);
+  background: var(--state-active-tint);
 }
 
 .scene-slot[data-state="active"] .scene-mix-level,
@@ -4094,7 +4337,7 @@ html[data-control-drag="yes"] * {
 
 @keyframes scene-queued {
   50% {
-    border-color: color-mix(in srgb, var(--color-acid) 35%, var(--color-line));
+    border-color: var(--state-queued-dim);
   }
 }
 
@@ -4103,9 +4346,10 @@ html[data-control-drag="yes"] * {
    forced colors lose nothing. */
 .scene-slot[data-state="building"] .scene-pad {
   border-color: var(--color-acid);
+  box-shadow: var(--state-active-ring), var(--raised-shadow);
   background:
     linear-gradient(var(--color-acid), var(--color-acid)) left bottom / calc(var(--build-progress, 0) * 100%) 3px no-repeat,
-    color-mix(in srgb, var(--color-acid) 4%, var(--color-surface));
+    var(--state-active-tint);
   transition: background-size 240ms ease-out;
 }
 
@@ -4396,17 +4640,24 @@ html[data-control-drag="yes"] * {
   white-space: nowrap;
 }
 
+/* Queued (sending or waiting for its bar): the queued scene's dashed, pulsing border. */
 .fill-button.is-on,
 .fill-into-button.is-on {
   border-style: dashed;
   border-color: var(--color-acid);
+  animation: scene-queued 1.1s ease-in-out infinite;
 }
 
+/* Playing: active, as a running Rise or the active scene is. Filled acid is kept for
+   what a hand is holding. */
 .fill-button[data-state="playing"],
 .fill-into-button[data-state="playing"] {
   border-style: solid;
-  background: var(--color-acid);
-  color: var(--color-acid-ink);
+  border-color: var(--color-acid);
+  background: var(--state-active-tint);
+  box-shadow: var(--state-active-ring), var(--raised-shadow);
+  color: var(--color-acid);
+  animation: none;
 }
 
 /* Unavailable is aria-disabled (still focusable, reason read as its description). */
@@ -4962,7 +5213,9 @@ html[data-control-drag="yes"] * {
 
 @media (prefers-reduced-motion: reduce) {
   .scene-slot[data-state="queued"] .scene-pad,
-  .scene-slot[data-state="sending"] .scene-pad {
+  .scene-slot[data-state="sending"] .scene-pad,
+  .fill-button.is-on,
+  .fill-into-button.is-on {
     animation: none;
   }
 }

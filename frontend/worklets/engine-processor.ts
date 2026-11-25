@@ -27,6 +27,8 @@ type Inbound =
   | { type: 'transport'; deck: DeckId; action: 'play' | 'stop' }
   | { type: 'bpm'; value: number }
   | { type: 'swing'; value: number }
+  /** Beat Repeat's division, 4, 8 or 16 (docs/NIGHT10_PROTOCOL.md). Both decks. */
+  | { type: 'repeatDivision'; value: number }
   | { type: 'master'; value: number }
   | { type: 'filter'; value: number }
   | { type: 'bands'; low: number; mid: number; high: number }
@@ -380,6 +382,10 @@ class EngineProcessor extends AudioWorkletProcessor {
         for (const engine of this.liveEngines()) engine.set_swing(message.value);
         return;
 
+      case 'repeatDivision':
+        for (const engine of this.liveEngines()) engine.set_repeat_division(message.value);
+        return;
+
       case 'master':
         for (const engine of this.liveEngines()) engine.set_master(message.value);
         return;
@@ -558,7 +564,7 @@ class EngineProcessor extends AudioWorkletProcessor {
       case 'gestureBegin': {
         const engine = this.engines[this.live];
         const token = message.token >>> 0;
-        const kind = message.kind === 1 || message.kind === 2 ? message.kind : 255;
+        const kind = message.kind === 1 || message.kind === 2 || message.kind === 3 ? message.kind : 255;
         const accepted = engine ? engine.gesture_begin(token, kind) : false;
         this.port.postMessage({ type: 'gestureBeginResult', deck: this.live, token, accepted });
         return;

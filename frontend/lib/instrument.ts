@@ -14,8 +14,8 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { engine, GESTURE_KIND, SCENE_ACCENT, SCENE_TIMING } from './engine';
-import type { Deck as DeckId, EngineEvent as WireEvent, SceneAccent } from './engine';
+import { DEFAULT_REPEAT_DIVISION, engine, GESTURE_KIND, REPEAT_DIVISIONS, SCENE_ACCENT, SCENE_TIMING } from './engine';
+import type { Deck as DeckId, EngineEvent as WireEvent, RepeatDivision, SceneAccent } from './engine';
 import { emptyFlags, fetchLibrary, fetchTrack } from './api';
 import {
   defaultSend,
@@ -93,6 +93,7 @@ import { LANE_IDS, type LaneId, type ScenePatterns } from './patterns';
 import { usePatternWorkspace } from './workspace';
 import { useProjectHistory } from './project-history';
 import type { Fill, LibraryResponse, Mix, StemId, TrackArrangement, TrackSummary } from './types';
+import { RecordingSession, RequestCatalog, fromEngine, rememberBook, rememberFill, type LogEntry, type PerformanceRecording, type RecordingState } from './recording';
 
 /** The scene slot Fill → Drop leads into: the fourth, whatever it is named now. */
 const FILL_INTO_SLOT: SceneSlotId = 'drop';
@@ -179,6 +180,15 @@ function useStable<T extends Record<string, (...args: never[]) => unknown>>(acti
 
 /** The order a stem-swapping continuous mix steps the groups through. */
 const CONTINUOUS_MASKS: Mask[] = ['full', 'nodrums', 'nomusic'];
+
+/** The held effects (temporary overrides), and the engine gesture each one is. */
+export type HeldKind = 'echo' | 'filter' | 'repeat';
+const HELD_KINDS: readonly HeldKind[] = ['echo', 'filter', 'repeat'];
+const HELD_GESTURE: Record<HeldKind, (typeof GESTURE_KIND)[keyof typeof GESTURE_KIND]> = {
+  echo: GESTURE_KIND.echoThrow,
+  filter: GESTURE_KIND.filterHold,
+  repeat: GESTURE_KIND.beatRepeat,
+};
 
 /** Paint the mute flags for a group shortcut. */
 function paintMutes(mask: Mask, drums: StemId[], music: StemId[]): Record<StemId, boolean> {
@@ -287,7 +297,11 @@ export function useInstrument() {
   const requestBook = useRef<RequestBook>(EMPTY_BOOK);
   /** The last request that landed, for its crash (`accentFired` follows its `applied`). */
   const landedLast = useRef<SceneRequest | null>(null);
+  /** What each request asked for, for the performance recording (see its section). */
+  const catalogRef = useRef<RequestCatalog>(null!);
+  catalogRef.current ??= new RequestCatalog();
   const setBook = (next: RequestBook) => {
+    rememberBook(catalogRef.current, next);
     requestBook.current = next;
     sceneRequestRef.current = next.shown;
     setSceneRequest(next.shown);
@@ -345,6 +359,7 @@ export function useInstrument() {
   const [fill, setFillState] = useState<FillJob | null>(null);
   const fillRef = useRef<FillJob | null>(null);
   const setFill = (next: FillJob | null) => {
+    if (next) rememberFill(catalogRef.current, next);
     fillRef.current = next;
     setFillState(next);
   };
@@ -369,10 +384,19 @@ export function useInstrument() {
    * Held effects, by kind, with the token the engine knows them by. Temporary
    * overrides only: none of this is part of the working mix or the project.
    */
-  const [held, setHeld] = useState<{ echo: boolean; filter: boolean }>({ echo: false, filter: false });
-  const heldTokens = useRef<{ echo: number | null; filter: number | null }>({ echo: null, filter: null });
-  const leaseTimers = useRef<{ echo: number | null; filter: number | null }>({ echo: null, filter: null });
+  const [held, setHeld] = useState<Record<HeldKind, boolean>>({ echo: false, filter: false, repeat: false });
+  const heldTokens = useRef<Record<HeldKind, number | null>>({ echo: null, filter: null, repeat: null });
+  const leaseTimers = useRef<Record<HeldKind, number | null>>({ echo: null, filter: null, repeat: null });
   const nextToken = useRef(1);
+  /**
+   * Beat Repeat's division (Night 10). How you perform, not what the song is: kept in
+   * localStorage, never in a project, and sent to the engine on load and on change.
+   */
+  const [repeatDivision, setRepeatDivisionState] = useState<RepeatDivision>(() =>
+    readChoice(PREF.repeatDivision, REPEAT_DIVISIONS, DEFAULT_REPEAT_DIVISION));
+  useEffect(() => {
+    engine.setRepeatDivision(repeatDivision);
+  }, [repeatDivision]);
 
   useEffect(() => {
     let cancelled = false;
@@ -477,6 +501,7 @@ export function useInstrument() {
       // follows rather than waiting for a release that may never come.
       clearHeld('echo');
       clearHeld('filter');
+      clearHeld('repeat');
       return;
     }
     try {
@@ -505,6 +530,8 @@ export function useInstrument() {
         const deck = liveDeck;
         abandonedBuild.current = bookBuild(requestBook.current)?.requestId ?? null;
         engine.stop(deck);
+        // The stop and the load end a held Beat Repeat in the engine.
+        clearHeld('repeat');
         loadDeck(deck, arranged);
         engine.setMuted(0, false);
         setTrack(arranged);
@@ -564,6 +591,7 @@ export function useInstrument() {
 
   /** Cue rewinds the live deck and starts that same deck. */
   function cue() {
+    recorder.interrupt('cue');
     engine.cue();
     void engine.play(liveDeck);
   }
@@ -1479,9 +1507,7 @@ export function useInstrument() {
     engine.nudge(dir);
   }
 
-  // ---- Held effects (Echo Throw, Filter Hold) -----------------------------
-
-  type HeldKind = 'echo' | 'filter';
+  // ---- Held effects (Echo Throw, Filter Hold, Beat Repeat) -----------------
 
   function clearHeld(kind: HeldKind) {
     const timer = leaseTimers.current[kind];
@@ -1504,7 +1530,7 @@ export function useInstrument() {
     setHeld((h) => ({ ...h, [kind]: true }));
     leaseTimers.current[kind] = window.setInterval(() => engine.gestureRenew(token), 1000);
     void engine
-      .gestureBegin(token, kind === 'echo' ? GESTURE_KIND.echoThrow : GESTURE_KIND.filterHold)
+      .gestureBegin(token, HELD_GESTURE[kind])
       .then((accepted) => {
         if (!accepted && heldTokens.current[kind] === token) clearHeld(kind);
       });
@@ -1523,15 +1549,23 @@ export function useInstrument() {
     engine.releaseGestures();
     clearHeld('echo');
     clearHeld('filter');
+    clearHeld('repeat');
   }
 
-  // A lease that ran out (a lost release, a frozen tab) shows as let go.
+  /** Beat Repeat's division. Remembered; a held repeat captures again on its next line. */
+  function setRepeatDivision(division: RepeatDivision) {
+    setRepeatDivisionState(division);
+    writeChoice(PREF.repeatDivision, division);
+  }
+
+  // A lease that ran out (a lost release, a frozen tab), or a Beat Repeat a brake,
+  // backspin or scratch ended, shows as let go.
   useEffect(
     () =>
       engine.onSceneEvents((events) => {
         for (const e of events) {
           if (e.kind === EVENT.gestureExpired) {
-            for (const kind of ['echo', 'filter'] as const) {
+            for (const kind of HELD_KINDS) {
               if (heldTokens.current[kind] === e.requestId) clearHeldRef.current(kind);
             }
           }
@@ -1687,10 +1721,12 @@ export function useInstrument() {
    * same as Cancel scene, which restores the mix without stopping playback.
    */
   function panic() {
+    recorder.interrupt('panic');
     engine.panic();
     cancelTempoGlide();
     clearHeld('echo');
     clearHeld('filter');
+    clearHeld('repeat');
     setFill(null);
     setBook(cancelAll(requestBook.current, 5));
     setPlaying(false);
@@ -1769,6 +1805,76 @@ export function useInstrument() {
     (isPending(sceneRequest) && sceneRequest.target === 'restoreScene' ? 'Restoring previous mix' : null) ??
     riseHoldsFill ??
     (busyFill && busyFill.kind === 'plain' && busyFill.status === 'playing' ? 'Available when the fill ends' : null);
+
+  // ---- Performance recording (docs/PERFORMANCE_EVENTS.md) --------------------------
+  //
+  // An in-memory take of what was applied, at engine steps. The catalog remembers what
+  // each request asked for as it is sent (setBook, setFill), so an outcome can be named
+  // whatever order the engine listeners run in. Nothing here is saved or sent.
+  const recorderRef = useRef<RecordingSession | null>(null);
+  recorderRef.current ??= new RecordingSession();
+  const recorder = recorderRef.current;
+  const [recordingView, setRecordingView] = useState<{ state: RecordingState; count: number; log: readonly LogEntry[] }>(
+    () => ({ state: recorder.state, count: recorder.count, log: recorder.log }));
+  useEffect(() => recorder.subscribe(() => setRecordingView({ state: recorder.state, count: recorder.count, log: recorder.log })), [recorder]);
+
+  useEffect(
+    () =>
+      engine.onSceneEvents((events) => {
+        for (const e of events) {
+          const input = fromEngine(e, catalogRef.current, (slot) => sceneNameRef.current(slot), songStepRef.current);
+          if (input) recorder.record(input);
+        }
+      }),
+    [recorder],
+  );
+
+  // A track change and an auto-mix end the take (Panic says so itself, first).
+  const recordedTrack = useRef<string | null>(null);
+  useEffect(() => {
+    if (recorder.state !== 'recording') return;
+    if (mixing) recorder.interrupt('mix');
+    else if (track?.id !== recordedTrack.current) recorder.interrupt('track');
+  }, [recorder, mixing, track?.id]);
+
+  // A transport Stop ends it too: the engine's own frames going from playing to stopped
+  // after Start. Not the `playing` state, which Play sets ahead of the engine, so a frame
+  // from before Play would read as a Stop.
+  const recordSawPlaying = useRef(false);
+  const framePlaying = useRef(false);
+  useEffect(
+    () =>
+      engine.subscribe((t) => {
+        framePlaying.current = t.playing;
+        if (t.playing) recordSawPlaying.current = true;
+        else if (recordSawPlaying.current && recorder.state === 'recording') recorder.interrupt('stop');
+      }),
+    [recorder],
+  );
+
+  const startRecording = () => {
+    if (!track) return;
+    recordedTrack.current = track.id;
+    // Armed if the engine's last frame was playing; otherwise by its first one that is.
+    recordSawPlaying.current = framePlaying.current;
+    recorder.start(track.id, bpm, songStepRef.current);
+  };
+  const stopRecording = () => recorder.stop('user');
+  const clearRecording = () => recorder.clear();
+  const recordingActions = useStable({ startRecording, stopRecording, clearRecording });
+
+  // The developer log: `__BCKGRND_RECORDING__.table()` in the console, and the checks.
+  useEffect(() => {
+    window.__BCKGRND_RECORDING__ = {
+      state: () => recorder.state,
+      recording: () => recorder.recording(),
+      log: () => recorder.log,
+      table: () => console.table(recorder.log),
+      start: () => recordingActions.startRecording(),
+      stop: () => recordingActions.stopRecording(),
+      clear: () => recordingActions.clearRecording(),
+    };
+  }, [recorder, recordingActions]);
 
   const actions = useStable({
     togglePlay,
@@ -1856,6 +1962,11 @@ export function useInstrument() {
     echo: held.echo,
     /** A Filter Hold is being held. */
     filterHeld: held.filter,
+    /** A Beat Repeat is being held. */
+    repeatHeld: held.repeat,
+    /** Beat Repeat's division (4, 8 or 16), remembered per viewer. */
+    repeatDivision,
+    setRepeatDivision,
     loopBars,
     // project
     project,
@@ -1899,9 +2010,26 @@ export function useInstrument() {
       project !== null &&
       compare[compare.listening] !== null &&
       !sameMix({ params: project.params, stems: project.stems }, compare[compare.listening]!),
+    /** The performance recording: what Lacey's Record indicator binds to. */
+    recording: { ...recordingView, ...recordingActions },
     // intents, each with one identity for the life of the app
     ...actions,
   };
 }
 
 export type Instrument = ReturnType<typeof useInstrument>;
+
+declare global {
+  interface Window {
+    /** The performance recording, for the checks and the console (docs/PERFORMANCE_EVENTS.md). */
+    __BCKGRND_RECORDING__?: {
+      state: () => RecordingState;
+      recording: () => PerformanceRecording | null;
+      log: () => readonly LogEntry[];
+      table: () => void;
+      start: () => void;
+      stop: () => void;
+      clear: () => void;
+    };
+  }
+}
