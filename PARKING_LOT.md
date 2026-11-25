@@ -510,3 +510,7 @@ not. Things to settle before or while building it:
 - **The Repeat pad is 54 px, its row's pads 52.** It is not the icon (54 with and without
   the glyph's layout fixes) and not the hint's line box. The row is bottom-aligned, so its
   top sits 2 px high. (Lacey)
+- **verify-ui-repeat's "losing pointer capture releases it" is intermittent.** It failed 4
+  of 6 desktop runs on Night 10 and passed on identical Repeat code in between. The check
+  waits on `lostpointercapture`, which Chrome delivers with the next pointer move. A timing
+  race under load is likely; the release path itself passes its other checks. (Silas, Tara)
