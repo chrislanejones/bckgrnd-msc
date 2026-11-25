@@ -502,3 +502,35 @@ not. Things to settle before or while building it:
   change, but a tempo glide would then capture again on every grid line. (Silas)
 - ~~**The temporary Repeat pad and division picker**~~ replaced by Lacey's `RepeatSlot` in the
   Hold FX row at the Night 10 merge.
+
+## Found in Night 10B (11-25-2026)
+
+- **One-beat fills are parked for Night 11** on `night10/beat-fills` at `db3a946`, untested.
+  Its bypass hash check must be rerun: Silas's Beat Repeat harness overwrote the scratch
+  hash files it used in `~/ai-repo/bckgrnd-night10-hash` (restored; his own harness now
+  lives in `~/ai-repo/bckgrnd-night10-repeat-hash`). (fills agent, Silas)
+- **A take has no elapsed position.** v1 records song steps (0–255), which wrap at the top
+  and jump on cue, seek and loops; `seq` gives order, not time. A timeline needs either a
+  monotonic onset counter on the event ring (shared with the MCP, so a contract change) or
+  host-side counting from telemetry. (Night 12, ADR-026)
+- **Repeat, Filter, Echo and gesture events aren't recorded.** The kinds are reserved in
+  `contracts/performance.json` and refused by `recording.ts`. (Night 12)
+- **`buildApplied.b` is 0 when the host's Rise lands**, because the host sends no separate
+  landing vector. The recorder treats any `buildApplied` as landed. If a Rise ever sends
+  one, check the `landed` rule. (recording, Silas)
+- **A seek isn't noted in the developer log.** It would need a hook in `app.tsx`. The take
+  itself is right; only the log is quieter. (recording)
+- **The Repeat pad sits 2 px taller than Echo and Filter** in the Hold FX row at some
+  widths. Optional polish. (Lacey)
+- **A pattern-editor velocity check was flaky once** in verify:desktop (Lacey round 2) and
+  passed on rerun. Watch it. (Tara)
+- **MCP PR #2's base is `night6/linux-release-candidate`,** which is 8 commits ahead of
+  main and was never merged; the latest release is v0.3.1. Chris: rebase onto main, or
+  merge the release-candidate branch first. (Chris, MCP)
+- **A packaged build copies `.env`.** NativePHP strips only `cleanup_env_keys`; Night 10
+  widened that deny-list (`*_PASSWORD`, `*_TOKEN`, `*_API_KEY`, provider prefixes) and
+  pinned it in `NativeEnvCleanupTest`. Build Linux rc.4 from a secret-free `.env`. (Chris)
+- **The take's Rise outcome is spelled `cancelled`** (`contracts/performance.json`), matching
+  the existing status words in `frontend/lib/scenes.ts` (`RequestStatus`, `FillStatus`).
+  House style is `canceled`. Renaming the v1 value is free until takes are saved, but
+  doing it alone would split it from `scenes.ts`. Rename both or neither. (Chris, Silas)
