@@ -67,7 +67,8 @@ class TrackController extends Controller
      *
      * `activity` gives the UI's per-bar step rows so it can draw a stem's pattern
      * without shipping all nine lanes to the client. `fillStyles` are the four fill
-     * styles (Fills::styles), kept beside the track so the track itself, a saved
+     * styles (Fills::styles) and `beatFillStyles` their one-beat fills
+     * (Fills::beatStyles), kept beside the track so the track itself, a saved
      * project's hashed source, is unchanged by them.
      */
     public function show(Request $request, string $id): JsonResponse
@@ -93,6 +94,7 @@ class TrackController extends Controller
             'track' => $arranged->jsonSerialize(),
             'activity' => $activity,
             'fillStyles' => Fills::styles($track),
+            'beatFillStyles' => Fills::beatStyles($track),
         ]);
     }
 }

@@ -125,8 +125,9 @@ foreach (Library::all() as $track) {
     $write("{$outDir}/{$track->id}.json", [
         'track' => $arrangedJson,
         'activity' => $activity,
-        // Beside the track, not in it: see Fills::styles.
+        // Beside the track, not in it: see Fills::styles and Fills::beatStyles.
         'fillStyles' => Fills::styles($track),
+        'beatFillStyles' => Fills::beatStyles($track),
     ]);
     $written++;
 }
