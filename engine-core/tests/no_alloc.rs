@@ -322,6 +322,30 @@ fn night_8_requests_neither_allocate_nor_free_on_the_audio_path() {
     );
     rig.until(event::BUILD_REPLACED);
 
+    // Night 10 beat fills (length 1): plain, Fill into and Rise + Fill, each played
+    // through to its end.
+    assert_eq!(
+        rig.call("queue_fill_at", |e| e.queue_fill_at(20, 0, 2, 1)),
+        0
+    );
+    rig.until(event::FILL_STARTED);
+    rig.until(event::FILL_ENDED);
+    assert_eq!(
+        rig.call("queue_fill_into", |e| e
+            .queue_fill_into(21, 0, 0, 1, 22, &back, 0)),
+        0
+    );
+    rig.until(event::FILL_STARTED);
+    rig.until(event::SCENE_APPLIED);
+    assert_eq!(
+        rig.call("queue_build_with_length", |e| e
+            .queue_build_with_length(23, 2, &rise, &drop, 24, 0, 0, 1)),
+        0
+    );
+    rig.until(event::BUILD_STARTED);
+    rig.until(event::FILL_STARTED);
+    rig.until(event::BUILD_APPLIED);
+
     // Crash accents: a Now scene's fires in the render call, a Bar scene's on its onset.
     assert_eq!(
         rig.call("queue_scene_with", |e| e.queue_scene_with(15, 0, &drop, 1)),
