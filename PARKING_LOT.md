@@ -486,7 +486,7 @@ not. Things to settle before or while building it:
 
 ## Found in Night 10 Beat Repeat (11-24-2026)
 
-- **Listen to Beat Repeat** at 1/4 to 1/32, its seams (2.5 ms dips) and the 8 ms release,
+- **Listen to Beat Repeat** at 1/4, 1/8 and 1/16, its seams (2.5 ms dips) and the 8 ms release,
   with Filter Hold and Echo Throw over it. (Chris)
 - **The transport rounds every step up to a whole sample.** `Transport::tick` sets
   `to_next = step_len - 1` and drops the fraction, so steps are `ceil(step_len)` long and

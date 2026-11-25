@@ -38,6 +38,7 @@ and is marked `(backfilled)`.
 | [022](022-a-scene-may-carry-an-explicit-crash-accent.md) | A scene may carry a crash accent, off by default and never automatic, fired when it commits during playback (amends ADR-008) | draft | 2026-11-19 |
 | [023](023-scene-accents-bump-the-project-to-version-4.md) | The scene accent bumps the project to version 4 with a v3 → v4 migration, not an optional v3 field | draft | 2026-11-19 |
 | [024](024-fill-styles-ship-beside-the-track-not-inside-it.md) | Four fill styles ship as `fillStyles` beside the track, not in `track.fills` (a project's hashed source); the host picks one by style key, and Fill Style is an app preference | draft | 2026-11-24 |
+| [025](025-beat-repeat-is-gesture-kind-3-looping-the-pre-master-feed.md) | Beat Repeat is held-gesture kind 3: it loops the five-channel pre-master feed from the next grid line, releases at once, and its division is an app preference, not project data | draft | 2026-11-25 |
 
 Night 8's new event numbers (51 and up) and reason 11 (`linked`) are protocol, not
 decisions. They belong in a Night 8 protocol doc, alongside `docs/NIGHT7_PROTOCOL.md`,
