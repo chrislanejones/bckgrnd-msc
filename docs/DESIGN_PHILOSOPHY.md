@@ -211,6 +211,20 @@ is **Hold FX**: Echo and Filter, then Beat Repeat in column three with its 1/4 �
 five, apart from the held pads. That column is shorter than the jog column, so moving
 Loop into it saved the deck a row. Panic stays in the transport (or the phone's dock), so
 it never scrolls away with the surface.
+
+States read the same everywhere on the surface (Night 10). They use the acid tokens
+`--state-queued-dim`, `--state-active-tint`, `--state-active-ring` and
+`--state-held-glow`:
+
+| State | Means | Treatment | Where |
+|---|---|---|---|
+| Rest | Nothing happening | Raised gradient, `--color-line` border | Every pad and fill button |
+| Queued | Waiting for its beat, bar or phrase | Dashed acid border that pulses (no pulse under reduced motion), and the boundary in words | Scene pads, Fill, Fill → Drop |
+| Active | Running or latched | Solid acid border, inset acid ring, 7% acid tint, acid words | The active scene, a Rise building, a fill playing |
+| Held | A hand is down | Filled acid, acid-ink words, glow | Echo, Filter, Repeat, Bend ± |
+
+Filled acid means a hand is holding something. A choice pill (Switch on, Loop, the
+Repeat division) is also filled when picked, because that is what a picked choice looks like.
 Cancel clears the selected scene and returns to the mix from before scene choices.
 It stays available for an active scene even when nothing is queued.
 

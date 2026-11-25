@@ -471,7 +471,9 @@ not. Things to settle before or while building it:
 
 ## Found in Night 10 performance layout, round 1 (11-24-2026)
 
-- **No "Queued:" readout yet.** The brief's "Queued: none" line has no home of its own: the
+- **No "Queued:" readout yet (checked in round 2: not cheap).** The scenes header has
+  about 0 px to spare at 1440 and 1280; the status line only takes room when it has
+  text. A permanent "Queued: none" would wrap the header to a second row. The brief's "Queued: none" line has no home of its own: the
   scenes status line reports the last outcome ("Drop queued"), not what is waiting. A
   derived "Queued: Drop · Bar 9 / none" from `sceneRequest` and the fill job would fit the
   status line's slot without a new row. Wording and priority (scene vs fill vs Rise) are
