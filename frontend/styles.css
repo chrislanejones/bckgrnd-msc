@@ -1319,7 +1319,7 @@ body {
   }
 }
 
-/* The jog wheel beside its six pads in a 2 x 3 block, centered on the wheel. */
+/* The jog wheel beside the pad column, centered on the wheel. */
 .deck-row {
   --jog: clamp(min(11rem, var(--jog-max)), 30cqi, var(--jog-max));
   display: grid;
@@ -1327,27 +1327,44 @@ body {
   grid-template-areas: "jog pads";
   align-items: center;
   gap: var(--space-6);
-  padding: 0 0 var(--section-gap);
 }
 
+/*
+ * The pad column (Night 10): three rows on one five-column grid, so every row keeps
+ * the same column rhythm. The deck's own gestures; Hold FX, the momentary effects
+ * (Echo, Filter, then Beat Repeat at column three with its division across four and
+ * five); and Loop, with Release FX in column five. Loop used to be a row under the jog
+ * as well; inside this column it costs nothing, since the jog column is the taller.
+ */
 .deck-pads {
   grid-area: pads;
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--section-gap);
+}
+
+.deck-group {
+  display: grid;
   gap: var(--group-gap);
 }
 
-/* Loop and Release FX share the deck's bottom row: the loop lengths on the left, the
-   safety exit at the far end, apart from the gesture pads. */
-.deck-foot {
-  display: flex;
-  flex-wrap: wrap;
+.deck-pad-row {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   align-items: end;
-  gap: var(--group-gap) var(--space-4);
+  gap: var(--group-gap);
+}
+
+.hold-fx > .repeat-division {
+  grid-column: span 2;
+  align-self: center;
+}
+
+.repeat-division .segment {
+  min-height: var(--button-sm-h);
 }
 
 .deck-foot > .segmented-block {
-  flex: 1 1 18rem;
+  grid-column: span 4;
 }
 
 .deck-foot .segment {
@@ -1355,7 +1372,36 @@ body {
 }
 
 .deck-foot > .deck-safety {
-  margin-inline-start: auto;
+  justify-content: stretch;
+}
+
+.deck-foot > .deck-safety > .text-button {
+  width: 100%;
+  min-height: var(--button-sm-h);
+  /* One line at 1024 too, where a column is about 86px. */
+  padding-inline: var(--space-2);
+  white-space: nowrap;
+}
+
+/* A phone-width deck: three columns, the division and Loop each a full row. */
+@container (max-width: 30rem) {
+  .deck-pad-row {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .hold-fx > .repeat-division,
+  .deck-foot > .segmented-block {
+    grid-column: 1 / -1;
+  }
+
+  .deck-foot > .deck-safety {
+    grid-column: 1 / -1;
+    justify-content: flex-end;
+  }
+
+  .deck-foot > .deck-safety > .text-button {
+    width: auto;
+  }
 }
 
 @container (max-width: 34rem) {
@@ -1365,6 +1411,53 @@ body {
     grid-template-areas:
       "jog"
       "pads";
+  }
+}
+
+/*
+ * The performance surface (Night 10): the Scenes panel (the transition group: scenes,
+ * Fill, Fill → Drop, Rise) and the Deck panel (the momentary group: pads, Hold FX,
+ * Loop) read as one area. They share one border and are split by a single rule, not a
+ * gap between two cards. On a phone this holds in Perform, the one view showing both.
+ */
+.performance {
+  display: grid;
+  gap: var(--workspace-pad);
+  min-width: 0;
+}
+
+@media (min-width: 900px) {
+  .performance {
+    gap: 0;
+  }
+
+  .performance > .scenes-panel:has(+ .deck-panel) {
+    border-bottom-left-radius: 0;
+    border-bottom-right-radius: 0;
+  }
+
+  .performance > .scenes-panel + .deck-panel {
+    border-top-color: color-mix(in srgb, var(--color-line) 70%, transparent);
+    border-top-left-radius: 0;
+    border-top-right-radius: 0;
+    margin-top: -1px;
+  }
+}
+
+@media (max-width: 899.98px) {
+  .app[data-view="perform"] .performance {
+    gap: 0;
+  }
+
+  .app[data-view="perform"] .performance > .scenes-panel:has(+ .deck-panel) {
+    border-bottom-left-radius: 0;
+    border-bottom-right-radius: 0;
+  }
+
+  .app[data-view="perform"] .performance > .scenes-panel + .deck-panel {
+    border-top-left-radius: 0;
+    border-top-right-radius: 0;
+    margin-top: -1px;
   }
 }
 

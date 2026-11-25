@@ -75,6 +75,7 @@ export function App() {
   // per viewer, and held open by a capture so a comparison never hides its own state.
   const [compareOpen, setCompareOpen] = useState(() => readChoice(PREF.compareOpen, ['open', 'closed'], 'closed') === 'open');
   const compareId = useId();
+  const holdFxId = useId();
   const compareShown = compareOpen || inst.compare !== null;
   const toggleCompare = useCallback(() => {
     setCompareOpen((open) => {
@@ -403,6 +404,10 @@ export function App() {
             </div>
           </InstrumentPanel>
 
+          {/* One performance surface (Night 10): the transition group (scenes, Fill,
+              Fill → Drop, Rise) over the momentary group (the deck's pads, Hold FX,
+              Loop), joined by a single rule rather than two cards. */}
+          <div className="performance" data-views="perform mix">
           {inst.scenes ? (
             <InstrumentPanel
               title="Scenes & comparison"
@@ -482,66 +487,79 @@ export function App() {
           <InstrumentPanel title="Deck" views={['perform']} className="deck-panel">
             <div className="deck-row">
               <JogWheel spinning={inst.playing} />
+              {/* One five-column grid, three rows: the deck's own gestures; Hold FX, the
+                  momentary effects (Beat Repeat joins at column three, its division
+                  across four and five: ui/HoldFx.tsx); then Loop, with Release FX at
+                  the far end, apart from the held pads. */}
               <div className="deck-pads">
-                <PerformancePad label="Cue" ariaLabel="Cue to the start" onPress={inst.cue} />
-                <PerformancePad label="Brake" ariaLabel="Vinyl brake" onPress={inst.brake} />
-                <PerformancePad
-                  label="Echo"
-                  hint="hold"
-                  ariaLabel="Echo throw, while held"
-                  latched={inst.echo}
-                  onHoldStart={() => inst.holdEffect('echo')}
-                  onHoldEnd={() => inst.releaseEffect('echo')}
-                />
-                <PerformancePad
-                  label="Filter"
-                  hint="hold"
-                  ariaLabel="Filter hold, while held"
-                  latched={inst.filterHeld}
-                  onHoldStart={() => inst.holdEffect('filter')}
-                  onHoldEnd={() => inst.releaseEffect('filter')}
-                />
-                <PerformancePad
-                  label="Bend +"
-                  hint="hold"
-                  ariaLabel="Nudge tempo up"
-                  onHoldStart={() => inst.nudge(1)}
-                  onHoldEnd={() => inst.nudge(0)}
-                />
-                <PerformancePad
-                  label="Bend −"
-                  hint="hold"
-                  ariaLabel="Nudge tempo down"
-                  onHoldStart={() => inst.nudge(-1)}
-                  onHoldEnd={() => inst.nudge(0)}
-                />
-                <PerformancePad label="Backspin" ariaLabel="Backspin the platter" onPress={inst.backspin} />
-              </div>
-            </div>
-            <div className="deck-foot">
-              <Segmented<number>
-                label={inst.loopBars ? `Loop · ${inst.loopBars} bar${inst.loopBars === 1 ? '' : 's'}` : 'Loop · off'}
-                value={inst.loopBars}
-                onPick={inst.pickLoop}
-                options={LOOP_OPTIONS}
-              />
-              {/* Three different exits, kept apart: Cancel scene (in the scene strip)
-                  restores the previous mix, Release FX (here, at the end of the deck's
-                  bottom row, apart from the held pads) lets go of held effects, and
-                  Panic (in the bar, or the phone's bottom dock, so it never scrolls
-                  away) stops everything and clears the tails. */}
-              <div className="deck-safety">
-                <button
-                  type="button"
-                  className="text-button"
-                  disabled={!inst.echo && !inst.filterHeld}
-                  onClick={inst.releaseAllEffects}
-                >
-                  Release FX
-                </button>
+                <div className="deck-pad-row">
+                  <PerformancePad label="Cue" ariaLabel="Cue to the start" onPress={inst.cue} />
+                  <PerformancePad label="Brake" ariaLabel="Vinyl brake" onPress={inst.brake} />
+                  <PerformancePad label="Backspin" ariaLabel="Backspin the platter" onPress={inst.backspin} />
+                  <PerformancePad
+                    label="Bend −"
+                    hint="hold"
+                    ariaLabel="Nudge tempo down"
+                    onHoldStart={() => inst.nudge(-1)}
+                    onHoldEnd={() => inst.nudge(0)}
+                  />
+                  <PerformancePad
+                    label="Bend +"
+                    hint="hold"
+                    ariaLabel="Nudge tempo up"
+                    onHoldStart={() => inst.nudge(1)}
+                    onHoldEnd={() => inst.nudge(0)}
+                  />
+                </div>
+                <div className="deck-group" role="group" aria-labelledby={holdFxId}>
+                  <span id={holdFxId} className="control-label">Hold FX</span>
+                  <div className="deck-pad-row hold-fx">
+                    <PerformancePad
+                      label="Echo"
+                      hint="throw"
+                      ariaLabel="Echo throw, while held"
+                      latched={inst.echo}
+                      onHoldStart={() => inst.holdEffect('echo')}
+                      onHoldEnd={() => inst.releaseEffect('echo')}
+                    />
+                    <PerformancePad
+                      label="Filter"
+                      hint="hold"
+                      ariaLabel="Filter hold, while held"
+                      latched={inst.filterHeld}
+                      onHoldStart={() => inst.holdEffect('filter')}
+                      onHoldEnd={() => inst.releaseEffect('filter')}
+                    />
+                    {/* Beat Repeat's slot: <RepeatSlot {...RepeatControls} /> from ui/HoldFx.tsx */}
+                  </div>
+                </div>
+                <div className="deck-pad-row deck-foot">
+                  <Segmented<number>
+                    label={inst.loopBars ? `Loop · ${inst.loopBars} bar${inst.loopBars === 1 ? '' : 's'}` : 'Loop · off'}
+                    value={inst.loopBars}
+                    onPick={inst.pickLoop}
+                    options={LOOP_OPTIONS}
+                  />
+                  {/* Three different exits, kept apart: Cancel scene (in the scene strip)
+                      restores the previous mix, Release FX (here, at the end of the Loop
+                      row, apart from the held pads) lets go of held effects, and Panic
+                      (in the bar, or the phone's bottom dock, so it never scrolls away)
+                      stops everything and clears the tails. */}
+                  <div className="deck-safety">
+                    <button
+                      type="button"
+                      className="text-button"
+                      disabled={!inst.echo && !inst.filterHeld}
+                      onClick={inst.releaseAllEffects}
+                    >
+                      Release FX
+                    </button>
+                  </div>
+                </div>
               </div>
             </div>
           </InstrumentPanel>
+          </div>
 
           <InstrumentPanel title="Mix to the next track" views={['perform']} className="next-panel">
             <div className="next-row">
