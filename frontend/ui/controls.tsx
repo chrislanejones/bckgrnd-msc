@@ -116,9 +116,12 @@ export function PerformancePad({
   onHoldEnd,
   keys,
   size = 'lg',
+  icon,
 }: {
   label: string;
   hint?: string;
+  /** A small glyph before the label (decorative: the name is the label or ariaLabel). */
+  icon?: ReactNode;
   ariaLabel?: string;
   latched?: boolean;
   onPress?: () => void;
@@ -209,7 +212,10 @@ export function PerformancePad({
       }
       onBlur={momentary ? () => heldBy.current === 'key' && release() : undefined}
     >
-      <span className="pad-label">{label}</span>
+      <span className="pad-label">
+        {icon ? <span className="pad-icon" aria-hidden="true">{icon}</span> : null}
+        {label}
+      </span>
       {hint ? <span className="pad-hint">{hint}</span> : null}
     </button>
   );

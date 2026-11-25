@@ -8,6 +8,7 @@
  */
 
 import type { RepeatDivision } from '../lib/engine';
+import { RefreshCw } from 'lucide-react';
 import { PerformancePad, Segmented } from './controls';
 
 const DIVISIONS: Array<{ value: RepeatDivision; label: string; aria: string }> = [
@@ -26,14 +27,17 @@ export type RepeatControls = {
 };
 
 /**
- * Beat Repeat: a momentary pad whose hint shows the division it repeats, then the
- * division as a radio group (one always picked, arrow keys move and pick).
+ * Beat Repeat: a momentary pad whose hint shows the division it repeats (filled acid
+ * while held, like every held pad), then the division
+ * as a radio group (one always picked, arrow keys move and pick). Chris's concept card,
+ * compact: the segmented divisions and a hold button, without the waveform.
  */
 export function RepeatSlot({ held, division, onHoldStart, onHoldEnd, onDivision }: RepeatControls) {
   return (
     <>
       <PerformancePad
         label="Repeat"
+        icon={<RefreshCw size={12} strokeWidth={2.5} />}
         hint={`1/${division}`}
         ariaLabel="Beat repeat, while held"
         latched={held}
