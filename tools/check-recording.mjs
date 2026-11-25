@@ -224,6 +224,11 @@ const E = { sq: 1, sa: 2, sc: 3, sr: 4, sj: 5, fq: 11, fs: 12, fe: 13, fc: 14, b
     const f = s.recording().events.at(-1);
     return f.outcome === 'cutShort' && f.reason === 5 && !('endStep' in f);
   })());
+  c.remember({ kind: 'rise', requestId: 43, target: 'drop', bars: 2 });
+  feed(E.bs, 43, 64, 2);
+  feed(E.ba, 43, 96, 0);
+  check('a Rise that ran its bars landed, whether or not the engine committed a separate landing vector',
+    s.recording().events.at(-1).outcome === 'landed' && s.recording().events.at(-1).endStep === 96);
   check('canceled and cut short still validate', valid(s.recording()).length === 0, valid(s.recording()).join('; '));
 }
 

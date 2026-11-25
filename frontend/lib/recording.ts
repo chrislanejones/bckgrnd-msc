@@ -107,11 +107,11 @@ export type RiseRecord = Common & {
   /** The fill's request id, for Rise + Fill. */
   fillRequestId?: number;
   /**
-   * `landed`: the scene landed; `ended`: the Rise ended without landing it;
-   * `cancelled`/`replaced`: stopped mid-rise; `open`: still rising when the take stopped.
+   * `landed`: it ran its bars and reached the scene (`buildApplied`); `cancelled` or
+   * `replaced`: stopped mid-rise; `open`: still rising when the take stopped.
    * The start was applied either way: what was heard is part of the take.
    */
-  outcome: 'landed' | 'ended' | 'cancelled' | 'replaced' | 'open';
+  outcome: 'landed' | 'cancelled' | 'replaced' | 'open';
   endStep?: number;
   reason?: number;
   crash: boolean;
@@ -468,7 +468,9 @@ export function fromEngine(
         payload: { slot: asked.target, name: nameOf(asked.target), bars: e.b || asked.bars, withFill: asked.fillId !== undefined,
           ...(asked.fillId !== undefined ? { fillRequestId: asked.fillId } : {}) } };
     case K.buildApplied:
-      return { status: 'ended', kind, requestId: id, step: e.a, outcome: e.b === 1 ? 'landed' : 'ended' };
+      // The Rise reached its scene: `b` only says whether a separate landing vector was
+      // committed too (engine-core/src/build.rs), which the host's Rise need not send.
+      return { status: 'ended', kind, requestId: id, step: e.a, outcome: 'landed' };
     case K.buildCancelled:
       // Before it started this is a plain cancel; after, it also closes the Rise.
       return { status: 'canceled', kind, requestId: id, outcome: 'cancelled', reason: e.a };

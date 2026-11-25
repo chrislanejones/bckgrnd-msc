@@ -34,15 +34,17 @@ function kit(page) {
   const rec = (method) => page.evaluate((m) => window.__BCKGRND_RECORDING__[m](), method);
   const waitCount = (n, opts = RT) =>
     page.waitForFunction((want) => (window.__BCKGRND_RECORDING__.recording()?.events.length ?? 0) >= want, n, opts);
-  const waitRecorded = (pred, opts = RT) =>
-    page.waitForFunction((src) => (window.__BCKGRND_RECORDING__.recording()?.events ?? []).some(new Function('e', `return ${src}`)), pred, opts);
-  return { slot, pad, waitState, waitStatus, play, rec, waitCount, waitRecorded };
+  /** Until an event of `kind` is in the take with its outcome settled (no eval: the page's CSP forbids it). */
+  const waitClosed = (kind, opts = RT) =>
+    page.waitForFunction((want) => (window.__BCKGRND_RECORDING__.recording()?.events ?? []).some((e) => e.kind === want && e.outcome !== 'open'), kind, opts);
+  return { slot, pad, waitState, waitStatus, play, rec, waitCount, waitClosed };
 }
 
 export async function recordingChecks({ open, check }) {
   {
     const { page, errors } = await open(1440, 1000);
     const k = kit(page);
+    let at = 'open';
     try {
       check('recording: the host exposes the recording hook, idle at first',
         await page.evaluate(() => typeof window.__BCKGRND_RECORDING__?.start === 'function' && window.__BCKGRND_RECORDING__.state() === 'idle'));
@@ -51,26 +53,30 @@ export async function recordingChecks({ open, check }) {
       check('recording: Start records', (await k.rec('state')) === 'recording');
 
       // A scene on the next bar.
+      at = 'scene on the next bar';
       await k.pad(SPARSE).click();
       await k.waitState(SPARSE, ['active', 'modified']);
       await k.waitCount(1);
 
       // A fill: kept once it starts, closed once it ends.
+      at = 'fill';
       await page.locator('.fill-button').click();
-      await k.waitRecorded("e.kind === 'fill' && e.outcome !== 'open'");
+      await k.waitClosed('fill');
 
       // A queued scene, canceled by pressing it again: never in the take.
+      at = 'cancel a queued scene';
       await k.pad(BUILD).click();
       await k.waitStatus(/^Build queued/);
       await k.pad(BUILD).click();
       await k.waitStatus(/^Build cancelled/);
 
       // A 2-bar Rise into Drop.
+      at = '2-bar Rise';
       const rise = page.getByRole('radio', { name: 'Rise into the scene over several bars' });
       if ((await rise.getAttribute('aria-checked')) !== 'true') await rise.click();
       await page.getByRole('radio', { name: 'Rise over 2 bars' }).click();
       await k.pad(DROP).click();
-      await k.waitRecorded("e.kind === 'rise' && e.outcome !== 'open'");
+      await k.waitClosed('rise');
       await k.rec('stop');
 
       const doc = await k.rec('recording');
@@ -100,6 +106,7 @@ export async function recordingChecks({ open, check }) {
         doc?.format === 'bckgrnd-msc/performance' && doc.version === 1 && typeof doc.track === 'string' && doc.stepsPerBar === 16 && doc.startedAtStep >= 0);
 
       // A transport Stop ends a take by itself; Clear empties it.
+      at = 'transport Stop';
       await k.rec('start');
       await page.getByRole('button', { name: 'Stop the track', exact: true }).click();
       await page.waitForFunction(() => window.__BCKGRND_RECORDING__.state() === 'stopped', null, RT);
@@ -107,7 +114,12 @@ export async function recordingChecks({ open, check }) {
       await k.rec('clear');
       check('recording: Clear leaves it idle and empty', (await k.rec('state')) === 'idle' && (await k.rec('recording')) === null);
     } catch (e) {
-      check('recording: the walk-through ran to the end', false, String(e.message).split('\n')[0]);
+      const seen = await page.evaluate(() => ({
+        state: window.__BCKGRND_RECORDING__?.state(),
+        status: document.querySelector('.scene-status')?.textContent?.trim(),
+        log: (window.__BCKGRND_RECORDING__?.log() ?? []).slice(-8).map((l) => `${l.requestId}:${l.kind}:${l.status}`).join(' '),
+      })).catch(() => ({}));
+      check('recording: the walk-through ran to the end', false, `at ${at}: ${String(e.message).split('\n')[0]} | ${JSON.stringify(seen)}`);
     }
     check('recording: no page errors', errors.length === 0, errors.join('; '));
     await page.close();

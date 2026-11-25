@@ -97,7 +97,7 @@
         "bars": { "enum": [2, 4, 8] },
         "withFill": { "type": "boolean" },
         "fillRequestId": { "$ref": "#/$defs/requestId" },
-        "outcome": { "enum": ["landed", "ended", "cancelled", "replaced", "open"] },
+        "outcome": { "enum": ["landed", "cancelled", "replaced", "open"] },
         "endStep": { "$ref": "#/$defs/step" },
         "reason": { "type": "integer", "minimum": 1 },
         "crash": { "type": "boolean" }

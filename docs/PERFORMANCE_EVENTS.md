@@ -63,14 +63,16 @@ Readers **reject** an unknown `format` or a newer `version`, as for projects.
 |---|---|---|
 | `scene` | `sceneApplied` for a scene pad (Compare listens and restores are not performance) | `slot`, `name` (as shown then), `timing` (`now`, `beat`, `bar`), `crash` |
 | `fill` | `fillStarted` | `style` (resolved, or null), `phraseBars` (0, 2, 4, 8, 16), `link` (`none`, `fillInto`, `rise`), `partner`, `outcome` (`played`, `cutShort`, `open`), `endStep`, `reason` |
-| `rise` | `buildStarted` | `slot`, `name` (the landing scene), `bars` (2, 4, 8), `withFill`, `fillRequestId`, `outcome` (`landed`, `ended`, `cancelled`, `replaced`, `open`), `endStep`, `reason`, `crash` |
+| `rise` | `buildStarted` | `slot`, `name` (the landing scene), `bars` (2, 4, 8), `withFill`, `fillRequestId`, `outcome` (`landed`, `cancelled`, `replaced`, `open`), `endStep`, `reason`, `crash` |
 | `fillInto` | `sceneApplied` for the scene half of a Fill into | `slot`, `name`, `fillRequestId`, `crash` |
 
 - A Fill into is two events: its `fill` (with `link: "fillInto"` and `partner`), then the
   `fillInto` landing on the step the fill ended. If the scene half is canceled while the
   fill plays, the fill stays (it was heard), unlinked, and there is no `fillInto`.
 - A Rise's landing is part of its `rise` event (`outcome: "landed"`, `endStep`). There
-  is no separate scene event for it.
+  is no separate scene event for it. `landed` means `buildApplied`: the Rise ran its bars
+  and reached the scene. (`b` on that event only says whether a separate landing vector
+  was committed as well, which the host's Rise need not send.)
 - `crash` turns true when the engine's `accentFired` follows for that request.
 - Outcomes are filled in later by `fillEnded`, `buildApplied`, `buildCancelled` and
   `buildReplaced`, while the take is still recording. `open` means the take stopped
