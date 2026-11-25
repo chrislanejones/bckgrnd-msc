@@ -3,6 +3,8 @@ Date: 2026-11-04   Status: draft
 
 > Amendment proposed 11-19-2026. ADR-021 (draft) would extend "one scene and one fill": the pending scene or build and the pending fill can form one linked request with a shared deadline, queued and canceled together.
 
+> Amendment proposed 11-24-2026 (`49f896b`). The host keeps one record per request id (`RequestBook` in `frontend/lib/scenes.ts`), each folded by its own events until the engine settles it, so a refused or canceled newer request no longer hides an older one still pending. The host never guesses what a newer request did to an older one.
+
 ## Context
 A scene launch changes up to 44 values (8 stems × 4 fields plus 12 effects) and has
 to land on a beat or bar, before that step's notes sound. The UI thread can't hit a

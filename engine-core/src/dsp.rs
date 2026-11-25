@@ -97,6 +97,7 @@ fn poly_blep(t: f32, dt: f32) -> f32 {
     }
 }
 
+#[derive(Clone, Copy)]
 pub struct Osc {
     phase: f32,
     inc: f32,

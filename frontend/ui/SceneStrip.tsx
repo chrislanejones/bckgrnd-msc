@@ -23,8 +23,8 @@
  * Bar 9, then Filling into Drop, then Active.
  */
 
-import { useEffect, useId, useRef, useState } from 'react';
-import { MoreHorizontal, X, Zap } from 'lucide-react';
+import { useCallback, useEffect, useId, useRef, useState } from 'react';
+import { ChevronRight, MoreHorizontal, X, Zap } from 'lucide-react';
 import type { Scene, SceneSlotId } from '../lib/contract';
 import { SCENE_SLOTS } from '../lib/contract';
 import {
@@ -38,6 +38,12 @@ import {
   type Timing,
 } from '../lib/scenes';
 import {
+  FILL_CHOICES,
+  FILL_MODE_LABEL,
+  FILL_STYLE_HINT,
+  FILL_STYLE_LABEL,
+  fillChoiceLabel,
+  isFillMode,
   PHRASE_BAR_CHOICES,
   fillButtonAria,
   fillButtonJob,
@@ -51,6 +57,9 @@ import {
   fillingLine,
   type FillAt,
   type FillJob,
+  type FillChoice,
+  type FillMode,
+  type FillStyle,
   type PhraseBars,
 } from '../lib/fills';
 import { STEM_ORDER, STEM_NAMES } from '../lib/stems';
@@ -62,7 +71,7 @@ import type { CSSProperties, ReactNode } from 'react';
 export type FillControls = {
   /** The fill the engine holds (plain, a Fill into's or a Rise's), or null. */
   job: FillJob | null;
-  /** The track's fill, by name. */
+  /** The fill's name for its buttons: its style's ("Classic fill"). */
   name: string;
   at: FillAt;
   phraseBars: PhraseBars;
@@ -107,7 +116,12 @@ type Props = {
   onReset: (slot: SceneSlotId) => void;
   /** Crash on launch for one slot (project version 4). */
   onCrash: (slot: SceneSlotId, crash: boolean) => void;
-  /** Rendered at the end of the toolbar row (Compare A/B). */
+  /**
+   * A press on an unavailable fill button, with its reason: shown in the status line,
+   * so a touch user, who gets no tooltip, sees why (`useSceneNotice`).
+   */
+  onUnavailable?: (reason: string) => void;
+  /** Rendered at the end of the toolbar, a row of its own (Compare A/B, when unfolded). */
   children?: ReactNode;
 };
 
@@ -291,7 +305,7 @@ export function SceneStrip(props: Props) {
             <X size={12} aria-hidden="true" /> Cancel
           </button>
         </div>
-        {fill ? <FillTools fill={fill} ids={reasonIds} /> : null}
+        {fill ? <FillTools fill={fill} ids={reasonIds} onUnavailable={props.onUnavailable} /> : null}
         {props.children}
       </div>
       {fill ? <FillReasons fill={fill} ids={reasonIds} /> : null}
@@ -300,22 +314,104 @@ export function SceneStrip(props: Props) {
 }
 
 /**
- * The scene panel's header extras: the last outcome as a status line and the
- * Shift+1–4 hint as a small tag. Rendered as the panel's header actions, so the
+ * The scene panel's header extras: the last outcome as a status line, the Fill style
+ * menu and the Shift+1–4 hint as a small tag. Rendered as the panel's header actions, so the
  * status needs no row of its own.
  */
-export function SceneHeader({ status }: { status: string }) {
+export function SceneHeader({
+  status,
+  fillStyle,
+  compare,
+}: {
+  status: string;
+  /** Fill style, when the track has fills: the choice and how to change it. */
+  fillStyle?: { style: FillChoice; next: Record<FillMode, FillStyle>; onStyle: (style: FillChoice) => void };
+  /** Compare A/B's fold: the toggle sits here, the row it opens ends the toolbar. */
+  compare?: CompareFold;
+}) {
   return (
     <>
       {/* Discrete changes only ("Drop queued", "Drop active"), never every beat. */}
       <p className="scene-status" role="status" aria-live="polite" title={status || undefined}>
         {status}
       </p>
+      {fillStyle ? <FillStyleSelect {...fillStyle} /> : null}
+      {compare ? <CompareToggle {...compare} /> : null}
       <span className="scene-keys" title="Shift+1 to Shift+4 launch the four scenes">
         <kbd>Shift</kbd> <kbd>1–4</kbd>
       </span>
     </>
   );
+}
+
+/** Compare A/B's fold, as the header toggle needs it. */
+export type CompareFold = {
+  /** The row is showing: unfolded, or a capture exists. */
+  shown: boolean;
+  /** A capture exists, so the row stays until Keep current or Exit comparison. */
+  comparing: boolean;
+  /** The id of the row it shows. */
+  controls: string;
+  onToggle: () => void;
+  onUnavailable: (reason: string) => void;
+};
+
+/** Why the fold can't close: a comparison is under way and its state must stay in view. */
+const COMPARE_HELD = 'Compare A/B stays open while comparing: Keep current or Exit comparison';
+
+/**
+ * Compare A/B's fold toggle (Night 9B), in the panel header beside Fill style. Folded by
+ * default and remembered per viewer; a capture holds the row open, so which mix is
+ * playing (A · Listening, B · Modified) is never out of sight during a comparison.
+ * "Compare A/B" on a wide panel, "A/B" on a narrow one; the name is always the full one.
+ */
+function CompareToggle({ shown, comparing, controls, onToggle, onUnavailable }: CompareFold) {
+  const reasonId = useId();
+  return (
+    <>
+      <button
+        type="button"
+        className="compare-toggle tap"
+        aria-expanded={shown}
+        aria-controls={shown ? controls : undefined}
+        aria-disabled={comparing || undefined}
+        aria-describedby={comparing ? reasonId : undefined}
+        aria-label="Compare A/B"
+        title={comparing ? COMPARE_HELD : shown ? 'Fold Compare A/B' : 'Compare two mix snapshots'}
+        onClick={comparing ? () => onUnavailable(COMPARE_HELD) : onToggle}
+      >
+        <ChevronRight className="compare-toggle-chevron" aria-hidden="true" size={12} strokeWidth={2.5} />
+        <span className="compare-toggle-full" aria-hidden="true">Compare A/B</span>
+        <span className="compare-toggle-short" aria-hidden="true">A/B</span>
+      </button>
+      {comparing ? (
+        <span id={reasonId} hidden>
+          {COMPARE_HELD}
+        </span>
+      ) : null}
+    </>
+  );
+}
+
+/**
+ * The scenes status line with a short-lived notice over it: the reason an unavailable
+ * control can't be pressed, said where the panel already reports what happened. It
+ * gives way to the next real status, or after a few seconds.
+ */
+export function useSceneNotice(status: string): [string, (text: string) => void] {
+  const [notice, setNotice] = useState<{ text: string; over: string } | null>(null);
+  useEffect(() => {
+    if (!notice) return;
+    const t = window.setTimeout(() => setNotice(null), 4000);
+    return () => window.clearTimeout(t);
+  }, [notice]);
+  // The first real status change retires the notice, so it can't come back when the
+  // status later returns to the line it was shown over.
+  useEffect(() => {
+    if (notice && notice.over !== status) setNotice(null);
+  }, [notice, status]);
+  const notify = useCallback((text: string) => setNotice({ text, over: status }), [status]);
+  return [notice && notice.over === status ? notice.text : status, notify];
 }
 
 function queuedLine(r: SceneRequest, name: string): string {
@@ -375,7 +471,15 @@ function FillReasons({ fill, ids }: { fill: FillControls; ids: { fill: string; i
 }
 
 /** Fill's own row: Fill at, the phrase length (Phrase end only), Fill and Fill → Drop. */
-function FillTools({ fill, ids }: { fill: FillControls; ids: { fill: string; into: string } }) {
+function FillTools({
+  fill,
+  ids,
+  onUnavailable,
+}: {
+  fill: FillControls;
+  ids: { fill: string; into: string };
+  onUnavailable?: (reason: string) => void;
+}) {
   return (
     <div className="scene-fill-tools" role="group" aria-label="Fill">
       <Segmented<FillAt>
@@ -401,21 +505,63 @@ function FillTools({ fill, ids }: { fill: FillControls; ids: { fill: string; int
           <span className="scene-build-unit" aria-hidden="true">bars</span>
         </div>
       ) : null}
-      <FillButton fill={fill} reasonId={ids.fill} />
-      <FillIntoButton fill={fill} reasonId={ids.into} />
+      <FillButton fill={fill} reasonId={ids.fill} onUnavailable={onUnavailable} />
+      <FillIntoButton fill={fill} reasonId={ids.into} onUnavailable={onUnavailable} />
     </div>
   );
 }
 
 /**
- * The Fill button: the track's fill, at the Fill at timing. Shows where a queued fill
+ * Fill style (Night 9): a compact menu of the four, Classic first. A native select, so
+ * keyboard, touch and screen readers get the platform's own picker; its name is "Fill
+ * style" and its tooltip says what the chosen one does. A fill already queued keeps
+ * the style it was sent with.
+ *
+ * It sits in the panel's header, not on the fill row: with Phrase end, 16 bars and the
+ * widest button words ("Fill · Next phrase → Drop") that row is already full at every
+ * mouse width from 900 to 1280px, and a second fill row would break the toolbar's
+ * three 32px rows (tools/verify-ui-fills.mjs).
+ */
+function FillStyleSelect({ style, next, onStyle }: { style: FillChoice; next: Record<FillMode, FillStyle>; onStyle: (style: FillChoice) => void }) {
+  const title = isFillMode(style)
+    ? `Fill style: ${FILL_MODE_LABEL[style]}, next ${FILL_STYLE_LABEL[next[style]]} (${FILL_STYLE_HINT[next[style]]})`
+    : `Fill style: ${FILL_STYLE_LABEL[style]}, ${FILL_STYLE_HINT[style]}`;
+  return (
+    <label className="scene-fill-style" title={title}>
+      <span className="control-label">Fill style</span>
+      <select
+        className="fill-style-select"
+        value={style}
+        onChange={(event) => onStyle(event.target.value as FillChoice)}
+      >
+        {/* Random and Rotate say what the next press plays: "Rotate · next Busy". */}
+        {FILL_CHOICES.map((choice) => (
+          <option key={choice} value={choice}>
+            {fillChoiceLabel(choice, isFillMode(choice) ? next[choice] : choice)}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
+/**
+ * The Fill button: the track's fill in the chosen style, at the Fill at timing. Shows where a queued fill
  * plays ("Fill · Bar 8", "Fill · Next phrase") and any fill playing.
  *
  * Unavailable is aria-disabled, not disabled: it stays in the tab order, so focus is
  * not dropped to the page when a queued fill starts playing under it, and the reason
  * (a Rise ending with the fill, say) is read as its description.
  */
-function FillButton({ fill, reasonId }: { fill: FillControls; reasonId: string }) {
+function FillButton({
+  fill,
+  reasonId,
+  onUnavailable,
+}: {
+  fill: FillControls;
+  reasonId: string;
+  onUnavailable?: (reason: string) => void;
+}) {
   const own = fillButtonJob(fill.job);
   const state = own ? own.status : 'idle';
   const phrase = fillPhrase(fill.at, fill.phraseBars);
@@ -430,7 +576,7 @@ function FillButton({ fill, reasonId }: { fill: FillControls; reasonId: string }
       aria-label={fillButtonAria(fill.job, fill.name, phrase)}
       aria-describedby={reason ? reasonId : undefined}
       title={reason ?? fillButtonTitle(fill.name, own ? own.phrase : phrase)}
-      onClick={off ? undefined : fill.onFill}
+      onClick={off ? (reason && onUnavailable ? () => onUnavailable(`Fill: ${reason}`) : undefined) : fill.onFill}
     >
       {fillButtonLabel(fill.job)}
     </button>
@@ -442,7 +588,15 @@ function FillButton({ fill, reasonId }: { fill: FillControls; reasonId: string }
  * "Fill · Bar 8 → Drop" while it waits, "Filling → Drop" while the fill plays; pressing it
  * again cancels it.
  */
-function FillIntoButton({ fill, reasonId }: { fill: FillControls; reasonId: string }) {
+function FillIntoButton({
+  fill,
+  reasonId,
+  onUnavailable,
+}: {
+  fill: FillControls;
+  reasonId: string;
+  onUnavailable?: (reason: string) => void;
+}) {
   const own = fillIntoJob(fill.job);
   const state = own ? own.status : 'idle';
   const phrase = fillPhrase(fill.at, fill.phraseBars);
@@ -457,7 +611,7 @@ function FillIntoButton({ fill, reasonId }: { fill: FillControls; reasonId: stri
       aria-label={aria}
       aria-describedby={reason ? reasonId : undefined}
       title={reason ?? aria}
-      onClick={reason !== null ? undefined : fill.onFillInto}
+      onClick={reason !== null ? () => onUnavailable?.(`Fill → ${fill.intoName}: ${reason}`) : fill.onFillInto}
     >
       {fillIntoLabel(fill.job, fill.intoName)}
     </button>

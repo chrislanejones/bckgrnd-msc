@@ -2104,6 +2104,11 @@ body {
     min-height: var(--control-md);
   }
 
+  /* Echo's divisions and the stem pills too: real 44px pills, not just a hit area. */
+  .inspector .segment {
+    min-height: var(--control-md);
+  }
+
   .inspector-head .segment {
     min-height: var(--control-md);
   }
@@ -2156,6 +2161,60 @@ body {
     min-height: 1.5rem;
     padding-block: 0;
     padding-inline: 0.2rem;
+  }
+}
+
+/* Short windows, with a mouse: the rack's rhythm tightens so it fits without scrolling.
+   Below 820px tall (1280 x 800, 1024 x 768) Output open fits too: the groups close up
+   to 6px, a heading sits on its knobs, the value pill drops to 24px, the compact
+   floor, and Echo's divisions lose their word "Time". Below 680px tall (1366 x 640) the dials also step down to 40px; the 48px
+   dial stays everywhere the rack fits at 48. Text sizes and colors do not change. */
+/* Words a heading carries only while a short window has hidden them elsewhere. */
+.inspector-short-only {
+  display: none;
+}
+
+@media (pointer: fine) and (min-width: 900px) and (max-height: 819.98px) {
+  .inspector-short-only {
+    display: inline;
+  }
+
+  /* Groups keep more air between them than inside them: 6px apart, the heading
+     flush on its knobs, told apart by weight and color rather than space. */
+  .inspector-body {
+    gap: var(--group-gap);
+  }
+
+  .inspector-legend {
+    margin-bottom: 0;
+    line-height: 1;
+  }
+
+  /* Echo's three rows of 24px divisions stand as tall as a knob once their word
+     "Time" goes, as "Fill at" does in a narrow scenes toolbar. The divisions keep it
+     as their group's name, and its "off" shows on the Echo heading instead. */
+  .inspector-echo > .segmented-block > .control-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
+  .inspector .knob {
+    gap: 1px;
+  }
+
+  .inspector .knob-value {
+    min-height: 1.5rem;
+    padding-block: 0;
+  }
+}
+
+@media (pointer: fine) and (min-width: 900px) and (max-height: 679.98px) {
+  .inspector {
+    --knob-size: 2.5rem;
   }
 }
 
@@ -3475,6 +3534,39 @@ html[data-control-drag="yes"] * {
   outline-offset: 2px;
 }
 
+/* Touch (Night 9B): the value and its Reset take a 44px finger without growing. The
+   value is a transparent pill, so it simply widens to 44px; each gets a 44px-tall hit
+   area from an invisible ::before, and Reset's reaches 12.8px around its 20px ring
+   (45.6px), so the pair sits as far apart and the two areas meet without overlapping.
+   Both reach about 9px above the readout, over the dial's empty bottom corners (the
+   dial keeps a 49px-tall hit), and as far below it, into the gap before the next row. */
+@media (pointer: coarse) {
+  .knob-readout {
+    gap: 0.8rem;
+  }
+
+  .knob-value,
+  .knob-reset {
+    position: relative;
+  }
+
+  .knob-value {
+    min-width: var(--control-md);
+  }
+
+  .knob-value::before {
+    content: "";
+    position: absolute;
+    inset: calc((var(--control-md) - 100%) / -2) 0;
+  }
+
+  .knob-reset::before {
+    content: "";
+    position: absolute;
+    inset: -0.8rem;
+  }
+}
+
 .knob-dial {
   position: relative;
   width: var(--knob);
@@ -3689,6 +3781,155 @@ html[data-control-drag="yes"] * {
   text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--color-fg);
+}
+
+/* Fill style (Night 9): a compact native menu in the scenes header, beside the status
+   line and the Shift 1-4 hint, with the drawn chevron the Next song menu uses. 24px
+   for a mouse (the compact floor), so the header keeps its height; 44px on touch. */
+.scene-fill-style {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.scene-fill-style > .control-label {
+  white-space: nowrap;
+}
+
+.fill-style-select {
+  min-height: 1.5rem;
+  appearance: none;
+  -webkit-appearance: none;
+  padding: 0.1rem 1.6rem 0.1rem 0.7rem;
+  border: 1px solid var(--color-line);
+  border-radius: 999px;
+  background-color: var(--color-surface);
+  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 8' fill='none' stroke='%238e939c' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M1 1.5 6 6.5 11 1.5'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 0.65rem center;
+  background-size: 0.6rem;
+  color: var(--color-fg);
+  font: inherit;
+  font-size: var(--text-label);
+  font-weight: 700;
+  cursor: pointer;
+}
+
+@media (pointer: coarse) {
+  .fill-style-select {
+    min-height: var(--control-md);
+  }
+}
+
+/* Compare A/B's fold (Night 9B): a header pill like Fill style beside it, so the
+   toolbar is two rows until Compare is wanted. The chevron turns as Output's does.
+   While a capture holds the row open the pill reads as on but inert (aria-disabled),
+   and a press says why in the status line. */
+.compare-toggle {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-height: 1.5rem;
+  padding: 0.1rem 0.7rem 0.1rem 0.5rem;
+  border: 1px solid var(--color-line);
+  border-radius: 999px;
+  background: var(--color-surface);
+  color: var(--color-fg);
+  font: inherit;
+  font-size: var(--text-label);
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.compare-toggle:hover:not([aria-disabled="true"]) {
+  border-color: color-mix(in srgb, var(--color-acid) 40%, var(--color-line));
+}
+
+.compare-toggle[aria-expanded="true"] {
+  border-color: color-mix(in srgb, var(--color-acid) 55%, var(--color-line));
+}
+
+.compare-toggle[aria-disabled="true"] {
+  cursor: default;
+}
+
+.compare-toggle-chevron {
+  flex: none;
+  color: var(--color-muted);
+  transition: transform 120ms ease-out;
+}
+
+.compare-toggle[aria-expanded="true"] .compare-toggle-chevron {
+  transform: rotate(90deg);
+}
+
+/* "A/B" until the panel has room for the full words (1440px and up with a mouse). */
+.compare-toggle-full {
+  display: none;
+}
+
+@container scenes (min-width: 47rem) {
+  .compare-toggle-full {
+    display: inline;
+  }
+
+  .compare-toggle-short {
+    display: none;
+  }
+}
+
+@media (pointer: coarse) {
+  .compare-toggle {
+    min-height: var(--control-md);
+    min-width: var(--control-md);
+    justify-content: center;
+  }
+}
+
+/* A narrow touch panel, and any phone-width one: Fill style and the A/B toggle share
+   one row under the title (A/B at its end), and the status takes its own full line
+   below them, next to the pads it reports on, rather than a sliver beside them. A
+   mouse at 900-1180px (a 34rem panel) keeps the one header row. */
+@media (pointer: coarse) {
+  @container scenes (max-width: 34rem) {
+    .scenes-panel .panel-actions {
+      flex-wrap: wrap;
+      row-gap: var(--group-gap);
+    }
+
+    .scenes-panel .scene-status {
+      flex: 1 0 100%;
+      order: 1;
+    }
+
+    .compare-toggle {
+      margin-inline-start: auto;
+    }
+  }
+}
+
+@container scenes (max-width: 26rem) {
+  .scenes-panel .panel-actions {
+    flex-wrap: wrap;
+    row-gap: var(--group-gap);
+  }
+
+  .scenes-panel .scene-status {
+    flex: 1 0 100%;
+    order: 1;
+  }
+
+  .compare-toggle {
+    margin-inline-start: auto;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .compare-toggle-chevron {
+    transition: none;
+  }
 }
 
 .scene-keys {

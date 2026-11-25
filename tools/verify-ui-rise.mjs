@@ -576,9 +576,147 @@ export async function riseChecks({ open, check }) {
     check(`${tag}: no page errors`, errors.length === 0, errors.join('; '));
     await page.close();
   }
+
+  await riseRequestChecks({ open, check });
 }
 
-// ---- On its own: node tools/verify-ui-rise.mjs [baseUrl] -----------------------
+/** Every enum parameter's options, from the registry a saved project is read against. */
+const ENUMS = Object.fromEntries(
+  JSON.parse(readFileSync(join(root, 'contracts/parameters.json'), 'utf8'))
+    .parameters.filter((p) => p.kind === 'enum')
+    .map((p) => [p.id, p.options.map((o) => o.value)]),
+);
+
+/**
+ * The host's record of a Rise (Night 9). The engine only replaces a build when the
+ * scene queued over it commits, so a scene withdrawn before then leaves the Rise
+ * running, and the host must still follow it, adopt its lanes and show it active.
+ * And following a Rise must leave the knobs on the store's own values, not the
+ * engine's float32 copies: Echo time 1/8T read back as 0.3333333432674408 is not a
+ * registry option, so a project saved after it would not open again.
+ *
+ * Run by `riseChecks`, or alone: node tools/verify-ui-rise.mjs [baseUrl] requests
+ */
+export async function riseRequestChecks({ open, check }) {
+  // ---- A scene queued over a running Rise, then cancelled: the Rise still lands. ----
+  {
+    const { page, errors } = await open(1440, 1000);
+    const k = kit(page);
+    const tag = 'rise kept';
+    try {
+      await page.waitForSelector('.scene-slot');
+      await k.play();
+      await k.knobFill('Cutoff', 450);
+      await k.riseOver(4);
+      await k.nextBar();
+      await k.pad(3).click();
+      await k.waitLine(3, /^Rising · 1 of 4$/);
+      // Next bar, then Sparse, withdrawn at once: well inside the bar it waits for.
+      await page.getByRole('radio', { name: 'Launch on the next bar' }).click();
+      await k.nextBar();
+      await k.pad(1).click();
+      const queued = await k.waitState(1, ['sending', 'queued'], { timeout: 1500 }).then(() => true, () => false);
+      await k.pad(1).click();
+      const withdrawn = await k.waitStatus(/^Sparse cancelled/).then(() => true, () => false);
+      check(`${tag}: Sparse queued over the Rise, then cancelled`, queued && withdrawn, await k.statusText());
+      const rising = await k.waitLine(3, /^Rising · [234] of 4$/, { timeout: 6000 }).then(() => true, () => false);
+      check(`${tag}: the Drop pad goes on counting the Rise`, rising, `${await k.stateOf(3)} "${await k.lineOf(3)}"`);
+      const landed = await k.waitState(3, ['active', 'modified']).then(() => true, () => false);
+      check(`${tag}: Drop lands and shows active`, landed, `${await k.stateOf(3)} "${await k.lineOf(3)}"; ${await k.statusText()}`);
+      await page.waitForTimeout(400);
+      const off = differ(await k.mix(), await k.sceneMix(3));
+      check(`${tag}: every knob and fader lands on Drop`, off.length === 0, show(await k.mix(), off));
+      check(`${tag}: no pad is left busy`, (await k.busy()).length === 0, JSON.stringify(await k.busy()));
+    } catch (e) {
+      check(`${tag}: the walk-through ran to the end`, false, String(e.message).split('\n')[0]);
+    }
+    check(`${tag}: no page errors`, errors.length === 0, errors.join('; '));
+    await page.close();
+  }
+
+  // ---- Panic with a scene queued over a running Rise: the Rise's restoring base still
+  // reaches the knobs, though Panic has cleared the book. ---------------------------
+  {
+    const { page, errors } = await open(1440, 1000);
+    const k = kit(page);
+    const tag = 'rise panic under a scene';
+    try {
+      await page.waitForSelector('.scene-slot');
+      await k.play();
+      await k.knobFill('Cutoff', 450);
+      const before = await k.mix();
+      await k.riseOver(4);
+      await k.nextBar();
+      await k.pad(3).click();
+      await k.waitLine(3, /^Rising · 2 of 4$/);
+      await page.getByRole('radio', { name: 'Launch on the next bar' }).click();
+      await k.nextBar();
+      await k.pad(1).click();
+      await k.waitState(1, ['sending', 'queued'], { timeout: 1500 });
+      const moved = differ(before, await k.mix());
+      // Twice in one task: the second Panic finds no Rise in the book, and must not
+      // forget the one the first is still closing (CodeRabbit, PR #12).
+      await page.evaluate(() => {
+        const b = document.querySelector('button.panic-button');
+        b.click();
+        b.click();
+      });
+      await k.waitStatus(/^Panic: stopped, nothing queued, effects released$/);
+      await page.waitForTimeout(1200);
+      const after = await k.mix();
+      check(`${tag}: the knobs are back at their pre-Rise values, after a double Panic`,
+        moved.length > 0 && differ(before, after).length === 0, show(after, differ(before, after)) || `${moved.length} had moved`);
+      check(`${tag}: no pad is left busy`, (await k.busy()).length === 0, JSON.stringify(await k.busy()));
+    } catch (e) {
+      check(`${tag}: the walk-through ran to the end`, false, String(e.message).split('\n')[0]);
+    }
+    check(`${tag}: no page errors`, errors.length === 0, errors.join('; '));
+    await page.close();
+  }
+
+  // ---- Echo time 1/8T through a Rise and its cancel: exact values, never float32. ----
+  {
+    const { page, errors } = await open(1440, 1000);
+    const k = kit(page);
+    const tag = 'rise exact';
+    const offOptions = (p) =>
+      Object.entries(ENUMS)
+        .filter(([id, values]) => id in p.params && !values.includes(p.params[id]))
+        .map(([id]) => `${id} ${p.params[id]}`);
+    try {
+      await page.waitForSelector('.scene-slot');
+      const triplet = page.getByRole('button', { name: 'Echo every eighth triplet', exact: true });
+      // Echo time is on the inspector's Master tab.
+      if ((await triplet.count()) === 0) await page.locator('.inspector-head').getByText('Master', { exact: true }).first().click();
+      await triplet.click();
+      await k.play();
+      const before = await k.mix();
+      check(`${tag}: Echo time starts on 1/8T exactly`, before['fx.echoTime'] === 1 / 3, String(before['fx.echoTime']));
+      await k.riseOver(2);
+      await k.nextBar();
+      await k.pad(3).click();
+      await k.waitLine(3, /^Rising · 2 of 2$/);
+      const mid = await k.project(() => window.__BCKGRND_PROJECT__());
+      check(`${tag}: mid-rise, every enum knob holds one of its options`, offOptions(mid).length === 0, offOptions(mid).join(', '));
+      await k.pad(3).click();
+      await k.waitStatus(/rise cancelled/);
+      await page.waitForTimeout(600);
+      const after = await k.project(() => window.__BCKGRND_PROJECT__());
+      check(`${tag}: after the cancel, Echo time is still exactly 1/8T`, after.params['fx.echoTime'] === 1 / 3, String(after.params['fx.echoTime']));
+      check(`${tag}: and every enum knob holds one of its options`, offOptions(after).length === 0, offOptions(after).join(', '));
+      const back = await k.mix();
+      const drift = differ(before, back, 0);
+      check(`${tag}: every knob and fader is back on its own value, not a float32 copy`, drift.length === 0,
+        drift.map((key) => `${key} ${before[key]} -> ${back[key]}`).join(', '));
+    } catch (e) {
+      check(`${tag}: the walk-through ran to the end`, false, String(e.message).split('\n')[0]);
+    }
+    check(`${tag}: no page errors`, errors.length === 0, errors.join('; '));
+    await page.close();
+  }
+}
+
+// ---- On its own: node tools/verify-ui-rise.mjs [baseUrl] [requests] --------------
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
   const { chromium } = await import('playwright');
   const baseUrl = process.argv[2] ?? 'http://127.0.0.1:8080';
@@ -600,7 +738,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
     return { page, errors };
   };
   try {
-    await riseChecks({ open, check });
+    await (process.argv[3] === 'requests' ? riseRequestChecks : riseChecks)({ open, check });
   } finally {
     await browser.close();
   }

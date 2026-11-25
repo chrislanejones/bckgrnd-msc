@@ -329,9 +329,160 @@ check('a merged crash is said the same way', s.accentStatus('Drop', 2) === 'Drop
 check('a crash silent under a solo says nothing', s.accentStatus('Drop', 0) === null);
 check('accentFired is not a launch event, so it never settles a request', !s.isLaunchEvent(s.EVENT.accentFired));
 
+// ---- Fill style (Night 9, frontend/lib/fills.ts) ------------------------------------
+{
+  const lanes = { kick: [], clap: [], hat: [], hatOpen: [] };
+  const styles = fl.FILL_STYLES.map((style, i) => ({ id: `f${i}`, name: style, style, ...lanes }));
+  check('fill style: four styles, Classic first and the default',
+    JSON.stringify(fl.FILL_STYLES) === '["classic","simple","busy","syncopated"]' && fl.DEFAULT_FILL_STYLE === 'classic'
+    && fl.FILL_STYLES.map((x) => fl.FILL_STYLE_LABEL[x]).join() === 'Classic,Simple,Busy,Syncopated');
+  check('fill style: the index is the style\'s place among the fill styles',
+    fl.FILL_STYLES.every((x, i) => fl.fillIndex(styles, x) === i)
+    && fl.fillIndex([...styles].reverse(), 'classic') === 3);
+  check('fill style: no styles, or a style missing, falls back to Classic\'s 0',
+    fl.fillIndex(undefined, 'busy') === 0 && fl.fillIndex([], 'busy') === 0 && fl.fillIndex(styles.slice(0, 2), 'syncopated') === 0);
+  const track = { id: 't', fills: [{ id: 'roll', name: 'Clap roll', ...lanes }] };
+  const sent = fl.withFillStyles(track, styles);
+  check('fill style: the engine is sent the styles as fills, the arrangement left as it is',
+    sent.fills.length === 4 && sent.fills[2].style === 'busy' && track.fills.length === 1 && sent !== track);
+  check('fill style: without styles the arrangement goes unchanged',
+    fl.withFillStyles(track, undefined) === track && fl.withFillStyles(track, []) === track);
+  // ---- Random and Rotate: resolved at queue time, moved on only when a fill plays.
+  const C = fl.FILL_CURSOR;
+  check('fill choice: six in the menu, the four styles then Random and Rotate',
+    JSON.stringify(fl.FILL_CHOICES) === '["classic","simple","busy","syncopated","random","rotate"]');
+  // Play `n` fills by `choice`, each started: the styles heard.
+  const playN = (choice, n, have = styles, cursor = C) => {
+    const out = [];
+    for (let i = 0; i < n; i += 1) {
+      const pick = fl.resolveFill(choice, have, cursor);
+      out.push(pick.style);
+      if (pick.index !== fl.fillIndex(have, pick.style)) out.push('BAD-INDEX');
+      cursor = fl.advanceFill(cursor, choice, pick.style);
+    }
+    return out;
+  };
+  check('rotate: Classic, Simple, Busy, Syncopated, then Classic again, with their indexes',
+    playN('rotate', 6).join() === 'classic,simple,busy,syncopated,classic,simple'
+    && [0, 1, 2, 3].every((r) => fl.resolveFill('rotate', styles, { ...C, rotate: r }).index === r));
+  const rotHalf = styles.filter((f) => f.style !== 'simple');
+  check('rotate: a style the track lacks is skipped', playN('rotate', 4, rotHalf).join() === 'classic,busy,syncopated,classic');
+  const seqA = playN('random', 40);
+  const seqB = playN('random', 40);
+  check('random: the sequence is the same every session (fixed seed + counter)', seqA.join() === seqB.join() && seqA.length === 40
+    && seqA.slice(0, 8).join() === 'syncopated,classic,syncopated,classic,simple,syncopated,busy,simple', seqA.slice(0, 8).join());
+  check('random: never the same style twice in a row', seqA.every((x, i) => i === 0 || x !== seqA[i - 1]));
+  check('random: all four come up, and nothing else', new Set(seqA).size === 4 && seqA.every((x) => fl.FILL_STYLES.includes(x)));
+  const two = styles.filter((f) => ['classic', 'busy'].includes(f.style));
+  const seqTwo = playN('random', 10, two);
+  check('random: only the styles the track has (two: they alternate)',
+    seqTwo.every((x) => x === 'classic' || x === 'busy') && seqTwo.every((x, i) => i === 0 || x !== seqTwo[i - 1]), seqTwo.join());
+  check('random: one style only, it repeats', playN('random', 3, styles.slice(0, 1)).join() === 'classic,classic,classic');
+  check('random: a different seed is a different sequence',
+    Array.from({ length: 12 }, (_, n) => fl.fillDraw(1, n)).join() !== Array.from({ length: 12 }, (_, n) => fl.fillDraw(fl.FILL_SEED, n)).join());
+  check('fallback: no fillStyles plays Classic and names it Classic, for a style and both modes',
+    ['busy', 'syncopated', 'random', 'rotate'].every((x) => {
+      const p = fl.resolveFill(x, undefined, { ...C, rotate: 2, draws: 5, last: 'classic' });
+      return p.style === 'classic' && p.index === 0;
+    }));
+  check('fallback: a style missing from the library is Classic, by name too',
+    fl.resolveFill('busy', rotHalf.filter((f) => f.style !== 'busy'), C).style === 'classic');
+  check('a cancel does not move the cursor: the next press plays what was shown',
+    fl.resolveFill('rotate', styles, C).style === 'classic' && fl.resolveFill('rotate', styles, C).style === 'classic'
+    && fl.resolveFill('rotate', styles, fl.advanceFill(C, 'rotate', 'classic')).style === 'simple');
+  check('a plain style playing leaves Rotate and Random where they were, but is the last played',
+    (() => { const c = fl.advanceFill(C, 'busy', 'busy'); return c.rotate === 0 && c.draws === 0 && c.last === 'busy'; })());
+  check('the menu and the Fill button say what the next press plays',
+    fl.fillChoiceLabel('rotate', 'busy') === 'Rotate · next Busy' && fl.fillChoiceLabel('simple', 'simple') === 'Simple'
+    && fl.fillChoiceName('random', 'syncopated') === 'Syncopated fill, by Random' && fl.fillChoiceName('busy', 'busy') === 'Busy fill');
+  check('the Fill button names a non-Classic style in place of "Fill"; Classic keeps Night 8\'s words',
+    fl.fillButtonLabel({ ...job({ phrase: 0 }), status: 'queued', bar: 8, style: 'busy' }) === 'Busy · Bar 8'
+    && fl.fillButtonLabel({ ...job(), status: 'playing', style: 'syncopated' }) === 'Synco playing'
+    && fl.fillButtonLabel({ ...job(), status: 'queued', bar: 8, late: true, style: 'simple' }) === 'Simple · Next phrase'
+    && fl.fillButtonLabel({ ...job({ phrase: 0 }), status: 'queued', bar: 8, style: 'classic' }) === 'Fill · Bar 8');
+
+  check('fill style: the buttons name the style', fl.fillStyleName('syncopated') === 'Syncopated fill'
+    && fl.fillButtonAria(null, fl.fillStyleName('busy'), 0) === 'Busy fill for one bar, from the next bar');
+}
+
 const vec = s.sceneVector(applied);
 const back = s.mixFromVector(vec);
 check('mixFromVector inverts sceneVector', s.sameMix(s.copyMix(back), applied) && s.sceneVector(back).every((v, i) => v === vec[i]));
+
+// Night 9: the host keeps a record per request id (RequestBook). A newer request that
+// is refused or cancelled never clobbers an older pending one.
+const ask = (requestId, target, extra = {}) => ({ requestId, target, revision: 1, generation: 0, timing: 'bar', status: 'sending', mix: s.copyMix(factory(target)), ...extra });
+const said = (kind, id, a = 0, b = 0) => ({ kind, id, a, b });
+const fold = (book, ...events) => events.reduce((step, e) => s.foldBookEvent(step.book, e), { book });
+{
+  // The overwrite case: Sparse waits for its bar, a newer Drop is refused, Sparse lands.
+  let book = s.bookSend(s.EMPTY_BOOK, ask(1, 'sparse'));
+  book = fold(book, said(s.EVENT.sceneQueued, 1, 9)).book;
+  book = s.bookSend(book, ask(2, 'drop'));
+  check('a newer request is the one shown, and the older one is kept', book.shown.requestId === 2 && book.pending.map((r) => r.requestId).join() === '1,2');
+  const refused = s.foldBookEvent(book, said(s.EVENT.sceneRejected, 2, 3));
+  check('the newer one refused, the older pending one is shown again',
+    refused.next.status === 'rejected' && refused.resumed?.requestId === 1 && refused.book.shown.requestId === 1 && refused.book.shown.status === 'queued');
+  const lands = s.foldBookEvent(refused.book, said(s.EVENT.sceneApplied, 1));
+  check('and when it lands, it is the request shown, applied, and nothing is left pending',
+    lands.wasShown && lands.next.status === 'applied' && lands.book.shown.status === 'applied' && lands.book.pending.length === 0);
+  // The same with a refused Rise.
+  const rise = s.foldBookEvent(s.bookSend(refused.book, ask(3, 'drop', { build: { bars: 4 } })), said(s.EVENT.buildRejected, 3, 3));
+  check('a refused Rise over a waiting scene leaves the scene shown', rise.resumed?.requestId === 1 && rise.book.shown.requestId === 1);
+}
+{
+  // A scene queued over a running Rise, then cancelled: the Rise is still the one in hand.
+  let book = s.bookSend(s.EMPTY_BOOK, ask(10, 'drop', { build: { bars: 4 } }));
+  book = fold(book, said(s.EVENT.buildQueued, 10, 5), said(s.EVENT.buildStarted, 10, 5)).book;
+  book = fold(s.bookSend(book, ask(11, 'sparse')), said(s.EVENT.sceneQueued, 11, 6)).book;
+  check('a Rise under a queued scene is still found, and is the pending build', s.bookFind(book, 10)?.status === 'building' && s.bookBuild(book)?.requestId === 10);
+  const progress = s.foldBookEvent(book, said(s.EVENT.buildProgress, 10, 2));
+  check("the Rise's progress folds without moving what is shown", !progress.wasShown && progress.book.shown.requestId === 11 && s.bookFind(progress.book, 10).build.bar === 2);
+  const withdrawn = s.foldBookEvent(progress.book, said(s.EVENT.sceneCancelled, 11, 10));
+  check('the scene cancelled, the Rise is shown again, still rising at bar 2',
+    withdrawn.resumed?.requestId === 10 && withdrawn.book.shown.status === 'building' && withdrawn.book.shown.build.bar === 2);
+  const risen = s.foldBookEvent(withdrawn.book, said(s.EVENT.buildApplied, 10));
+  check('and the Rise lands as the shown request', risen.wasShown && risen.book.shown.status === 'applied' && risen.book.pending.length === 0);
+  // Committing instead: the scene lands, then the engine says the Rise was replaced.
+  const commit = fold(progress.book, said(s.EVENT.sceneApplied, 11), said(s.EVENT.buildReplaced, 10, 11)).book;
+  check('a scene committing over a Rise stays shown; the replaced Rise leaves the book',
+    commit.shown.requestId === 11 && commit.shown.status === 'applied' && commit.pending.length === 0 && s.bookBuild(commit) === null);
+  // Panic with the scene still queued over the Rise: the book empties, but the Rise is
+  // handed back as closing, so its restoring base is still followed.
+  const panicked = s.bookCancelAll(progress.book, 5);
+  check('Panic over a Rise under a queued scene empties the book and reads the scene cancelled',
+    panicked.book.pending.length === 0 && panicked.book.shown.requestId === 11 && panicked.book.shown.status === 'cancelled' && panicked.book.shown.reason === 5);
+  check('and hands back the Rise as closing, so its restoring base reaches the knobs', panicked.closing?.requestId === 10);
+  check('Panic with no Rise pending has nothing closing', s.bookCancelAll(commit, 5).closing === null && s.bookCancelAll(s.EMPTY_BOOK, 5).closing === null);
+}
+{
+  // An older request landing while a newer one is still being sent.
+  let book = fold(s.bookSend(s.EMPTY_BOOK, ask(20, 'sparse')), said(s.EVENT.sceneQueued, 20, 3)).book;
+  book = s.bookSend(book, ask(21, 'drop'));
+  const early = s.foldBookEvent(book, said(s.EVENT.sceneApplied, 20));
+  check('an older request landing under a newer one is reported, and the newer stays shown',
+    !early.wasShown && early.next.status === 'applied' && early.book.shown.requestId === 21 && early.book.pending.map((r) => r.requestId).join() === '21');
+  check('an event for a request the book never held changes nothing', s.foldBookEvent(book, said(s.EVENT.sceneApplied, 99)).book === book);
+  check('a late event for a settled request changes nothing', s.foldBookEvent(early.book, said(s.EVENT.sceneCancelled, 20, 10)).book === early.book);
+}
+
+// Night 9: a build's float32 bases read back as the store's own values.
+{
+  const mix = s.copyMix(factory('full'));
+  mix.params['fx.echoTime'] = 1 / 3;
+  mix.stems.kick.volume = 0.9;
+  const exact = s.sceneValues(mix);
+  const engineCopy = s.sceneVector(mix);
+  check('sceneValues lays a mix out as the vector does, in doubles', exact.length === 44 && exact.every((v, i) => Math.fround(v) === engineCopy[i]));
+  check('the float32 Echo time 1/8T is not a registry option, as read', engineCopy[32 + contract.sceneVector.indexOf('fx.echoTime')] !== 1 / 3);
+  const read = s.mixFromVector(s.exactValues(engineCopy, [exact]));
+  check('exactValues gives back 1/8T and 0.9 exactly', read.params['fx.echoTime'] === 1 / 3 && read.stems.kick.volume === 0.9);
+  const between = Float32Array.from(engineCopy);
+  between[0] = 0.5;
+  check('a value part way through a build keeps the engine number', s.exactValues(between, [exact])[0] === Math.fround(0.5));
+  const other = s.sceneValues({ ...mix, stems: { ...mix.stems, kick: { ...mix.stems.kick, volume: Math.fround(0.9) } } });
+  check('the first known mix that matches wins', s.exactValues(engineCopy, [exact, other])[0] === 0.9 && s.exactValues(engineCopy, [other, exact])[0] === Math.fround(0.9));
+}
 
 if (failed) {
   console.error(`\n${failed} scene check(s) failed.`);

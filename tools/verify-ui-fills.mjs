@@ -12,6 +12,11 @@
  * meanwhile; the choices survive a reload; every control has a full name; and the
  * scenes toolbar adds no row as the options and the widest labels come and go.
  *
+ * Fill style (Night 9): Classic by default; the choice is remembered; Fill, Fill → Drop
+ * and Rise + Fill send the chosen style's index, which the engine accepts because the
+ * track it was loaded with carries the four styles as its fills; a queued fill keeps
+ * the style it was sent with.
+ *
  * Every change of the pads, the fill buttons, the bar readout and the status line is
  * logged in the page with its time, so the checks read what the screen showed and for
  * how long, not a poll that can miss a bar.
@@ -596,6 +601,247 @@ export async function fillChecks({ open, check }) {
     await page.close();
   }
 
+  // ---- Fill style (Night 9): Classic by default, remembered, and sent with all three. --
+  {
+    const { page, errors } = await open(1440, 1000);
+    const k = kit(page);
+    try {
+      // Every message the page posts to the worklet that loads a track or asks for a fill.
+      await page.addInitScript(() => {
+        const sent = (window.__FILL_SENT__ = []);
+        const post = MessagePort.prototype.postMessage;
+        MessagePort.prototype.postMessage = function (message, ...rest) {
+          if (message && typeof message === 'object' && ['track', 'mix', 'fill', 'fillInto', 'build'].includes(message.type)) {
+            const { type, index, fillIndex, json } = message;
+            const fills = json ? JSON.parse(json).fills : undefined;
+            sent.push({ type, index, fillIndex, fills: fills?.map((f) => f.style ?? null) });
+          }
+          return post.call(this, message, ...rest);
+        };
+      });
+      await page.reload({ waitUntil: 'networkidle' });
+      await page.waitForSelector('.scene-fill-tools');
+      const select = page.getByRole('combobox', { name: 'Fill style', exact: true });
+      const sent = () => page.evaluate(() => window.__FILL_SENT__);
+      const options = await select.locator('option').evaluateAll((os) => os.map((o) => `${o.value}:${o.textContent.trim()}`));
+      check('fill style: a menu named Fill style in the scenes header (not the toolbar), the four styles, Random and Rotate',
+        (await page.locator('.scenes-panel .panel-actions .fill-style-select').count()) === 1
+        && (await page.locator('.scene-toolbar select').count()) === 0
+        && options.join() === 'classic:Classic,simple:Simple,busy:Busy,syncopated:Syncopated,random:Random · next Syncopated,rotate:Rotate · next Classic', options.join());
+      check('fill style: Classic by default, and the Fill button names it',
+        (await select.inputValue()) === 'classic' && (await k.fillBtn.getAttribute('aria-label')) === 'Classic fill for one bar, from the next bar',
+        `${await select.inputValue()} / ${await k.fillBtn.getAttribute('aria-label')}`);
+      check('fill style: the default is not stored until it is chosen',
+        await page.evaluate(() => localStorage.getItem('bckgrnd-msc:fill-style')) === null);
+      // The track the UI keeps (a saved project's hashed source) still has its one fill.
+      const own = await page.evaluate(async () => (await (await fetch('/library/warehouse.json')).json()).track.fills.length);
+      check("fill style: the library's track keeps its one fill", own === 1, String(own));
+
+      await select.selectOption('busy');
+      check('fill style: choosing Busy is stored, and the Fill button names it',
+        await page.evaluate(() => localStorage.getItem('bckgrnd-msc:fill-style')) === 'busy'
+        && (await k.fillBtn.getAttribute('aria-label')) === 'Busy fill for one bar, from the next bar');
+      await page.reload({ waitUntil: 'networkidle' });
+      await page.waitForSelector('.scene-fill-tools');
+      check('fill style: after a reload it is still Busy', (await select.inputValue()) === 'busy', await select.inputValue());
+
+      await k.play();
+      await k.tempo(BPM);
+      // Messages queued before the first Play reach the worklet once it boots.
+      const loads = (await sent()).filter((m) => m.type === 'track');
+      check('fill style: the engine is loaded with the four styles as its fills',
+        loads.length > 0 && loads.every((m) => m.fills?.join() === 'classic,simple,busy,syncopated'), JSON.stringify(loads.map((m) => m.fills)));
+      check('fill style: with a mouse the Fill button\'s tooltip names the style',
+        /^Busy fill: /.test((await k.fillBtn.getAttribute('title')) ?? ''), await k.fillBtn.getAttribute('title'));
+      // Fill: index 2. Switched to Simple while it waits, it keeps Busy.
+      let from = (await sent()).length;
+      await k.fillBtn.click();
+      await page.waitForFunction((n) => window.__FILL_SENT__.slice(n).some((m) => m.type === 'fill'), from, RT);
+      await select.selectOption('simple');
+      const keptAria = await k.fillBtn.getAttribute('aria-label');
+      await k.waitFill('playing');
+      const playingAria = await k.fillBtn.getAttribute('aria-label');
+      await k.waitFill('idle');
+      const fillMsg = (await sent()).slice(from).find((m) => m.type === 'fill');
+      check('fill style: Fill sends Busy\'s index, 2, and the engine plays it', fillMsg?.index === 2, JSON.stringify(fillMsg));
+      check('fill style: a queued fill keeps the style it was sent with',
+        /Busy fill/.test(keptAria ?? '') && playingAria === 'Busy fill is playing', `${keptAria} / ${playingAria}`);
+      check('fill style: once it has played, the button names the new choice',
+        (await k.fillBtn.getAttribute('aria-label')) === 'Simple fill for one bar, from the next bar', await k.fillBtn.getAttribute('aria-label'));
+
+      // Fill → Drop: index 3 (Syncopated).
+      await select.selectOption('syncopated');
+      from = (await sent()).length;
+      await k.intoBtn.click();
+      await k.waitState(DROP, ['active', 'modified']);
+      const intoMsg = (await sent()).slice(from).find((m) => m.type === 'fillInto');
+      check('fill style: Fill → Drop sends Syncopated\'s index, 3, and Drop lands', intoMsg?.index === 3, JSON.stringify(intoMsg));
+
+      // Rise + Fill: index 1 (Simple), into the first scene.
+      await select.selectOption('simple');
+      await k.switchOn('Rise into the scene over several bars');
+      await k.riseOver(2);
+      await k.finishWithFill(true);
+      from = (await sent()).length;
+      await k.pad(0).click();
+      await page.waitForFunction((n) => window.__FILL_SENT__.slice(n).some((m) => m.type === 'build'), from, RT);
+      await k.waitFill('playing');
+      const riseAria = await k.fillBtn.getAttribute('aria-label');
+      await k.waitState(0, ['active', 'modified']);
+      const buildMsg = (await sent()).slice(from).find((m) => m.type === 'build');
+      check('fill style: Rise + Fill sends Simple\'s index, 1, and the fill plays the last bar',
+        buildMsg?.fillIndex === 1 && riseAria === 'Simple fill is playing', `${JSON.stringify(buildMsg)} / ${riseAria}`);
+
+      // Back to Classic: index 0, as before Night 9.
+      await select.selectOption('classic');
+      await k.switchOn('Launch on the next bar');
+      from = (await sent()).length;
+      await k.fillBtn.click();
+      await k.waitFill('playing');
+      await k.waitFill('idle');
+      const classicMsg = (await sent()).slice(from).find((m) => m.type === 'fill');
+      check('fill style: Classic sends index 0, the Night 3 fill', classicMsg?.index === 0, JSON.stringify(classicMsg));
+    } catch (e) {
+      check('fill style: the walk-through ran to the end', false, String(e.message).split('\n')[0]);
+    }
+    check('fill style: no page errors', errors.length === 0, errors.join('; '));
+    await page.close();
+  }
+
+  // ---- Random and Rotate (Night 9): resolved when queued, shown before the press, moved
+  // on only when a fill plays. Observed as the index each request sends. ---------------
+  {
+    const { page, errors } = await open(1440, 1000);
+    const k = kit(page);
+    try {
+      await page.addInitScript(() => {
+        const sent = (window.__FILL_SENT__ = []);
+        const post = MessagePort.prototype.postMessage;
+        MessagePort.prototype.postMessage = function (message, ...rest) {
+          if (message && typeof message === 'object' && ['fill', 'fillInto', 'build'].includes(message.type)) {
+            sent.push({ type: message.type, index: message.type === 'build' ? message.fillIndex : message.index });
+          }
+          return post.call(this, message, ...rest);
+        };
+      });
+      await page.reload({ waitUntil: 'networkidle' });
+      await page.waitForSelector('.scene-fill-tools');
+      const NAMES = ['Classic', 'Simple', 'Busy', 'Syncopated'];
+      const select = page.getByRole('combobox', { name: 'Fill style', exact: true });
+      const sent = () => page.evaluate(() => window.__FILL_SENT__);
+      const menuNext = async (mode) => {
+        const text = await select.locator(`option[value="${mode}"]`).textContent();
+        return NAMES.indexOf(text.replace(/^.* · next /, '').trim());
+      };
+      // One fill on the Fill button, played through; the index it sent and the words.
+      const fillOnce = async () => {
+        const from = (await sent()).length;
+        await k.fillBtn.click();
+        await k.waitFill('playing');
+        const playingText = await k.text(k.fillBtn);
+        await k.waitFill('idle');
+        return { index: (await sent()).slice(from).find((m) => m.type === 'fill')?.index, playingText };
+      };
+      await select.selectOption('rotate');
+      await page.reload({ waitUntil: 'networkidle' });
+      await page.waitForSelector('.scene-fill-tools');
+      check('fill modes: Rotate is remembered across a reload, and says Classic plays next',
+        (await select.inputValue()) === 'rotate' && await page.evaluate(() => localStorage.getItem('bckgrnd-msc:fill-style')) === 'rotate'
+        && (await menuNext('rotate')) === 0);
+      check('fill modes: at rest the Fill button names what the next press plays',
+        (await k.fillBtn.getAttribute('aria-label')) === 'Classic fill, by Rotate for one bar, from the next bar', await k.fillBtn.getAttribute('aria-label'));
+      await k.play();
+      await k.tempo(BPM);
+      const r1 = await fillOnce();
+      const shown2 = await menuNext('rotate');
+      const r2 = await fillOnce();
+      const r3 = await fillOnce();
+      check('rotate: three fills play Classic, Simple, Busy (indexes 0, 1, 2)', [r1.index, r2.index, r3.index].join() === '0,1,2' && shown2 === 1,
+        `${r1.index},${r2.index},${r3.index}; shown next ${shown2}`);
+      check('rotate: the playing words name the style ("Fill playing", "Simple playing", "Busy playing")',
+        [r1.playingText, r2.playingText, r3.playingText].join() === 'Fill playing,Simple playing,Busy playing', [r1.playingText, r2.playingText, r3.playingText].join());
+      check('rotate: the menu then says Syncopated is next, and so does the Fill button',
+        (await menuNext('rotate')) === 3 && /^Syncopated fill, by Rotate /.test((await k.fillBtn.getAttribute('aria-label')) ?? ''));
+
+      // A canceled Rotate fill: it sent Syncopated, and the next press sends Syncopated again.
+      await k.fillAt('phrase');
+      await k.phrase(4);
+      let from = (await sent()).length;
+      await k.fillBtn.click();
+      await k.waitText('.fill-button', /^Synco · /);
+      const queuedText = await k.text(k.fillBtn);
+      await k.fillBtn.click();
+      await page.waitForFunction(() => document.querySelector('.fill-button')?.textContent?.trim() === 'Drum fill', null, RT);
+      await page.waitForTimeout(300);
+      const canceledIndex = (await sent()).slice(from).find((m) => m.type === 'fill')?.index;
+      check('rotate: a canceled fill does not move on: the menu still says Syncopated',
+        canceledIndex === 3 && /^Synco · (Bar \d+|Next phrase)$/.test(queuedText ?? '') && (await menuNext('rotate')) === 3,
+        `sent ${canceledIndex}, read ${queuedText}, next ${await menuNext('rotate')}`);
+      await k.fillAt('bar');
+      const r4 = await fillOnce();
+      check('rotate: the next press plays Syncopated (3), then Classic is next', r4.index === 3 && (await menuNext('rotate')) === 0, `${r4.index}`);
+
+      // Fill → Drop and Rise + Fill resolve too, in Rotate and in Random.
+      from = (await sent()).length;
+      await k.intoBtn.click();
+      await k.waitState(DROP, ['active', 'modified']);
+      const intoRot = (await sent()).slice(from).find((m) => m.type === 'fillInto')?.index;
+      await select.selectOption('random');
+      const randomNext = await menuNext('random');
+      await k.switchOn('Rise into the scene over several bars');
+      await k.riseOver(2);
+      await k.finishWithFill(true);
+      from = (await sent()).length;
+      await k.pad(0).click();
+      await k.waitState(0, ['active', 'modified']);
+      const riseRand = (await sent()).slice(from).find((m) => m.type === 'build')?.index;
+      const randomNext2 = await menuNext('random');
+      await k.switchOn('Launch on the next bar');
+      from = (await sent()).length;
+      await k.intoBtn.click();
+      await k.waitState(DROP, ['active', 'modified']);
+      const intoRand = (await sent()).slice(from).find((m) => m.type === 'fillInto')?.index;
+      check('modes: Fill → Drop in Rotate plays the shown Classic (0)', intoRot === 0, String(intoRot));
+      check('modes: Rise + Fill in Random plays the style the menu showed', riseRand === randomNext, `${riseRand} vs ${randomNext}`);
+      check('modes: Fill → Drop in Random plays the next shown, never the one just played',
+        intoRand === randomNext2 && intoRand !== riseRand, `${intoRand} vs ${randomNext2}, after ${riseRand}`);
+      await select.selectOption('rotate');
+      await k.switchOn('Rise into the scene over several bars');
+      from = (await sent()).length;
+      await k.pad(1).click();
+      await k.waitState(1, ['active', 'modified']);
+      const riseRot = (await sent()).slice(from).find((m) => m.type === 'build')?.index;
+      check('modes: Rise + Fill in Rotate plays Simple (1), the next after Classic', riseRot === 1, String(riseRot));
+      await k.switchOn('Launch on the next bar');
+
+      // A loop: Phrase end at 2 bars inside a 2-bar loop puts the fill on the loop's last
+      // bar, at the wrap. One press, one style, and the cursor moves on exactly once.
+      await page.getByRole('button', { name: 'Loop 2 bars', exact: true }).click();
+      await k.fillAt('phrase');
+      await k.phrase(2);
+      const before = await menuNext('rotate');
+      from = (await sent()).length;
+      await k.fillBtn.click();
+      await k.waitFill('playing');
+      await k.waitFill('idle');
+      // Two more passes of the loop: the fill doesn't come round again, nothing moves.
+      await k.nextBar();
+      await k.nextBar();
+      await k.nextBar();
+      const loopSent = (await sent()).slice(from).filter((m) => m.type === 'fill');
+      const after = await menuNext('rotate');
+      check('loop: one press sends one fill, Busy (2), at the loop wrap', loopSent.length === 1 && loopSent[0].index === 2 && before === 2,
+        `${JSON.stringify(loopSent)}, shown ${before}`);
+      check('loop: the cursor moved on exactly once (Syncopated next) over three more bars', after === 3, String(after));
+      check('loop: the Fill button is free again, not replaying', (await k.fillBtn.getAttribute('data-state')) === 'idle');
+      await page.getByRole('button', { name: 'Loop 2 bars', exact: true }).click();
+    } catch (e) {
+      check('fill modes: the walk-through ran to the end', false, String(e.message).split('\n')[0]);
+    }
+    check('fill modes: no page errors', errors.length === 0, errors.join('; '));
+    await page.close();
+  }
+
   // ---- Preferences survive a reload. -------------------------------------------------
   {
     const { page, errors } = await open(1440, 1000);
@@ -629,13 +875,15 @@ export async function fillChecks({ open, check }) {
   }
 
   // ---- The toolbar with a mouse at 1440, 1280 and 1180 (and the other compact widths
-  // Lacey's checks use): no row added, and never more than three rows of one 32px
-  // control (Switch on; Fill; Compare A/B), 108px. One row can't hold the scene and
+  // Lacey's checks use): no row added, and two rows of one 32px control (Switch on;
+  // Fill), 70px, with Compare A/B folded into the header (Night 9B, the default). Unfolded,
+  // Compare adds exactly its own row: 108px. One row can't hold the scene and
   // fill controls: squeezed as far as they go they need about 950px, and the panel is
   // 798px wide at 1440. At 375 and 320 (touch) the toolbar stacks a row per control by
   // design, so there it is measured, and held to 44px targets, labels that are never
   // cut short, and no sideways scroll. -------------------------------------------
-  const MOUSE_TOOLBAR_MAX = 108.5;
+  const MOUSE_TOOLBAR_MAX = 70.5;
+  const MOUSE_TOOLBAR_COMPARING = 108.5;
   const widths = [[1440, 900], [1280, 800], [1279, 800], [1200, 800], [1180, 800], [1100, 800], [1024, 768], [960, 800], [900, 800],
     [375, 812, { hasTouch: true, isMobile: true }], [320, 640, { hasTouch: true, isMobile: true }]];
   for (const [w, h, extra] of widths) {
@@ -665,7 +913,9 @@ export async function fillChecks({ open, check }) {
           r.selectNodeContents(el);
           return new Set([...r.getClientRects()].map((q) => Math.round(q.top))).size;
         };
-        for (const [a, b] of [['Fill · Next phrase', 'Fill → Drop'], ['Drum fill', 'Fill · Next phrase → Drop'], ['Drum fill', 'Fill · Bar 16 → Drop'], ['Fill playing', 'Filling → Drop']]) {
+        // Night 9: a style other than Classic names itself in place of the word Fill.
+        for (const [a, b] of [['Fill · Next phrase', 'Fill → Drop'], ['Drum fill', 'Fill · Next phrase → Drop'], ['Drum fill', 'Fill · Bar 16 → Drop'], ['Fill playing', 'Filling → Drop'],
+          ['Simple · Next phrase', 'Fill → Drop'], ['Synco · Next phrase', 'Fill → Drop'], ['Simple · Bar 16', 'Fill → Drop'], ['Simple playing', 'Filling → Drop']]) {
           fill.textContent = a;
           into.textContent = b;
           const h = Math.round(bar.getBoundingClientRect().height * 10) / 10;
@@ -692,8 +942,15 @@ export async function fillChecks({ open, check }) {
       if (w >= 900) {
         check(`${w}px: Rise, Finish with Fill, Phrase end and the widest labels add no row to the toolbar`,
           [rise.h, riseFill.h, phrase.h, widest.h].every((x) => x === base.h), `${base.h} / ${rise.h} / ${riseFill.h} / ${phrase.h} / ${widest.each.join(',')}px`);
-        check(`${w}px: the toolbar is at most three rows of 32px (${MOUSE_TOOLBAR_MAX}px), every option on`,
+        check(`${w}px: with Compare folded the toolbar is two rows of 32px (${MOUSE_TOOLBAR_MAX}px), every option on`,
           [base.h, phrase.h, widest.h].every((x) => x <= MOUSE_TOOLBAR_MAX), `${base.h} / ${phrase.h} / ${widest.h}px`);
+      }
+      // Unfold Compare A/B from the header: one row more, never two.
+      await page.getByRole('button', { name: 'Compare A/B' }).click();
+      const comparing = await toolbar(page);
+      if (w >= 900) {
+        check(`${w}px: Compare A/B unfolded adds its one row (${MOUSE_TOOLBAR_COMPARING}px at most)`,
+          comparing.h <= MOUSE_TOOLBAR_COMPARING && comparing.h > phrase.h, `${phrase.h} -> ${comparing.h}px`);
       }
       check(`${w}px: the fill buttons' widest words are not cut short`, !widest.cut, widest.cutWords.join(', '));
       if (w >= 375) {
@@ -701,12 +958,18 @@ export async function fillChecks({ open, check }) {
       } else {
         check(`${w}px: and the longest wraps to two lines at most`, widest.lines <= 2, `${widest.lines} lines`);
       }
+      const menu = await page.evaluate(() => {
+        const b = document.querySelector('.fill-style-select')?.getBoundingClientRect();
+        return b ? { h: Math.round(b.height), w: Math.round(b.width), right: Math.round(b.right) } : null;
+      });
+      check(`${w}px: the Fill style menu is on screen, ${extra?.hasTouch ? '44' : '24'}px tall or more`,
+        menu !== null && menu.h >= (extra?.hasTouch ? 44 : 24) && menu.right <= w, JSON.stringify(menu));
       check(`${w}px: the page doesn't scroll sideways`, Object.values(all).every((m) => m.scroll <= w), Object.values(all).map((m) => m.scroll).join(','));
       if (extra?.hasTouch) {
-        const small = await page.evaluate(() => [...document.querySelectorAll('.scene-toolbar button')]
+        const small = await page.evaluate(() => [...document.querySelectorAll('.scene-toolbar button, .scenes-panel .panel-head button, .scenes-panel .panel-head select')]
           .filter((b) => b.getClientRects().length && (b.getBoundingClientRect().height < 44 || b.getBoundingClientRect().width < 44))
           .map((b) => `${b.getAttribute('aria-label') ?? b.textContent.trim()} ${Math.round(b.getBoundingClientRect().width)}x${Math.round(b.getBoundingClientRect().height)}`));
-        check(`${w}px touch: every scenes toolbar control is at least 44 x 44px`, small.length === 0, small.join(', '));
+        check(`${w}px touch: every scenes toolbar and header control is at least 44 x 44px, Compare unfolded`, small.length === 0, small.join(', '));
       }
       if (w === 375) {
         const shared = await page.evaluate(() => {
@@ -823,12 +1086,39 @@ export async function fillChecks({ open, check }) {
       }));
       check('a11y: before Play, Fill and Fill → Drop are aria-disabled, focusable, and described by their reason',
         why.every((b) => !b.native && b.aria === 'true' && b.tab === 0 && b.described === `Unavailable: ${b.title}`), JSON.stringify(why));
-      const was = { fill: await k.fillBtn.getAttribute('data-state'), status: await k.statusText() };
+      // Pressing them starts nothing, but says why in the status line (Night 9B): a touch
+      // user gets no tooltip, so that line is where the reason shows.
+      const was = { fill: await k.fillBtn.getAttribute('data-state') };
+      // Wait for the line each step expects, never a fixed delay (CodeRabbit, PR #12).
+      const statusNot = (prev) => page.waitForFunction(
+        (p) => (document.querySelector('.scene-status')?.textContent?.trim() ?? '') !== p, prev, RT);
+      const exactly = (text) => new RegExp(`^${text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`);
       await k.fillBtn.click({ force: true });
+      await k.waitStatus(/^Fill: /);
+      const fillWhy = await k.statusText();
       await k.intoBtn.click({ force: true });
-      await page.waitForTimeout(200);
-      check('a11y: and pressing them does nothing', (await k.fillBtn.getAttribute('data-state')) === was.fill && (await k.statusText()) === was.status
+      await k.waitStatus(/^Fill → /);
+      const intoWhy = await k.statusText();
+      check('a11y: and pressing them starts nothing', (await k.fillBtn.getAttribute('data-state')) === was.fill
         && (await k.intoBtn.getAttribute('data-state')) === 'idle');
+      check('a11y: but each press shows its reason in the status line',
+        fillWhy === `Fill: ${why[0].title}` && intoWhy?.endsWith(`: ${why[1].title}`) && intoWhy.startsWith('Fill → '), `${fillWhy} / ${intoWhy}`);
+      // The notice goes at the first real status change, and stays gone when the status
+      // comes back to the line it was shown over (CodeRabbit, PR #12).
+      await k.pad(1).click();
+      await statusNot(intoWhy);
+      const over = await k.statusText();
+      await k.fillBtn.click({ force: true });
+      await k.waitStatus(/^Fill: /);
+      const shown = await k.statusText();
+      await k.pad(2).click();
+      await statusNot(shown);
+      const moved = await k.statusText();
+      await k.pad(1).click();
+      await k.waitStatus(exactly(over)).catch(() => {});
+      const back = await k.statusText();
+      check('a11y: a reason notice does not come back when the status returns to its line',
+        shown.startsWith('Fill: ') && moved !== shown && back === over, `${over} / ${shown} / ${moved} / ${back}`);
       // Crash on launch: a real checkbox in the pad's menu, with a visible focus ring.
       await k.slot(DROP).locator('.scene-menu-button').click();
       const box = page.getByRole('checkbox', { name: 'Crash on launch', exact: true });

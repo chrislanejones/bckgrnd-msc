@@ -9,10 +9,14 @@ export const PREF = {
   fillAt: 'bckgrnd-msc:fill-at',
   /** The phrase length a Phrase end fill ends on: 2, 4, 8 or 16. */
   phraseBars: 'bckgrnd-msc:fill-phrase-bars',
+  /** Fill style (Night 9): `classic`, `simple`, `busy` or `syncopated`. */
+  fillStyle: 'bckgrnd-msc:fill-style',
   /** How many bars Rise rises over: 2, 4 or 8. */
   riseBars: 'bckgrnd-msc:rise-bars',
   /** Finish with Fill on Rise: `on` or `off`. */
   riseFill: 'bckgrnd-msc:rise-fill',
+  /** Compare A/B unfolded in the scenes toolbar (Night 9): `open` or `closed`. */
+  compareOpen: 'bckgrnd-msc:compare-open',
 } as const;
 
 /** The stored choice for `key` if it is one of `choices`, else `fallback`. */

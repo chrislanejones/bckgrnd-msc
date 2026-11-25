@@ -40,6 +40,8 @@ export type TrackSummary = {
 export type Fill = {
   id: string;
   name: string;
+  /** Its fill style (Night 9): set on `fillStyles`, absent on a track's own `fills`. */
+  style?: string;
   kick: number[];
   clap: number[];
   hat: number[];
@@ -77,6 +79,12 @@ export type TrackResponse = {
   track: TrackArrangement;
   /** Per-bar, per-stem step activity, for the UI's step rows. */
   activity: Record<StemId, boolean[][]>;
+  /**
+   * The four fill styles (Night 9, `Fills::styles`): Classic, Simple, Busy, Syncopated.
+   * Kept beside the track, not in it, so the track (a saved project's hashed source)
+   * is unchanged. Missing on libraries exported before Night 9.
+   */
+  fillStyles?: Fill[];
 };
 
 export type Preset = {

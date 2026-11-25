@@ -3,6 +3,8 @@ Date: 2026-11-17   Status: draft
 
 > Amendment proposed 11-19-2026. ADR-021 (draft) would let a Rise finish with a fill, queued and canceled with the build. Since `2e29170`, linked lanes wait in their own `staged` slot until their request is accepted. The Lanes paragraph below predates that.
 
+> Amendment proposed 11-24-2026 (`49f896b`). A Rise is still a `SceneRequest`, but it now keeps its own entry in ADR-015's request book instead of the one slot every launch used to overwrite, so it survives a scene queued over it and withdrawn. When Panic or an auto-mix cancels everything, the book empties but the Rise is kept as closing (`bookCancelAll`) until its outcome arrives, so the base it restores still reaches the knobs. Following a Rise writes the store's, the target scene's or the starting mix's own value wherever the engine's float32 equals it, never the float32 copy: Echo time 1/8T read back as 0.3333333432674408 and a project saved after the Rise wouldn't reopen.
+
 ## Context
 A Build should rise over several bars, not land on one boundary like a scene. That
 is up to 44 values moving on every sixteenth for as long as 128 onsets, and the UI

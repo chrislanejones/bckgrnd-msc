@@ -333,3 +333,64 @@ priority order. Branches merged in: `night8/adrs` (Dara), `night8/fill-ui`,
 
 Listening: Fill → Drop and Rise + Fill at 70/105/140 bpm, crash level alone and merged,
 slow Rise stepping. ADRs 020–023 to accept. MCP resync + npm publish to ship with v4.
+
+# Night 9 session log (11-24-2026)
+
+Baseline `main` 5e2e809 (Night 8 merged). Integration branch `night9/run` merges three
+task branches; the MCP work is on `night9/mcp-v4` in bckgrnd-msc-mcp.
+
+## What changed
+
+| Task | Commits | Result |
+|---|---|---|
+| 9A host requests | `49f896b` | One record per request id (`RequestBook`). A scene canceled over a running Rise no longer blanks Drop. Following a Rise writes exact values, not float32 copies (a saved project could not reopen) |
+| 9A audio thread | `473d13c` | Tone notes no longer allocate in `process()`; ported from bf21398 on `claude/tender-sagan-stmwjt` |
+| 9B fill styles | `ea7cd66`, `3608cbd`, `9498552` | Classic (default, byte-for-byte the old fill), Simple, Busy, Syncopated. PHP generates them; shipped as `fillStyles` beside the track; app preference `bckgrnd-msc:fill-style`; used by Fill, Fill → Drop and Rise + Fill |
+| 9C inspector | `c5d9385` | Short-window rack: 1366×640 fits; Output open fits at 1280×800 and 1024×768 |
+| 9C toolbar / Compare | none | Investigated only; recommendation below |
+| Docs | `9567b63` | ADR-024 (draft) and amendments to ADR-015, 016, 019; NIGHT8_PROTOCOL fill index |
+
+## Decisions made in the build
+
+| Call | Why |
+|---|---|
+| Styles beside the track, not in `track.fills` | A saved project names its track by a hash of the track JSON; changing `fills` would flag every saved project and the MCP would refuse them (ADR-024) |
+| Fill Style menu in the Scenes header | The Fill row was full at 900–1280 px; there it kept the toolbar at 108 px |
+| Compare A/B not moved | No spot holds it without adding a row when Rise or Phrase end is on. Recommend folding it behind a header toggle (toolbar 70 px by default) |
+| Ported the WIP branch's fixes, didn't merge it | Its own message says "a record to port from, not something to merge" |
+
+## Gates (`night9/run`, integrated)
+
+| Gate | Result |
+|---|---|
+| cargo fmt / clippy `--all-targets -D warnings` | clean |
+| cargo test | 330 pass, 1 ignored |
+| no-alloc test | 7/7 (4 fail on main's engine) |
+| wasm | 246,024 → 245,282 B (−742) |
+| bench | flat, +0.2 to +0.7% (noise) |
+| Renders | 20 tracks × 44.1/48 kHz × plain and under Rises: 80/80 bit-identical |
+| phpunit | 286 tests, 19,050 assertions |
+| verify:web | 8/8 |
+| verify:desktop | 10/10, 1,082 checks |
+| MCP (branch) | v4 read, v3 migrate, v5 refused; vitest 74/74; parity 48/48 byte-identical |
+
+## Waiting on Chris
+
+Listening: the four fill styles on each track kind (none listened to). ADR-024 and the
+three amendments to accept. The Compare A/B fold. MCP release (version, changelog,
+npm publish) together with the next desktop build.
+
+# Night 9B session log (11-24-2026)
+
+Continued on `night9/run` from 5fed84b (PR #12). Chris approved the Compare A/B fold.
+
+| Task | Commits | Result |
+|---|---|---|
+| Random and Rotate | `224a7fb`, `c89f1fc` | Resolved when a fill is queued; Rotate cycles Classic → Simple → Busy → Syncopated; Random is seeded, never repeats, only the track's styles; a pick moves on only when a fill starts playing; menu and Fill button name the next pick |
+| Review: effective style | `224a7fb` | A track without `fillStyles` now says Classic, not the chosen style (CodeRabbit) |
+| Review: Panic under a Rise | `ba64537`, `fb672bf` | Panic or auto-mix with a scene queued over a running Rise no longer leaves the knobs half-risen (CodeRabbit); ADR-016/019 amendment wording fixed |
+| Compare A/B fold | `3a04c94`, `b2c5440` | Header toggle, remembered (`bckgrnd-msc:compare-open`, closed by default). Toolbar 70 px folded, 108 while comparing, 900–1440 |
+| Touch | `3a04c94` | 44 px taps for knob value, Reset, Echo time and inspector buttons; a press on an unavailable Fill shows the reason |
+
+No engine, contract or PHP changes since 5fed84b, so the audio parity above still holds.
+Gates for the final commit follow in the PR.

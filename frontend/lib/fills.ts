@@ -9,6 +9,7 @@
  * engine reported.
  */
 
+import type { Fill, TrackArrangement } from './types';
 import {
   BUILD_REFUSAL,
   EVENT,
@@ -27,8 +28,155 @@ export type PhraseBars = 2 | 4 | 8 | 16;
 export const PHRASE_BAR_CHOICES: readonly PhraseBars[] = [2, 4, 8, 16];
 export const DEFAULT_PHRASE_BARS: PhraseBars = 4;
 
-/** The fill the Fill button plays: the track's first, as in Night 3. */
+/** The track's first fill, Classic: what plays when a style can't be found. */
 export const FILL_INDEX = 0;
+
+/**
+ * Fill style (Night 9): which of the track's four fills Fill, Fill → Drop and Rise +
+ * Fill play. An app preference, like Fill at; never part of a project.
+ */
+export type FillStyle = 'classic' | 'simple' | 'busy' | 'syncopated';
+export const FILL_STYLES: readonly FillStyle[] = ['classic', 'simple', 'busy', 'syncopated'];
+export const DEFAULT_FILL_STYLE: FillStyle = 'classic';
+export const FILL_STYLE_LABEL: Record<FillStyle, string> = {
+  classic: 'Classic',
+  simple: 'Simple',
+  busy: 'Busy',
+  syncopated: 'Syncopated',
+};
+/**
+ * A style's word on the Fill button, in place of "Fill" while it waits or plays. Short
+ * for Syncopated: "Syncopated · Next phrase" leaves the fill row no room at all at
+ * 1180px (measured), "Synco · Next phrase" leaves 33px. Its name stays the full one.
+ */
+export const FILL_STYLE_WORD: Record<FillStyle, string> = {
+  classic: 'Fill',
+  simple: 'Simple',
+  busy: 'Busy',
+  syncopated: 'Synco',
+};
+/** What a style does, for its menu's tooltip. */
+export const FILL_STYLE_HINT: Record<FillStyle, string> = {
+  classic: "the track's own fill",
+  simple: 'a lighter fill: the hats thin out',
+  busy: 'a rising clap roll',
+  syncopated: 'offbeat accents, 3 + 3 + 2',
+};
+
+/** The Fill button's name for a style: "Classic fill". */
+export const fillStyleName = (style: FillStyle): string => `${FILL_STYLE_LABEL[style]} fill`;
+
+/**
+ * The engine's index for `style` among the fills it was loaded with: its place in
+ * `styles` (the track's `fillStyles`), or Classic's 0 when the library has none or
+ * lacks that style.
+ */
+export function fillIndex(styles: readonly Fill[] | undefined, style: FillStyle): number {
+  const i = styles?.findIndex((f) => f.style === style) ?? -1;
+  return i >= 0 ? i : FILL_INDEX;
+}
+
+// ---- Fill choice: a style, or Random / Rotate (Night 9) ------------------------------
+
+/** The Fill style menu: the four styles, then Random and Rotate. Classic by default. */
+export type FillMode = 'random' | 'rotate';
+export type FillChoice = FillStyle | FillMode;
+export const FILL_CHOICES: readonly FillChoice[] = [...FILL_STYLES, 'random', 'rotate'];
+export const FILL_MODE_LABEL: Record<FillMode, string> = { random: 'Random', rotate: 'Rotate' };
+export const isFillMode = (choice: FillChoice): choice is FillMode => choice === 'random' || choice === 'rotate';
+
+/**
+ * Where Random and Rotate are: kept for the session, never stored, and kept across a
+ * track change. Moved on only when a fill actually starts playing (`advanceFill`), so a
+ * canceled, refused or withdrawn request plays next what it showed.
+ */
+export type FillCursor = {
+  /** Rotate's next place in `FILL_STYLES` (0-3). */
+  rotate: number;
+  /** How many Random picks have played: Random's draw counter. */
+  draws: number;
+  /** The style that played last, so Random never repeats it. */
+  last: FillStyle | null;
+};
+export const FILL_CURSOR: FillCursor = { rotate: 0, draws: 0, last: null };
+/** Random's seed: fixed, so a session's sequence is the same every time (and testable). */
+export const FILL_SEED = 0x6b0a5e9d;
+
+/** Draw `n` of mulberry32 from `seed`: a number in [0, 1), the same every time. */
+export function fillDraw(seed: number, n: number): number {
+  let t = (seed + Math.imul(n + 1, 0x6d2b79f5)) | 0;
+  t = Math.imul(t ^ (t >>> 15), t | 1);
+  t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+  return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+}
+
+/** The styles a track's fills actually have, in menu order: Classic alone without any. */
+export function availableStyles(styles: readonly Fill[] | undefined): FillStyle[] {
+  const have = FILL_STYLES.filter((x) => styles?.some((f) => f.style === x));
+  return have.length ? have : ['classic'];
+}
+
+/** What a press plays: the style that will be heard, and its index for the engine. */
+export type FillPick = { style: FillStyle; index: number };
+
+/**
+ * Resolve the menu's choice to one style, at queue time (and before it, to show it).
+ * A style the track lacks plays Classic, and is named Classic: the effective style is
+ * the one named everywhere. Rotate takes the next available style from its place;
+ * Random draws among the available styles, never the one that played last (unless it
+ * is the only one).
+ */
+export function resolveFill(choice: FillChoice, styles: readonly Fill[] | undefined, cursor: FillCursor, seed = FILL_SEED): FillPick {
+  const have = availableStyles(styles);
+  let style: FillStyle;
+  if (choice === 'rotate') {
+    const n = FILL_STYLES.length;
+    style = 'classic';
+    for (let k = 0; k < n; k += 1) {
+      const x = FILL_STYLES[(cursor.rotate + k) % n]!;
+      if (have.includes(x)) {
+        style = x;
+        break;
+      }
+    }
+  } else if (choice === 'random') {
+    const pool = have.length > 1 && cursor.last ? have.filter((x) => x !== cursor.last) : have;
+    style = pool[Math.floor(fillDraw(seed, cursor.draws) * pool.length)]!;
+  } else {
+    style = have.includes(choice) ? choice : 'classic';
+  }
+  return { style, index: fillIndex(styles, style) };
+}
+
+/** The cursor after a fill picked with `choice` started playing `style`. */
+export function advanceFill(cursor: FillCursor, choice: FillChoice, style: FillStyle): FillCursor {
+  return {
+    rotate: choice === 'rotate' ? (FILL_STYLES.indexOf(style) + 1) % FILL_STYLES.length : cursor.rotate,
+    draws: choice === 'random' ? cursor.draws + 1 : cursor.draws,
+    last: style,
+  };
+}
+
+/** The menu's words for a choice: a mode says what the next press plays. */
+export function fillChoiceLabel(choice: FillChoice, next: FillStyle): string {
+  return isFillMode(choice) ? `${FILL_MODE_LABEL[choice]} · next ${FILL_STYLE_LABEL[next]}` : FILL_STYLE_LABEL[choice];
+}
+
+/**
+ * The Fill button's name: the style that will play ("Busy fill"), and in Random or
+ * Rotate the mode too ("Busy fill, by Rotate").
+ */
+export const fillChoiceName = (choice: FillChoice, style: FillStyle): string =>
+  isFillMode(choice) ? `${fillStyleName(style)}, by ${FILL_MODE_LABEL[choice]}` : fillStyleName(style);
+
+/**
+ * The arrangement as the engine is sent it: with the four styles as its fills, so
+ * `fillIndex` picks one. The arrangement itself is left as it is (it is a project's
+ * hashed source); without styles it goes unchanged and index 0 is its own fill.
+ */
+export function withFillStyles(arranged: TrackArrangement, styles: readonly Fill[] | undefined): TrackArrangement {
+  return styles?.length ? { ...arranged, fills: [...styles] } : arranged;
+}
 
 /** What the engine is sent as `phrase`: 0 for the next bar. */
 export const fillPhrase = (at: FillAt, bars: PhraseBars): 0 | PhraseBars => (at === 'phrase' ? bars : 0);
@@ -47,6 +195,10 @@ export type FillJob = FillRequest & {
   late?: boolean;
   /** The request it was sent with: the Fill into's scene, or the Rise. */
   partner?: number;
+  /** The style it plays (resolved when sent): it keeps it if the choice changes meanwhile. */
+  style?: FillStyle;
+  /** The menu's choice it was resolved from: Random and Rotate move on when it starts. */
+  choice?: FillChoice;
 };
 
 const STEPS_PER_BAR = 16;
@@ -112,10 +264,13 @@ export function fillButtonJob(job: FillJob | null): FillJob | null {
 export function fillButtonLabel(job: FillJob | null): string {
   const own = fillButtonJob(job);
   if (!own) return 'Drum fill';
-  if (own.status === 'playing') return 'Fill playing';
-  if (own.status === 'sending') return 'Fill…';
-  if (own.late) return 'Fill · Next phrase';
-  return own.bar ? `Fill · Bar ${own.bar}` : 'Fill queued';
+  // A style other than Classic names itself in place of the word Fill ("Busy · Bar 8"),
+  // which keeps the widest words on the fill row. Classic keeps Night 8's words.
+  const word = own.style ? FILL_STYLE_WORD[own.style] : 'Fill';
+  if (own.status === 'playing') return `${word} playing`;
+  if (own.status === 'sending') return `${word}…`;
+  if (own.late) return `${word} · Next phrase`;
+  return own.bar ? `${word} · Bar ${own.bar}` : `${word} queued`;
 }
 
 /** The Fill button's name for assistive technology. `phrase` is the current Fill at. */
