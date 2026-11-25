@@ -405,6 +405,11 @@ export function useSceneNotice(status: string): [string, (text: string) => void]
     const t = window.setTimeout(() => setNotice(null), 4000);
     return () => window.clearTimeout(t);
   }, [notice]);
+  // The first real status change retires the notice, so it can't come back when the
+  // status later returns to the line it was shown over.
+  useEffect(() => {
+    if (notice && notice.over !== status) setNotice(null);
+  }, [notice, status]);
   const notify = useCallback((text: string) => setNotice({ text, over: status }), [status]);
   return [notice && notice.over === status ? notice.text : status, notify];
 }

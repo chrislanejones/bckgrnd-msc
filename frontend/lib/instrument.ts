@@ -904,7 +904,8 @@ export function useInstrument() {
   /** A Panic or an auto-mix: the engine cancels everything pending, for `reason`. */
   function cancelAll(book: RequestBook, reason: number): RequestBook {
     const { book: next, closing } = bookCancelAll(book, reason);
-    closingBuild.current = closing?.requestId ?? null;
+    // A later cancel that finds no Rise must not drop one still closing.
+    if (closing) closingBuild.current = closing.requestId;
     return next;
   }
   // Where a running build has moved the base (~30 Hz, then once more as it ends): the

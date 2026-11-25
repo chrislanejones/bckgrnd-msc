@@ -1099,6 +1099,22 @@ export async function fillChecks({ open, check }) {
         && (await k.intoBtn.getAttribute('data-state')) === 'idle');
       check('a11y: but each press shows its reason in the status line',
         fillWhy === `Fill: ${why[0].title}` && intoWhy?.endsWith(`: ${why[1].title}`) && intoWhy.startsWith('Fill → '), `${fillWhy} / ${intoWhy}`);
+      // The notice goes at the first real status change, and stays gone when the status
+      // comes back to the line it was shown over (CodeRabbit, PR #12).
+      await k.pad(1).click();
+      await page.waitForTimeout(150);
+      const over = await k.statusText();
+      await k.fillBtn.click({ force: true });
+      await page.waitForTimeout(100);
+      const shown = await k.statusText();
+      await k.pad(2).click();
+      await page.waitForTimeout(150);
+      const moved = await k.statusText();
+      await k.pad(1).click();
+      await page.waitForTimeout(150);
+      const back = await k.statusText();
+      check('a11y: a reason notice does not come back when the status returns to its line',
+        shown.startsWith('Fill: ') && moved !== shown && back === over, `${over} / ${shown} / ${moved} / ${back}`);
       // Crash on launch: a real checkbox in the pad's menu, with a visible focus ring.
       await k.slot(DROP).locator('.scene-menu-button').click();
       const box = page.getByRole('checkbox', { name: 'Crash on launch', exact: true });

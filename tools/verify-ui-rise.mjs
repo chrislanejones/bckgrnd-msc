@@ -654,11 +654,17 @@ export async function riseRequestChecks({ open, check }) {
       await k.pad(1).click();
       await k.waitState(1, ['sending', 'queued'], { timeout: 1500 });
       const moved = differ(before, await k.mix());
-      await page.getByRole('button', { name: 'Panic', exact: true }).click();
+      // Twice in one task: the second Panic finds no Rise in the book, and must not
+      // forget the one the first is still closing (CodeRabbit, PR #12).
+      await page.evaluate(() => {
+        const b = document.querySelector('button.panic-button');
+        b.click();
+        b.click();
+      });
       await k.waitStatus(/^Panic: stopped, nothing queued, effects released$/);
       await page.waitForTimeout(1200);
       const after = await k.mix();
-      check(`${tag}: the knobs are back at their pre-Rise values`,
+      check(`${tag}: the knobs are back at their pre-Rise values, after a double Panic`,
         moved.length > 0 && differ(before, after).length === 0, show(after, differ(before, after)) || `${moved.length} had moved`);
       check(`${tag}: no pad is left busy`, (await k.busy()).length === 0, JSON.stringify(await k.busy()));
     } catch (e) {
