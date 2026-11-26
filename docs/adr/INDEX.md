@@ -40,6 +40,7 @@ and is marked `(backfilled)`.
 | [024](024-fill-styles-ship-beside-the-track-not-inside-it.md) | Four fill styles ship as `fillStyles` beside the track, not in `track.fills` (a project's hashed source); the host picks one by style key, and Fill Style is an app preference | draft | 2026-11-24 |
 | [025](025-beat-repeat-is-gesture-kind-3-looping-the-pre-master-feed.md) | Beat Repeat is held-gesture kind 3: it loops the five-channel pre-master feed from the next grid line, releases at once, and its division is an app preference, not project data | draft | 2026-11-25 |
 | [026](026-a-performance-take-is-its-own-v1-contract-of-applied-events-at-song-steps.md) | A performance take is its own versioned contract (`bckgrnd-msc/performance` v1), held in memory and outside the project format: only applied scenes, fills and Rises, at engine song steps; elapsed position and replay are deferred | draft | 2026-11-25 |
+| [027](027-one-beat-fills-are-dedicated-recipes-beside-the-track-played-as-fill-length-1.md) | One-beat fills are four dedicated PHP recipes shipped as `beatFillStyles` beside the track, played as engine fill length 1 (steps 12-15) at index 4-7; Bar stays the default and a library without them plays the bar; Fill length is an app preference | draft | 2026-11-26 |
 
 Night 8's new event numbers (51 and up) and reason 11 (`linked`) are protocol, not
 decisions. They belong in a Night 8 protocol doc, alongside `docs/NIGHT7_PROTOCOL.md`,

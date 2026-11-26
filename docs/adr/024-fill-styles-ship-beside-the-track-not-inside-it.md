@@ -1,6 +1,8 @@
 # ADR-024: Fill styles ship beside the track, not inside it
 Date: 2026-11-24   Status: draft
 
+> Amendment proposed 11-26-2026. ADR-027 (draft) adds four one-beat fills as `beatFillStyles` beside `fillStyles`, loaded after them (index 4-7), and an engine fill length 1, so "Rust is unchanged" no longer holds for fills.
+
 ## Context
 Night 9 gives every track four fills: Classic (the existing fill), Simple, Busy and
 Syncopated. Their obvious home is `track.fills`, but a saved project names its source

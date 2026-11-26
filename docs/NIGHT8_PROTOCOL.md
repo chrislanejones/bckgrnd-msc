@@ -53,7 +53,8 @@ allocates. Where this file and the code disagree, the code is wrong.
   bar, and in a longer loop it plays the loop's last bar unless a phrase line inside
   the loop comes first. Setting, changing or clearing the loop while a fill waits works
   `start_serial` out again from where the playhead is and reports `fill queued` again.
-- A fill still plays all sixteen steps once started; only an interrupt cuts it short
+- A fill still plays its whole length once started (sixteen steps for a bar fill, four for a
+  beat fill, Night 10); only an interrupt cuts it short
   (Night 3).
 
 ### Events
@@ -72,10 +73,10 @@ The spec's "Phrase end · Beat" (`b` = 12) was dropped in Night 8 (`NIGHT8_DECIS
 
 | Host → worklet | Engine call |
 |---|---|
-| `{type: 'fill', requestId, generation, index, phrase?, length?, deck?}` | `queue_fill_at(requestId, index, phrase ?? 0, length ?? 0)`. A phrase other than 0, 2, 4, 8 or 16, or a length other than 0, goes in as 255 (refused, reason 1) |
+| `{type: 'fill', requestId, generation, index, phrase?, length?, deck?}` | `queue_fill_at(requestId, index, phrase ?? 0, length ?? 0)`. A phrase other than 0, 2, 4, 8 or 16, or a length other than 0 or 1, goes in as 255 (refused, reason 1) |
 
-The host API is `EngineHost.queueFill(requestId, index, generation, phrase = 0)` with
-`FILL_PHRASE_BARS` in `frontend/lib/engine.ts`.
+The host API is `EngineHost.queueFill(requestId, index, generation, phrase = 0, length = 0)`
+with `FILL_PHRASE_BARS` and `FillLength` in `frontend/lib/engine.ts`.
 
 Which fill: in Night 8 the host always sent index 0, the track's one fill. Since Night 9
 the engine is loaded with the track's four `fillStyles` as its fills, and Fill, Fill into
@@ -132,7 +133,8 @@ Accepted, the events are, in order: `scene replaced` for a scene that was pendin
 ### Timing
 
 - No new slots: the one pending fill and the one pending scene, tied by id. The scene
-  waits as `Timing::Linked`, due on onset serial `start_serial + 16`.
+  waits as `Timing::Linked`, due on onset serial `start_serial + fill_span(length)` (16 for a bar fill, 4 for a beat
+  fill; both land on the same onset, the line the fill ends on).
 - On the landing onset the order is unchanged (Night 4, Night 7):
 
   > pattern edit → **the scene commits, with its lanes** → build → `fill_onset` (**the
@@ -147,7 +149,7 @@ Accepted, the events are, in order: `scene replaced` for a scene that was pendin
 | Situation | Outcome |
 |---|---|
 | `cancel_fill(fill_id)` or `cancel_scene(scene_id)` before the fill starts | Both cancelled, reason 10, and the lanes (10). Events: `scene cancelled`, `fill cancelled`, `patterns cancelled` |
-| Either of those while the fill plays | The scene is cancelled (10) with its lanes; the fill plays out its bar and is unlinked (52, `a` = 10). Returns true |
+| Either of those while the fill plays | The scene is cancelled (10) with its lanes; the fill plays out its length and is unlinked (52, `a` = 10). Returns true |
 | Stop, seek, scratch, brake, backspin, Play while playing, track load, panic, the host's `cancel_pending` | Both cancelled, or the fill cut short (`fill ended`, -1), with that reason, and the lanes. Nothing is unlinked: both are gone |
 | Another scene launched (any timing) | The scene is `replaced` (latest wins) and its lanes withdrawn (10). The fill is unlinked (52, 10) and plays as a plain phrase fill. The new scene keeps **its own** timing |
 | A Rise queued | The scene is `replaced` by the build (Night 7); the fill is unlinked (52, 10) |
@@ -240,7 +242,7 @@ step).
 | Situation | Outcome |
 |---|---|
 | `cancel_build(id)` or `cancel_fill(fill_id)` before the fill starts | Build cancelled (10) and restored, its lanes withdrawn (10), the fill cancelled (10). Events in that order |
-| Either during the fill's bar | The same for the build; the fill runs its bar (Night 3) and is unlinked (52, 10) |
+| Either during the fill's bar | The same for the build; the fill runs its length (Night 3) and is unlinked (52, 10) |
 | Stop, seek, scratch, brake, backspin, Play while playing, track load, panic, the host's `cancel_pending` | Both cancelled, or the fill cut short, with that reason (as Night 7 and Night 3) |
 | A scene commits over the Rise (Night 7), or a newer Rise replaces it, or the idle deck's follower | `build replaced`; the waiting fill is cancelled with **reason 11 (linked)**, or, if it is already playing, unlinked (52, 11) and played out |
 
@@ -389,4 +391,5 @@ calls `queue_build_with_length`. The host API: `queueFill(…, phrase, length)`,
 `FillLength = 0 | 1` (`frontend/lib/engine.ts`).
 
 `FILL_LENGTHS` is not mirrored in `contracts/`: fill requests are performance, not
-project format, and the worklet's `fillLength` is the one copy outside the engine.
+project format. Copies outside the engine: the worklet's `fillLength`, `FillLength` in
+`frontend/lib/engine.ts`, and `FILL_LENGTHS` / `fillLengthCode` in `frontend/lib/fills.ts`.
