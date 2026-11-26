@@ -94,12 +94,23 @@ export const fillLengthCode = (length: FillLength | undefined): 0 | 1 => (length
 export const NO_BEAT_FILLS = "this track's library has no beat fills: fills play the bar";
 
 /**
- * The length a press plays: the preference, or Bar when the track has no beat fills
- * (a library exported before Night 10). The fill is then named Bar too: the host names
- * what plays, as it does for a style it lacks (ADR-024).
+ * Whether the engine is loaded with beat fills: `withFillStyles` sends them only after
+ * the four bar styles, so a library with beat fills but no `fillStyles` has none loaded.
  */
-export const effectiveLength = (length: FillLength, beats: readonly Fill[] | undefined): FillLength =>
-  length === 'beat' && beats?.length ? 'beat' : 'bar';
+export const beatFillsLoad = (styles: readonly Fill[] | undefined, beats: readonly Fill[] | undefined): boolean =>
+  Boolean(styles?.length && beats?.length);
+
+/**
+ * The length a press plays: the preference, or Bar when the engine has no beat fills
+ * loaded (a library exported before Night 10, or one without `fillStyles`). The fill is
+ * then named Bar too: the host names what plays, as it does for a style it lacks
+ * (ADR-024). Never Beat with a bar fill's index: that would play a bar fill's last beat.
+ */
+export const effectiveLength = (
+  length: FillLength,
+  beats: readonly Fill[] | undefined,
+  styles: readonly Fill[] | undefined,
+): FillLength => (length === 'beat' && beatFillsLoad(styles, beats) ? 'beat' : 'bar');
 
 // ---- Fill choice: a style, or Random / Rotate (Night 9) ------------------------------
 
@@ -187,7 +198,7 @@ export function resolveFillAt(
   cursor: FillCursor,
   seed = FILL_SEED,
 ): FillPick {
-  if (effectiveLength(length, beats) === 'bar' || !styles?.length) return resolveFill(choice, styles, cursor, seed);
+  if (effectiveLength(length, beats, styles) === 'bar' || !styles) return resolveFill(choice, styles, cursor, seed);
   const pick = resolveFill(choice, beats, cursor, seed);
   return { style: pick.style, index: styles.length + pick.index };
 }
@@ -251,6 +262,9 @@ export type FillJob = FillRequest & {
   /** `beat`: only the bar's last beat (Night 10). Kept as sent, like `style`. Absent: the bar. */
   length?: FillLength;
 };
+
+/** What a fill of `length` plays out once started: its bar, or its beat. */
+const unit = (length: FillLength | undefined): string => (length === 'beat' ? 'beat' : 'bar');
 
 /** The words a beat fill adds after the style's word on the buttons: "Busy beat". */
 const beatWord = (job: FillJob): string => (job.length === 'beat' ? ' beat' : '');
@@ -402,11 +416,12 @@ export function fillIntoAria(job: FillJob | null, scene: string, phrase: number,
       ? `Fill into ${scene}: a fill on the next bar, then ${scene}`
       : `Fill into ${scene} at the end of the ${phrase}-bar phrase`;
   }
-  if (own.status === 'playing') return `Filling into ${scene}. Press again to cancel ${scene}; the fill plays out its bar.`;
+  if (own.status === 'playing') return `Filling into ${scene}. Press again to cancel ${scene}; the fill plays out its ${unit(own.length)}.`;
   if (own.status === 'sending' || !own.bar) return `Fill into ${scene}, being queued. Press again to cancel.`;
+  const where = own.length === 'beat' ? 'on the last beat of' : 'at the end of';
   return own.late
-    ? `Fill into ${scene} at the end of the next phrase, bar ${own.bar}. Press again to cancel.`
-    : `Fill into ${scene} at the end of bar ${own.bar}. Press again to cancel.`;
+    ? `Fill into ${scene} ${where} the next phrase, bar ${own.bar}. Press again to cancel.`
+    : `Fill into ${scene} ${where} bar ${own.bar}. Press again to cancel.`;
 }
 
 /** A pad's line while its scene waits on a fill: Fill into, or a Rise's last bar. */
@@ -452,10 +467,13 @@ export function buildRefusal(reason: number, part: number): string {
   return BUILD_REFUSAL[reason] ?? REASON[reason] ?? 'refused';
 }
 
-/** The status line when a Fill into or a Rise + Fill was canceled or cut short. */
-export function fillIntoCancelled(scene: string, reason: number | undefined, filling: boolean): string {
+/**
+ * The status line when a Fill into or a Rise + Fill was canceled or cut short. `length`
+ * is the fill's, as sent: a beat fill plays out its beat, not a bar.
+ */
+export function fillIntoCancelled(scene: string, reason: number | undefined, filling: boolean, length: FillLength = 'bar'): string {
   if (reason === undefined || reason === 10) {
-    return filling ? `${scene} canceled; the fill plays out its bar` : `Fill → ${scene} canceled`;
+    return filling ? `${scene} canceled; the fill plays out its ${unit(length)}` : `Fill → ${scene} canceled`;
   }
   return `Fill → ${scene} canceled: ${REASON[reason] ?? ''}`;
 }

@@ -73,6 +73,7 @@ import {
   PHRASE_BAR_CHOICES,
   buildRefusal,
   advanceFill,
+  beatFillsLoad,
   effectiveLength,
   fillChoiceName,
   fillIntoCancelled,
@@ -397,7 +398,7 @@ export function useInstrument() {
   const liveStyles = track ? fillStylesCache.current.get(track.id) : undefined;
   const liveBeats = track ? beatFillsCache.current.get(track.id) : undefined;
   /** The length a press plays: Bar when the track has no beat fills (named Bar too). */
-  const playLength = effectiveLength(fillLength, liveBeats);
+  const playLength = effectiveLength(fillLength, liveBeats, liveStyles);
   /** A queued fill's length for its job: only a beat fill says so. */
   const jobLength = playLength === 'beat' ? { length: 'beat' as const } : {};
   const fillPick = resolveFillAt(fillStyle, liveStyles, liveBeats, playLength, fillCursor);
@@ -1072,7 +1073,10 @@ export function useInstrument() {
       showMix(next.mix);
       setSceneStatus(`${name} active`);
     } else if (next.status === 'cancelled') {
-      setSceneStatus(fillIntoCancelled(name, next.reason, Boolean(prev.fillInto?.filling)));
+      // The scene's cancel comes before its fill's own event, so the fill job is still
+      // the one this scene was sent with.
+      const job = fillRef.current?.requestId === prev.fillInto?.fillId ? fillRef.current : null;
+      setSceneStatus(fillIntoCancelled(name, next.reason, Boolean(prev.fillInto?.filling), job?.length));
     } else if (next.status === 'rejected') {
       setSceneStatus(`Fill → ${name} not started: ${fillIntoRefusal(next.reason ?? 1, part, name)}`);
     }
@@ -2029,7 +2033,7 @@ export function useInstrument() {
      */
     fillLength,
     /** Why Beat can't play on this track, or null. */
-    fillLengthUnavailable: track && !liveBeats?.length ? NO_BEAT_FILLS : null,
+    fillLengthUnavailable: track && !beatFillsLoad(liveStyles, liveBeats) ? NO_BEAT_FILLS : null,
     /** What the next press would play in Random and in Rotate, for the menu's words. */
     fillNextBy: {
       random: resolveFillAt('random', liveStyles, liveBeats, playLength, fillCursor).style,

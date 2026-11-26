@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Tests\Feature;
 
+use App\Support\Music\Fills;
 use App\Support\Music\Library;
 use Tests\TestCase;
 
@@ -62,6 +63,22 @@ final class TrackApiTest extends TestCase
             $exported = json_decode((string) file_get_contents("{$dir}/{$id}.json"), true);
             $this->assertSame(['classic', 'simple', 'busy', 'syncopated'], array_column($exported['beatFillStyles'] ?? [], 'style'), "public/library/{$id}.json");
             $this->assertCount(1, $exported['track']['fills'], "public/library/{$id}.json");
+        }
+    }
+
+    /**
+     * Night 11 QA: the API and the static library ship the same beat fills, and they
+     * are today's generator's, so a stale export can't send the web build different
+     * fills from the desktop one.
+     */
+    public function test_the_api_and_the_exported_library_ship_the_generators_beat_fills(): void
+    {
+        $dir = dirname(__DIR__, 2).'/public/library';
+        foreach (Library::all() as $id => $track) {
+            $want = json_decode((string) json_encode(Fills::beatStyles($track)), true);
+            $exported = json_decode((string) file_get_contents("{$dir}/{$id}.json"), true);
+            $this->assertSame($want, $exported['beatFillStyles'], "public/library/{$id}.json is stale");
+            $this->assertSame($want, $this->getJson("/api/tracks/{$id}")->assertOk()->json('beatFillStyles'), "/api/tracks/{$id}");
         }
     }
 
