@@ -561,12 +561,9 @@ not. Things to settle before or while building it:
 - **A repeat held when the take stops ends at an estimate.** `endOnset` counts forward
   from the last engine event to the last playing frame's step. Right unless a loop, a cue
   or a seek came after that event. The same telemetry serial would make it exact. (recording)
-- **Events drawer, at the merge with `night11/recording`:** `frontend/ui/EventsDrawer.tsx`
-  carries stand-ins for `describeEvent` / `describePosition` and optional
-  `recording()` / `exportTake()` / `downloadTake()` on `TakeSource`, because this branch
-  was cut before the recorder's API. Delete the two stand-ins, import `describeEvent`
-  from `lib/recording`, and drop the `?`s and the window fallback. Nothing else reads
-  the take. (Lacey, at merge)
+- ~~**Events drawer, at the merge with `night11/recording`:** stand-ins for `describeEvent` /
+  `describePosition`.~~ **Done at the merge (171bad6):** the drawer imports `describeEvent` from
+  `lib/recording`. The `downloadOf` fallback stays only for a source with no `downloadTake`.
 - **The phone's stopped-take Clear can now go.** The events drawer offers Clear, so the
   Record cell's × (which squeezes the phone's track name, above) could live only in the
   drawer on the phone. Needs `verify-ui-recording.mjs`'s "stopped shows ... a Clear
@@ -578,3 +575,16 @@ not. Things to settle before or while building it:
 - **Events drawer is a new overlay pattern** (non-modal, fixed under the transport, Esc
   and focus handled in the component). If it becomes the pattern for other inspectors,
   it may want an ADR. (Dara)
+
+## Found in Night 11 session (11-26-2026)
+
+- **The morning ran past its 110-minute timebox.** Both agents hit a usage limit
+  mid-task and resumed hours later. Integration order and the beat fills came first,
+  as the brief asked.
+- **ADR-026 is about 140 lines with the v2 amendment.** If v3 adds more, split the
+  take format into its own ADR-028 and leave ADR-026 the recording contract. (Dara)
+- **3 review threads on PR #12 are still unresolved on GitHub.** The code fixes landed
+  (c57013d, 224a7fb, 9611412); the threads need resolving by Chris or with a reply. (Chris)
+- **MCP PRs #2 and #4 are superseded.** #3 contains #2, and the Night 11 MCP resync
+  replaces #4's engine sync. Close both once #3 and the resync PR merge. (Chris)
+
