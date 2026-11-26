@@ -685,6 +685,324 @@ body {
   }
 }
 
+/* The Events toggle (Night 11): the take's event inspector, a disclosure between the
+   Record dot and Clear in the same cell, so the bar gains no column. A list icon in the
+   record chip's outline; acid-edged while the drawer is open, like Compare A/B's fold. */
+.events-toggle {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: var(--control-sm);
+  height: var(--control-sm);
+  padding: 0;
+  border: 1px solid var(--color-line);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--color-muted);
+}
+
+.events-toggle:hover {
+  border-color: color-mix(in srgb, var(--color-acid) 45%, var(--color-line));
+  color: var(--color-fg);
+}
+
+.events-toggle[aria-expanded="true"] {
+  border-color: color-mix(in srgb, var(--color-acid) 55%, var(--color-line));
+  color: var(--color-acid);
+}
+
+@media (pointer: coarse), (max-width: 899.98px) {
+  .events-toggle {
+    width: var(--control-md);
+    height: var(--control-md);
+  }
+}
+
+/* The phone's second row has no width to give (the track name is already at its
+   edge), but the position row has 74px free under the Record dot: the toggle sits
+   there, out of flow, so neither row nor the bar's 7.75rem grows. */
+@media (max-width: 899.98px) {
+  .record {
+    position: relative;
+  }
+
+  .record .events-toggle {
+    position: absolute;
+    top: calc(100% + var(--space-2));
+    left: 0;
+  }
+}
+
+/* The events drawer: a sheet pinned under the transport at the right edge, over the
+   inspector's column rather than the pads. Fixed, so it never pushes the scenes
+   toolbar or adds page scroll; it scrolls inside itself. Non-modal: the pads stay
+   playable while it shows the take filling in. */
+.events-drawer {
+  position: fixed;
+  top: calc(var(--transport-h) + var(--space-2));
+  right: var(--space-4);
+  z-index: 45;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  width: min(23rem, calc(100vw - 2 * var(--space-4)));
+  max-height: min(32rem, calc(100dvh - var(--transport-h) - var(--space-6)));
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-control);
+  background: var(--color-bg);
+  box-shadow: 0 1.25rem 3rem rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(243, 239, 230, 0.05);
+}
+
+.events-drawer[hidden] {
+  display: none;
+}
+
+.events-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-2) var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--color-line);
+}
+
+.events-title {
+  min-width: 0;
+}
+
+.events-title .panel-title {
+  outline-offset: 2px;
+}
+
+.events-summary {
+  margin: 0.1rem 0 0;
+  font-size: var(--text-label);
+  font-weight: 600;
+  line-height: 1.2;
+  white-space: nowrap;
+  color: var(--color-fg);
+}
+
+.events-drawer[data-state="recording"] .events-summary::before {
+  content: "";
+  display: inline-block;
+  width: 0.4rem;
+  height: 0.4rem;
+  margin-inline-end: 0.35rem;
+  border-radius: 999px;
+  background: var(--color-danger);
+  vertical-align: 0.1em;
+}
+
+.events-actions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.events-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  min-height: 1.75rem;
+  padding: 0 0.65rem;
+  border: 1px solid var(--color-line);
+  border-radius: 999px;
+  background: var(--color-surface);
+  color: var(--color-fg);
+  font-size: var(--text-label);
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.events-action:hover:not([aria-disabled="true"]) {
+  border-color: color-mix(in srgb, var(--color-acid) 45%, var(--color-line));
+}
+
+/* Unavailable stays focusable (its reason is its description); it reads as off. */
+.events-action[aria-disabled="true"] {
+  border-style: dashed;
+  color: var(--color-muted);
+  cursor: not-allowed;
+}
+
+.events-close {
+  display: inline-grid;
+  place-items: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--color-muted);
+}
+
+.events-close:hover {
+  color: var(--color-fg);
+}
+
+@media (pointer: coarse) {
+  .events-action,
+  .events-close {
+    min-height: var(--control-md);
+    min-width: var(--control-md);
+    justify-content: center;
+  }
+
+  .events-close {
+    width: var(--control-md);
+    height: var(--control-md);
+  }
+}
+
+.events-empty {
+  margin: 0;
+  padding: var(--space-3);
+  font-size: 0.75rem;
+  line-height: 1.45;
+  color: var(--color-muted);
+}
+
+/* Rows: number, kind tag, what and where on one line; how it went under the what.
+   Newest first, so a live take reads from the top. */
+.events-list {
+  margin: 0;
+  padding: var(--space-1) 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  list-style: none;
+}
+
+.events-row {
+  display: grid;
+  grid-template-columns: 1.5rem 3.25rem minmax(0, 1fr) auto;
+  grid-template-areas:
+    "seq kind what pos"
+    ". . outcome outcome";
+  align-items: baseline;
+  column-gap: var(--space-2);
+  padding: 0.3rem var(--space-3);
+  font-size: 0.75rem;
+  line-height: 1.3;
+}
+
+.events-row + .events-row {
+  border-top: 1px solid color-mix(in srgb, var(--color-line) 55%, transparent);
+}
+
+.events-seq {
+  grid-area: seq;
+  font-size: var(--text-label);
+  font-variant-numeric: tabular-nums;
+  text-align: end;
+  color: var(--color-muted);
+}
+
+.events-kind {
+  grid-area: kind;
+  font-size: 0.625rem;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--color-muted);
+}
+
+.events-what {
+  grid-area: what;
+  min-width: 0;
+  overflow: hidden;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--color-fg);
+}
+
+.events-pos {
+  grid-area: pos;
+  font-size: var(--text-label);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  color: var(--color-fg);
+}
+
+.events-outcome {
+  grid-area: outcome;
+  font-size: var(--text-label);
+  color: var(--color-muted);
+}
+
+/* Needs attention (a fill cut short, a Rise canceled or replaced): the warning color
+   and a mark, never color alone; the words say it too. */
+.events-row[data-flag] .events-outcome {
+  color: var(--color-warn);
+}
+
+.events-row[data-flag] .events-outcome::before {
+  content: "! ";
+  font-weight: 800;
+}
+
+/* The phone: the inspector's sheet, from the bar's line to the dock. */
+@media (max-width: 899.98px) {
+  .events-drawer {
+    top: var(--transport-h);
+    right: 0;
+    width: min(23rem, 100vw);
+    max-height: calc(100dvh - var(--transport-h) - var(--control-md) - 1rem - env(safe-area-inset-bottom));
+    border-width: 0 0 1px 1px;
+    border-radius: 0 0 0 var(--radius-control);
+  }
+}
+
+/* A phone narrower than the sheet: edge to edge, not a sliver of page beside it. */
+@media (max-width: 25.99rem) {
+  .events-drawer {
+    left: 0;
+    width: auto;
+    border-width: 0 0 1px;
+    border-radius: 0;
+  }
+}
+
+/* Room for the Events toggle (Night 11), measured: at 1180-1279px the track name is
+   at its 8rem floor and the meter has ~19px to give, so the clip light loses its word
+   here too (as below 1180), color and name kept. Below 1180 (the library-overlay tier)
+   the tempo rides under the track name, as on the phone, so the name keeps its room:
+   at 1040 the full wordmark is back and the name was 14px short without it. */
+@media (min-width: 1180px) and (max-width: 1279.98px) {
+  .clip-light {
+    width: 0.7rem;
+    height: 0.7rem;
+    padding: 0;
+    overflow: hidden;
+    border-radius: 999px;
+    font-size: 0;
+  }
+
+  .master-meter {
+    grid-template-columns: minmax(4rem, 8rem) auto;
+  }
+}
+
+@media (min-width: 900px) and (max-width: 1179.98px) {
+  .tempo-readout {
+    display: none;
+  }
+
+  .now-sub-bpm {
+    display: inline;
+    color: var(--color-fg);
+    font-weight: 600;
+  }
+}
+
+/* Inside the Record cell the chips sit closer than the cell's own gap. */
+.record {
+  gap: var(--space-1);
+}
+
 /* Syne is wide: below 1280px the wordmark steps down so the track name and Panic
    keep their room. (Measured with the bundled fonts, not a fallback.) */
 @media (max-width: 1279.98px) {
@@ -4065,15 +4383,89 @@ html[data-control-drag="yes"] * {
   }
 }
 
-/* Fill length (Night 10): Bar / Beat beside Fill style. Minimal until the layout pass
-   places it; 44px targets on touch like the menu beside it. */
-.scene-fill-length {
+/* Fill style and Fill length as one pill (Night 11): "Fill [Classic ▾ | Bar | Beat]".
+   The menu keeps its left cap, the two radios share its outline and take the right
+   cap, so the pair reads as one setting and costs one header row, not two. 24px with
+   a mouse like the menu; 44 x 44 on touch. */
+.scene-fill-set {
   flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+}
+
+.scene-fill-set .fill-style-select {
+  border-radius: 999px 0 0 999px;
+}
+
+.scene-fill-length {
+  display: inline-flex;
+  flex-shrink: 0;
+}
+
+.scene-fill-length .segment {
+  position: relative;
+  min-height: 1.5rem;
+  margin-inline-start: -1px;
+  padding: 0.1rem 0.6rem;
+  border-radius: 0;
+  font-size: var(--text-label);
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.scene-fill-length .segment:last-of-type {
+  padding-inline-end: 0.75rem;
+  border-radius: 0 999px 999px 0;
+}
+
+/* The checked one, and a hovered or focused one, draw their whole edge. */
+.scene-fill-length .segment:hover,
+.scene-fill-length .segment:focus-visible,
+.scene-fill-length .segment[aria-checked="true"] {
+  z-index: 1;
+}
+
+.scene-fill-length .segment[aria-disabled="true"] {
+  border-style: dashed;
+  color: var(--color-muted);
 }
 
 @media (pointer: coarse) {
   .scene-fill-length .segment {
+    min-width: var(--control-md);
     min-height: var(--control-md);
+  }
+}
+
+/* Given a full row on a narrow phone (below), the menu is what gives way, never the
+   radios: it shrinks inside the pill rather than pushing it past the edge. */
+.scene-fill-set {
+  min-width: 0;
+}
+
+.scene-fill-set .scene-fill-style {
+  flex-shrink: 1;
+  min-width: 0;
+}
+
+.scene-fill-set .fill-style-select {
+  min-width: 0;
+}
+
+/* 320px: the word "Fill" goes so the menu keeps its longest choice whole; its name
+   stays "Fill style". */
+@container scenes (max-width: 18.5rem) {
+  .scene-fill-style > .control-label > [aria-hidden="true"] {
+    display: none;
+  }
+}
+
+/* Room for the status line: below a 40rem panel (a mouse at 900-1279px) the header
+   extras take their own row under the title, so the status keeps ~170px rather than a
+   sliver; from 40rem (1280 up) title and extras share one row. */
+@container scenes (max-width: 39.99rem) {
+  .scenes-panel .panel-actions {
+    flex-basis: 100%;
   }
 }
 
@@ -4155,11 +4547,18 @@ html[data-control-drag="yes"] * {
     }
 
     .scenes-panel .scene-status {
-      flex: 1 0 100%;
+      flex: 1 1 0;
       order: 1;
     }
 
+    /* Night 11: the Fill pill has the row under the title; the status and A/B share
+       the next, A/B at its end. */
+    .scene-fill-set {
+      flex: 1 0 100%;
+    }
+
     .compare-toggle {
+      order: 2;
       margin-inline-start: auto;
     }
   }
@@ -4172,11 +4571,16 @@ html[data-control-drag="yes"] * {
   }
 
   .scenes-panel .scene-status {
-    flex: 1 0 100%;
+    flex: 1 1 0;
     order: 1;
   }
 
+  .scene-fill-set {
+    flex: 1 0 100%;
+  }
+
   .compare-toggle {
+    order: 2;
     margin-inline-start: auto;
   }
 }
@@ -5213,6 +5617,14 @@ html[data-control-drag="yes"] * {
       justify-content: flex-end;
       margin-inline-start: auto;
     }
+  }
+}
+
+/* The Shift 1-4 tag gives its room to the Fill length pill below a 47rem panel (1280
+   and down): the shortcut stays in each pad's tooltip and its aria-keyshortcuts. */
+@container scenes (max-width: 46.99rem) {
+  .scene-keys {
+    display: none;
   }
 }
 
