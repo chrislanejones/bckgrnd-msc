@@ -215,7 +215,7 @@ pub mod timing {
     pub const BAR: u8 = 2;
 }
 
-/// Event kinds on the wire: the first of each event's four numbers.
+/// Event kinds on the wire: the first of each event's [`EVENT_WIDTH`] numbers.
 pub mod event {
     pub const SCENE_QUEUED: u8 = 1;
     pub const SCENE_APPLIED: u8 = 2;
@@ -250,6 +250,12 @@ pub mod event {
     /// A scene's crash accent on the onset it committed (`a` = the step, -1 for Now;
     /// `b` = [`super::accent_fired`]).
     pub const ACCENT_FIRED: u8 = 53;
+    /// Beat Repeat (`docs/NIGHT10_PROTOCOL.md`, Events): a stutter engaged on its grid
+    /// line (`id` = the token held longest, `a` = the step, `b` = the division), and
+    /// that stutter ending on any path (`id` = the same token, `a` = the step of the
+    /// last onset, -1 if none since a seek or Play, `b` = [`crate::perform::repeat_ended`]).
+    pub const REPEAT_STARTED: u8 = 61;
+    pub const REPEAT_ENDED: u8 = 62;
 }
 
 /// The accent a scene, a Fill into's scene or a Rise's landing carries
@@ -287,8 +293,13 @@ pub mod reason {
     pub const LINKED: u8 = 11;
 }
 
-/// Numbers per event: `[kind, request id, a, b]`.
-pub const EVENT_WIDTH: usize = 4;
+/// Numbers per event: `[kind, request id, a, b, serial]`. The serial is the
+/// scheduler's onset serial when the event was raised ([`Scheduler::serial`]): it never
+/// goes down, never resets (not on Stop, not on a track load) and places every event in
+/// a take where a song step cannot (`docs/NIGHT3_PROTOCOL.md`, Events). An event raised
+/// between onsets (a Now apply, a cancel, a gesture let go) carries the serial of the
+/// last onset; one raised on an onset carries that onset's.
+pub const EVENT_WIDTH: usize = 5;
 
 /// Events the ring holds between drains.
 ///
@@ -310,6 +321,9 @@ pub struct EventRing {
     head: usize,
     len: usize,
     dropped: u32,
+    /// The onset serial stamped on each event pushed: kept equal to
+    /// [`Scheduler::serial`] by [`Scheduler::on_onset`], the only place it moves.
+    serial: f64,
 }
 
 impl Default for EventRing {
@@ -319,6 +333,7 @@ impl Default for EventRing {
             head: 0,
             len: 0,
             dropped: 0,
+            serial: 0.0,
         }
     }
 }
@@ -328,7 +343,7 @@ impl EventRing {
     // each one cost more wasm than the call.
     #[inline(never)]
     pub fn push(&mut self, kind: u8, id: u32, a: f64, b: f64) {
-        let record = [kind as f64, id as f64, a, b];
+        let record = [kind as f64, id as f64, a, b, self.serial];
         if self.len == EVENT_CAPACITY {
             // Full: overwrite the oldest.
             self.buf[self.head] = record;
@@ -349,7 +364,7 @@ impl EventRing {
         self.dropped
     }
 
-    /// Move as many events as fit into `out`, oldest first, four numbers each.
+    /// Move as many events as fit into `out`, oldest first, [`EVENT_WIDTH`] numbers each.
     /// Returns how many were moved; any that did not fit stay for the next drain.
     pub fn drain_into(&mut self, out: &mut [f64]) -> u32 {
         let n = self.len.min(out.len() / EVENT_WIDTH);
@@ -729,6 +744,8 @@ impl Scheduler {
     #[inline]
     pub fn on_onset(&mut self, step: usize) -> Option<PendingScene> {
         self.serial += 1;
+        // Exact in an f64 up to 2^53 onsets: centuries of sixteenths.
+        self.events.serial = self.serial as f64;
         let due = self.scene.as_ref().is_some_and(|p| match p.timing {
             Timing::Linked => self.serial >= p.due,
             timing => {
@@ -932,7 +949,8 @@ mod tests {
         for i in 0..5 {
             ring.push(event::SCENE_APPLIED, i, 0.0, 0.0);
         }
-        let mut out = [0.0f64; 9];
+        // Room for two events and part of a third.
+        let mut out = [0.0f64; 2 * EVENT_WIDTH + EVENT_WIDTH - 1];
         assert_eq!(ring.drain_into(&mut out), 2);
         assert_eq!(ring.len(), 3);
         assert_eq!(ring.drain_into(&mut out), 2);
@@ -941,5 +959,25 @@ mod tests {
             "the second drain starts where the first stopped"
         );
         assert_eq!(ring.len(), 1);
+    }
+
+    #[test]
+    fn every_event_carries_the_serial_of_the_last_onset() {
+        let mut s = Scheduler::default();
+        s.events.push(event::SCENE_QUEUED, 1, 0.0, 0.0);
+        s.on_onset(0);
+        s.on_onset(1);
+        s.events.push(event::SCENE_APPLIED, 2, 0.0, 0.0);
+        s.events.push(event::SCENE_CANCELLED, 3, 0.0, 0.0);
+        s.on_onset(2);
+        s.events.push(event::FILL_QUEUED, 4, 0.0, 0.0);
+        assert_eq!(s.serial(), 3);
+        let mut out = [0.0f64; EVENT_CAPACITY * EVENT_WIDTH];
+        let n = s.events.drain_into(&mut out) as usize;
+        let serials: Vec<f64> = out.as_chunks::<EVENT_WIDTH>().0[..n]
+            .iter()
+            .map(|e| e[4])
+            .collect();
+        assert_eq!(serials, [0.0, 2.0, 2.0, 3.0]);
     }
 }

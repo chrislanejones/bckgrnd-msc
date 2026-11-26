@@ -44,12 +44,35 @@ pub mod ended {
     pub const PLATTER: f64 = 1.0;
 }
 
+/// The `b` field of `repeat ended` (62): why the stutter stopped
+/// (`docs/NIGHT10_PROTOCOL.md`, Events). 0 and 1 mean what they mean for 21.
+pub mod repeat_ended {
+    /// The last held Beat Repeat token's lease ran out.
+    pub const LEASE: f64 = 0.0;
+    /// A brake, backspin or scratch took over the deck.
+    pub const PLATTER: f64 = 1.0;
+    /// The host let go of the last held Beat Repeat token (`gesture_end`).
+    pub const RELEASE: f64 = 2.0;
+    /// Release FX (`release_gestures`).
+    pub const RELEASE_FX: f64 = 3.0;
+    /// Panic.
+    pub const PANIC: f64 = 4.0;
+    /// Stop.
+    pub const STOP: f64 = 5.0;
+    /// A track load.
+    pub const TRACK: f64 = 6.0;
+    /// The end of an offline score.
+    pub const END_OF_SCORE: f64 = 7.0;
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct Slot {
     token: u32,
     kind: u8,
     /// Rendered samples left before the lease runs out.
     lease: u32,
+    /// When it began, counted in begins: the lowest is the one held longest.
+    order: u64,
 }
 
 /// The active overrides.
@@ -57,6 +80,8 @@ pub struct Gestures {
     slots: [Option<Slot>; MAX_GESTURES],
     /// A full lease, in samples.
     lease: u32,
+    /// Begins accepted so far.
+    begun: u64,
 }
 
 impl Gestures {
@@ -64,6 +89,7 @@ impl Gestures {
         Self {
             slots: [None; MAX_GESTURES],
             lease: (LEASE_SECONDS * sample_rate).max(1.0) as u32,
+            begun: 0,
         }
     }
 
@@ -83,10 +109,16 @@ impl Gestures {
         {
             return false;
         }
-        let lease = self.lease;
+        let (lease, order) = (self.lease, self.begun);
         match self.slots.iter_mut().find(|s| s.is_none()) {
             Some(slot) => {
-                *slot = Some(Slot { token, kind, lease });
+                *slot = Some(Slot {
+                    token,
+                    kind,
+                    lease,
+                    order,
+                });
+                self.begun += 1;
                 true
             }
             None => false,
@@ -137,6 +169,16 @@ impl Gestures {
         let any = self.slots.iter().any(Option::is_some);
         self.slots = [None; MAX_GESTURES];
         any
+    }
+
+    /// The token of `kind` held longest (begun first), if any is held.
+    pub fn first(&self, kind: u8) -> Option<u32> {
+        self.slots
+            .iter()
+            .flatten()
+            .filter(|g| g.kind == kind)
+            .min_by_key(|g| g.order)
+            .map(|g| g.token)
     }
 
     /// Whether an override of `kind` is active.
@@ -190,6 +232,18 @@ mod tests {
     }
 
     #[test]
+    fn first_is_the_token_held_longest_whatever_its_slot() {
+        let mut g = Gestures::new(48_000.0);
+        assert_eq!(g.first(kind::BEAT_REPEAT), None);
+        assert!(g.begin(7, kind::BEAT_REPEAT));
+        assert!(g.begin(8, kind::BEAT_REPEAT));
+        assert!(g.end(7));
+        assert!(g.begin(9, kind::BEAT_REPEAT), "takes the slot 7 left");
+        assert_eq!(g.first(kind::BEAT_REPEAT), Some(8));
+        assert_eq!(g.first(kind::ECHO_THROW), None);
+    }
+
+    #[test]
     fn a_lease_expires_unless_renewed() {
         let sr = 1_000.0;
         let mut g = Gestures::new(sr);
@@ -204,8 +258,11 @@ mod tests {
         assert!(!g.holds(kind::ECHO_THROW));
         assert!(g.holds(kind::FILTER_HOLD), "the renewed one stays");
         assert!(!g.renew(5), "an expired token is gone");
-        let mut out = [0.0f64; 8];
+        let mut out = [0.0f64; 2 * crate::scheduler::EVENT_WIDTH];
         assert_eq!(ring.drain_into(&mut out), 1);
-        assert_eq!(&out[..4], &[event::GESTURE_EXPIRED as f64, 5.0, 1.0, 0.0]);
+        assert_eq!(
+            &out[..5],
+            &[event::GESTURE_EXPIRED as f64, 5.0, 1.0, 0.0, 0.0]
+        );
     }
 }

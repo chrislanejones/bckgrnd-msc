@@ -188,7 +188,13 @@ const MIX_ENTRY_KICK = 0.45;
  */
 const SCENE_LEN = 44;
 const SCENE_FX_FILTER = 32;
-const EVENT_WIDTH = 4;
+/**
+ * Numbers per event in the engine's ring: `[kind, id, a, b, serial]`. The worklet posts
+ * the first four as `events` (unchanged, four each) and the fifth as `s`, one per event.
+ */
+const EVENT_WIDTH = 5;
+/** Numbers per event in a posted `sceneEvents` message's `events`. */
+const POSTED_WIDTH = 4;
 /** `EVENT_CAPACITY` in engine-core/src/scheduler.rs: one drain empties the ring. */
 const EVENT_CAPACITY = 64;
 const EVENT_SCENE_APPLIED = 2;
@@ -876,8 +882,18 @@ class EngineProcessor extends AudioWorkletProcessor {
     this.drainEvents('b', this.engines.b);
   }
 
-  private postSceneEvents(deck: DeckId, events: number[]): void {
-    this.port.postMessage({ type: 'sceneEvents', deck, events });
+  /**
+   * Post events four numbers each, with `s` the onset serial of each
+   * (docs/NIGHT3_PROTOCOL.md, Events). Events the worklet raises itself (refusals) are
+   * stamped with the deck engine's serial now, 0 before it exists.
+   */
+  private postSceneEvents(deck: DeckId, events: number[], s?: number[]): void {
+    let serials = s;
+    if (!serials) {
+      const now = this.engines[deck]?.onset_serial() ?? 0;
+      serials = new Array<number>(Math.floor(events.length / POSTED_WIDTH)).fill(now);
+    }
+    this.port.postMessage({ type: 'sceneEvents', deck, events, s: serials });
   }
 
   /**
@@ -931,7 +947,14 @@ class EngineProcessor extends AudioWorkletProcessor {
       }
     }
     if (baseFor >= 0) this.postBuildBase(deck, baseFor);
-    this.postSceneEvents(deck, Array.from(buf.subarray(0, n * EVENT_WIDTH)));
+    const events = new Array<number>(n * POSTED_WIDTH);
+    const serials = new Array<number>(n);
+    for (let k = 0; k < n; k += 1) {
+      const at = k * EVENT_WIDTH;
+      for (let j = 0; j < POSTED_WIDTH; j += 1) events[k * POSTED_WIDTH + j] = buf[at + j];
+      serials[k] = buf[at + POSTED_WIDTH];
+    }
+    this.postSceneEvents(deck, events, serials);
   }
 
   /**

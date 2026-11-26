@@ -31,7 +31,7 @@
 use std::hint::black_box;
 use std::time::{Duration, Instant};
 
-use bckgrnd_msc_engine::scene::SCENE_LEN;
+use bckgrnd_msc_engine::scene::{EVENT_CAPACITY, EVENT_WIDTH, SCENE_LEN};
 use bckgrnd_msc_engine::{Engine, Track};
 
 const SR: f32 = 48_000.0;
@@ -123,7 +123,7 @@ fn run(case: Case, track: &Track) -> Duration {
     let (rise, back) = targets(&e);
     let mut l = [0.0f32; BLOCK];
     let mut r = [0.0f32; BLOCK];
-    let mut events = [0.0f64; 4 * 64];
+    let mut events = [0.0f64; EVENT_CAPACITY * EVENT_WIDTH];
     let blocks = SR as usize * SECONDS / BLOCK;
     let mut next_id = 1u32;
     let payloads = [drum_payload(0.6), drum_payload(0.3)];
@@ -174,7 +174,7 @@ fn run(case: Case, track: &Track) -> Duration {
         e.process(&mut l, &mut r);
         while e.event_count() > 0 {
             let n = e.take_events_into(&mut events) as usize;
-            lanes_applied += events.as_chunks::<4>().0[..n]
+            lanes_applied += events.as_chunks::<EVENT_WIDTH>().0[..n]
                 .iter()
                 .filter(|ev| ev[0] == PATTERNS_APPLIED)
                 .count();

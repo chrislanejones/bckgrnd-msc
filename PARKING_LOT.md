@@ -588,3 +588,17 @@ not. Things to settle before or while building it:
 - **MCP PRs #2 and #4 are superseded.** #3 contains #2, and the Night 11 MCP resync
   replaces #4's engine sync. Close both once #3 and the resync PR merge. (Chris)
 
+
+## Found in Night 11 engine events (11-26-2026)
+
+- **The engine's noise is one stream per thread, shared by every engine on it.**
+  `dsp::noise()` is a thread-local xorshift, so two engines on one thread (both decks in
+  the worklet, or one render after another in a test binary) draw from the same stream,
+  and a render depends on every noise draw before it. Audio is fine. But a bypass hash
+  harness that runs renders in sequence on one thread only compares fairly when both
+  binaries run exactly the same sequence (the Night 11 harness now gives each render its
+  own thread). And replaying a take (Nights 12–14) can't be bit-exact unless the noise
+  is per engine and seeded, which would change every render's bytes once. (Silas, Felix)
+- The serial column (`EVENT_WIDTH` 5, `docs/NIGHT3_PROTOCOL.md` § The onset serial)
+  answers "a take has no elapsed position" above on the engine side. The recorder's use
+  of it is the recording agent's. (Silas, recording)

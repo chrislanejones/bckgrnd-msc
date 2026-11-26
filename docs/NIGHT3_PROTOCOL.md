@@ -193,8 +193,12 @@ Only `applied` changes the UI's active-scene indicator. Until then the pad shows
 
 The engine keeps a fixed ring of events; the worklet drains it after each render
 call and posts them to the UI only when there are any, as
-`{type: 'sceneEvents', deck, events: number[]}`. Each event is four numbers,
-**`[kind, requestId, a, b]`**:
+`{type: 'sceneEvents', deck, events: number[], s: number[]}`. Each event in `events`
+is four numbers, **`[kind, requestId, a, b]`**, and `s` holds one number per event, in
+the same order: its **onset serial** (Night 11, below). In the engine's ring each event
+is five numbers, `[kind, requestId, a, b, serial]` (`EVENT_WIDTH` = 5); the worklet
+splits the fifth off into `s` so the four-number shape every reader already uses stays
+as it was.
 
 | kind | name | a | b |
 |---|---|---|---|
@@ -209,6 +213,8 @@ call and posts them to the UI only when there are any, as
 | 14 | fill cancelled | reason | 0 |
 | 15 | fill rejected | reason | 0 |
 | 21 | gesture expired (lease ran out); `requestId` is the token | gesture kind | 0 (Night 10: 1 when a brake, backspin or scratch ended a Beat Repeat) |
+| 61 | repeat started (Night 11); `requestId` is the token | step it engaged on | division: 4, 8 or 16 |
+| 62 | repeat ended (Night 11); `requestId` is the token 61 named | step of the last onset (-1 if none since a seek or Play) | why (0-7, `docs/NIGHT10_PROTOCOL.md`, Events) |
 
 Reasons: 1 invalid, 2 stopped, 3 transport, 4 track, 5 panic, 6 mixing, 7 not
 playing, 8 already playing, 9 stale generation, 10 cancelled by the user.
@@ -216,6 +222,37 @@ playing, 8 already playing, 9 stale generation, 10 cancelled by the user.
 Kinds 31-35 are pattern revisions (`docs/NIGHT4_PROTOCOL.md`); kinds 41-47 are timed
 builds (`docs/NIGHT7_PROTOCOL.md`), which share this ring, these reasons and the
 cancellation table above.
+
+#### The onset serial (Night 11)
+
+A song step cannot place an event in a take: steps wrap at 256 and jump on Cue, a
+seek, a scratch drop and a loop. So every event also carries the scheduler's **onset
+serial**: the number of onsets (sixteenth steps fired) since that deck's engine was
+made.
+
+- **One onset, one count.** It goes up by exactly one on every onset, before anything
+  on that onset runs, so every event raised on an onset (a scene applied on its
+  boundary, a fill started, a Beat Repeat engaging, an accent) carries that onset's
+  serial. Steps raced through by a backspin or a brake are onsets too and count.
+- **Between onsets, the last onset's.** An event raised by a call rather than by an
+  onset (a Now apply, a cancel, Stop, Panic, a gesture let go, a lease running out at
+  the end of a render call) carries the serial of the last onset before it. Two events
+  with the same serial keep the ring's order.
+- **Never reset, never down.** Not by Stop, Play, a track load, a seek or a loop. A
+  take that starts mid-session subtracts its first event's serial. It is per engine:
+  each deck has its own, and a take ends on a track change (an auto-mix included), so a
+  take never mixes the two. A new engine (a page load) starts again at 0; events before
+  its first onset carry 0.
+- **Exact.** An f64, exact to 2^53 onsets (millions of years of sixteenths).
+- **Refusals the worklet makes itself** (above) carry the deck engine's serial at that
+  moment (`Engine::onset_serial`), the same "last onset" rule; 0 before the engine
+  exists.
+
+The main thread (`frontend/lib/engine.ts`) puts it on every `EngineEvent` as `s`.
+
+Why a fifth column rather than a separate "position" event: every event then carries
+its own place, with nothing to pair up and nothing lost if the ring overwrites its
+oldest entry. It costs one store per event and one per onset, no allocation.
 
 - The ring holds 64 events. If it fills between two drains (only possible with dozens
   of requests landing between two render calls) the **oldest** event is overwritten

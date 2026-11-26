@@ -59,7 +59,7 @@ fn a_library_fill_plays_one_bar_through_the_public_api() {
             seen.extend(
                 buf[..n * EVENT_WIDTH]
                     .chunks(EVENT_WIDTH)
-                    .map(|c| c.to_vec()),
+                    .map(|c| c[..4].to_vec()),
             );
         }
         let kinds = [event::FILL_QUEUED, event::FILL_STARTED, event::FILL_ENDED];
@@ -122,7 +122,7 @@ fn library_beat_fills_play_the_last_beat_through_the_public_api() {
                 seen.extend(
                     buf[..n * EVENT_WIDTH]
                         .chunks(EVENT_WIDTH)
-                        .map(|c| c.to_vec()),
+                        .map(|c| c[..4].to_vec()),
                 );
             }
             assert_eq!(
