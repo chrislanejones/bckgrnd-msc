@@ -21,6 +21,13 @@ namespace App\Support\Music;
  * project's source and is hashed (frontend/lib/snapshot.ts), so it stays byte for byte
  * what it was and no saved project reads as made against a changed library. The host
  * hands the four to the engine as the track's fills and picks one by its index.
+ *
+ * Beat fills (Night 10): `beatStyles()` gives four more, one per style, written for one
+ * beat rather than cut from the bar fills. Each is a 16-step bar like the others, with
+ * every hit on its last beat (steps 12 to 15) and steps 0 to 11 silent: the engine,
+ * asked for a fill of length 1, plays only positions 12 to 15 and leaves the bar's first
+ * three beats to the groove. They travel beside the track as `beatFillStyles`, for the
+ * same reason `fillStyles` do.
  */
 final class Fills
 {
@@ -82,6 +89,63 @@ final class Fills
             self::tag('busy', 'Busy', self::busy($bar, $peak, $kind)),
             self::tag('syncopated', 'Syncopated', self::syncopated($bar, $peak, $kind)),
         ];
+    }
+
+    /** The first step of a bar's last beat: where a beat fill's hits start. */
+    public const BEAT_FROM = 12;
+
+    /**
+     * The four one-beat fills for a track, in `STYLES` order, each a 16-step bar silent
+     * before step 12. Shares of each lane's own peak in the track, so nothing is louder
+     * than the track already plays it; deep is a little softer and lo-fi softer still.
+     *
+     * - Classic: a clap pickup, two claps rising into the downbeat over the beat's kick.
+     * - Simple: a single accent, kick and clap together on the beat, then nothing.
+     * - Busy: a sixteenth clap roll rising across the beat (from its second sixteenth
+     *   in lo-fi).
+     * - Syncopated: an off-beat push, the kick on the "and" under an open hat, claps on
+     *   the sixteenths either side.
+     *
+     * @return list<array{id: string, name: string, style: string, kick: list<float>, clap: list<float>, hat: list<float>, hatOpen: list<float>}>
+     */
+    public static function beatStyles(Track $track): array
+    {
+        $peak = [];
+        foreach (self::LANES as $lane) {
+            $peak[$lane] = (float) max(array_map('floatval', $track->{$lane}));
+        }
+        $soft = match ($track->kind) {
+            'deep' => 0.85,
+            'lofi' => 0.7,
+            default => 1.0,
+        };
+        $roll = $track->kind === 'lofi'
+            ? [13 => 0.55, 14 => 0.75, 15 => 0.95]
+            : [12 => 0.5, 13 => 0.65, 14 => 0.8, 15 => 1.0];
+        $hits = [
+            'classic' => ['kick' => [12 => 1.0], 'clap' => [14 => 0.6, 15 => 0.85], 'hat' => [12 => 0.5, 13 => 0.35], 'hatOpen' => []],
+            'simple' => ['kick' => [12 => 1.0], 'clap' => [12 => 0.9], 'hat' => [], 'hatOpen' => []],
+            'busy' => ['kick' => [12 => 0.9], 'clap' => $roll, 'hat' => [], 'hatOpen' => []],
+            'syncopated' => ['kick' => [14 => 0.9], 'clap' => [13 => 0.6, 15 => 0.9], 'hat' => [12 => 0.5], 'hatOpen' => [14 => 0.8]],
+        ];
+        $names = ['classic' => 'Classic beat', 'simple' => 'Simple beat', 'busy' => 'Busy beat', 'syncopated' => 'Syncopated beat'];
+
+        $out = [];
+        foreach (self::STYLES as $style) {
+            $lanes = [];
+            foreach (self::LANES as $lane) {
+                $row = array_fill(0, self::BAR, 0.0);
+                foreach ($hits[$style][$lane] as $step => $share) {
+                    // The kick keeps its weight: a beat fill that thins the downbeat's
+                    // pickup kick would sound like a dropout, not a fill.
+                    $row[$step] = self::vel($peak[$lane], $lane === 'kick' ? $share : $share * $soft);
+                }
+                $lanes[$lane] = $row;
+            }
+            $out[] = self::tag($style, $names[$style], $lanes, "{$style}-beat");
+        }
+
+        return $out;
     }
 
     /**
@@ -187,9 +251,9 @@ final class Fills
      * @param  array<string, list<float>>  $lanes
      * @return array{id: string, name: string, style: string, kick: list<float>, clap: list<float>, hat: list<float>, hatOpen: list<float>}
      */
-    private static function tag(string $style, string $name, array $lanes): array
+    private static function tag(string $style, string $name, array $lanes, ?string $id = null): array
     {
-        return ['id' => $style, 'name' => $name, 'style' => $style, 'kick' => $lanes['kick'], 'clap' => $lanes['clap'], 'hat' => $lanes['hat'], 'hatOpen' => $lanes['hatOpen']];
+        return ['id' => $id ?? $style, 'name' => $name, 'style' => $style, 'kick' => $lanes['kick'], 'clap' => $lanes['clap'], 'hat' => $lanes['hat'], 'hatOpen' => $lanes['hatOpen']];
     }
 
     /**

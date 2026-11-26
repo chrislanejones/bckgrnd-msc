@@ -4065,6 +4065,18 @@ html[data-control-drag="yes"] * {
   }
 }
 
+/* Fill length (Night 10): Bar / Beat beside Fill style. Minimal until the layout pass
+   places it; 44px targets on touch like the menu beside it. */
+.scene-fill-length {
+  flex-shrink: 0;
+}
+
+@media (pointer: coarse) {
+  .scene-fill-length .segment {
+    min-height: var(--control-md);
+  }
+}
+
 /* Compare A/B's fold (Night 9B): a header pill like Fill style beside it, so the
    toolbar is two rows until Compare is wanted. The chevron turns as Output's does.
    While a capture holds the row open the pill reads as on but inert (aria-disabled),

@@ -91,6 +91,11 @@ export type BuildBars = (typeof BUILD_BARS)[number];
  */
 export const FILL_PHRASE_BARS = [0, 2, 4, 8, 16] as const;
 export type FillPhrase = (typeof FILL_PHRASE_BARS)[number];
+/**
+ * A fill's length on the wire (Night 10, docs/NIGHT8_PROTOCOL.md): 0 the whole bar, 1
+ * only its last beat (steps 12-15), the bar's first three beats playing the groove.
+ */
+export type FillLength = 0 | 1;
 
 /**
  * `b` of the `fillRejected` and `sceneRejected` a refused Fill into posts: which part
@@ -695,6 +700,7 @@ export class EngineHost {
    * either (`cancelBuild` or `cancelFill`) ends both, and a replaced build takes its
    * waiting fill along (`fillCancelled`, `ENGINE_REASON.linked`). The fill reports
    * `fillQueued`, `fillLinked` (`a` = this build), then `fillStarted` and `fillEnded`.
+   * `fill.length` 1 plays only the last bar's last beat (Night 10).
    */
   queueBuild(
     requestId: number,
@@ -703,7 +709,7 @@ export class EngineHost {
     generation: number,
     land?: ArrayLike<number>,
     patterns?: { requestId: number; data: Float32Array },
-    extra: { fill?: { requestId: number; index: number }; accent?: SceneAccent } = {},
+    extra: { fill?: { requestId: number; index: number; length?: FillLength }; accent?: SceneAccent } = {},
   ): void {
     const { fill, accent = SCENE_ACCENT.none } = extra;
     this.post({
@@ -714,7 +720,7 @@ export class EngineHost {
       target: Array.from(target),
       ...(land ? { land: Array.from(land) } : {}),
       ...(patterns ? { patterns: patterns.data, patternsId: patterns.requestId } : {}),
-      ...(fill ? { fillId: fill.requestId, fillIndex: fill.index } : {}),
+      ...(fill ? { fillId: fill.requestId, fillIndex: fill.index, ...(fill.length ? { fillLength: fill.length } : {}) } : {}),
       ...(accent ? { accent } : {}),
     });
   }
@@ -738,9 +744,12 @@ export class EngineHost {
    * Outcomes arrive through `onSceneEvents`: `fillQueued` (again if a loop change moves
    * it), `fillStarted`, `fillEnded`, or `fillRejected` (not playing, already queued or
    * playing, mixing, stale generation, no such fill) or `fillCancelled`.
+   *
+   * `length` 1 (Night 10) plays only that bar's last beat: due on the first such beat
+   * ahead, so a press before this bar's last beat has started still catches it.
    */
-  queueFill(requestId: number, index: number, generation: number, phrase: FillPhrase = 0): void {
-    this.post({ type: 'fill', requestId, generation, index, ...(phrase ? { phrase } : {}) });
+  queueFill(requestId: number, index: number, generation: number, phrase: FillPhrase = 0, length: FillLength = 0): void {
+    this.post({ type: 'fill', requestId, generation, index, ...(phrase ? { phrase } : {}), ...(length ? { length } : {}) });
   }
 
   /**
@@ -764,11 +773,13 @@ export class EngineHost {
     generation: number,
     options: {
       phrase?: FillPhrase;
+      /** 1: only the last beat (Night 10); the scene still lands on the next downbeat. */
+      length?: FillLength;
       patterns?: { requestId: number; data: Float32Array };
       accent?: SceneAccent;
     } = {},
   ): void {
-    const { phrase = 0, patterns, accent = SCENE_ACCENT.none } = options;
+    const { phrase = 0, length = 0, patterns, accent = SCENE_ACCENT.none } = options;
     this.post({
       type: 'fillInto',
       fillId,
@@ -776,6 +787,7 @@ export class EngineHost {
       generation,
       index,
       ...(phrase ? { phrase } : {}),
+      ...(length ? { length } : {}),
       values: Array.from(values),
       ...(patterns ? { patterns: patterns.data, patternsId: patterns.requestId } : {}),
       ...(accent ? { accent } : {}),

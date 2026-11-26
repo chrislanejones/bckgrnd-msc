@@ -419,7 +419,18 @@ export function App() {
               actions={
                 <SceneHeader
                   status={sceneStatus}
-                  {...(inst.hasFill ? { fillStyle: { style: inst.fillStyle, next: inst.fillNextBy, onStyle: inst.setFillStyle } } : {})}
+                  {...(inst.hasFill
+                    ? {
+                        fillStyle: {
+                          style: inst.fillStyle,
+                          next: inst.fillNextBy,
+                          onStyle: inst.setFillStyle,
+                          length: inst.fillLength,
+                          onLength: inst.setFillLength,
+                          lengthUnavailable: inst.fillLengthUnavailable,
+                        },
+                      }
+                    : {})}
                   compare={{
                     shown: compareShown,
                     comparing: inst.compare !== null,
@@ -465,6 +476,9 @@ export function App() {
                         onAt: inst.setFillAt,
                         onPhraseBars: inst.setPhraseBars,
                         onRiseFill: inst.setRiseFill,
+                        length: inst.fillLength,
+                        onLength: inst.setFillLength,
+                        lengthUnavailable: inst.fillLengthUnavailable,
                       },
                     }
                   : {})}

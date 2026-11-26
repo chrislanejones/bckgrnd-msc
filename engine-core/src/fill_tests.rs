@@ -152,8 +152,9 @@ fn bad_phrase_or_length_is_refused() {
         (5, 0, 0),
         (32, 0, 0),
         (255, 0, 0),
-        (4, 1, 0),
+        (4, 2, 0),
         (0, 4, 0),
+        (0, 255, 0),
         (4, 0, 1),
     ] {
         assert_eq!(
@@ -445,8 +446,8 @@ fn a_refused_fill_into_changes_nothing() {
             detail::FILL,
         ),
         (
-            "beat length",
-            |e| e.queue_fill_into(1, 0, 4, 1, 2, &scene(0.9), 0),
+            "an unknown length",
+            |e| e.queue_fill_into(1, 0, 4, 2, 2, &scene(0.9), 0),
             reason::INVALID,
             detail::FILL,
         ),
@@ -1344,4 +1345,356 @@ fn a_bad_accent_is_refused_and_an_unlanded_one_is_silent() {
         .iter()
         .any(|x| x[0] == event::ACCENT_FIRED as f64));
     assert_eq!(e.transitions.crashes, 0);
+}
+
+// -- Night 10: beat fills (length 1) ------------------------------------------------
+
+/// The drums the groove itself plays on `step` (kick on the beat, hats on every step).
+fn groove_on(step: usize) -> Vec<(usize, f32)> {
+    if step.is_multiple_of(4) {
+        vec![(KICK, 1.0), (HATS, 0.4)]
+    } else {
+        vec![(HATS, 0.4)]
+    }
+}
+
+/// Next bar, length 1: the fill plays only the bar's last beat (12..15), from recipe
+/// position 12 (`fill started` b = 12), and ends on the next downbeat; the bar's first
+/// three beats and the next bar play the groove. A press before this bar's last beat
+/// has started catches it (fired 5 or 11: the beat on 12); one during or after it
+/// (fired 12, 15) goes to the next bar's (28). The same rule as a bar fill: the first
+/// start ahead, never one passed.
+#[test]
+fn a_beat_fill_plays_only_the_last_beat_of_the_next_bar() {
+    for (fired, start) in [(5, 12usize), (11, 12), (12, 28), (15, 28), (16, 28)] {
+        let mut e = playing_at(fired);
+        assert_eq!(e.queue_fill_at(1, 0, 0, 1), reason::OK, "after {fired}");
+        let bar = start - 12;
+        let seen = run_until(&mut e, event::FILL_ENDED, 1);
+        assert_eq!(
+            seen,
+            vec![
+                ev(event::FILL_QUEUED, 1, (bar / 16 + 1) as f64, start as f64),
+                ev(event::FILL_STARTED, 1, start as f64, 12.0),
+                ev(event::FILL_ENDED, 1, (start + 4) as f64, 0.0),
+            ],
+            "after {fired}"
+        );
+        render_until_fired(&mut e, start as i32 + 6);
+        for step in (fired as usize + 1).max(bar)..start {
+            assert_eq!(drums_on(&e, step), groove_on(step), "after {fired}, {step}");
+        }
+        for step in start..start + 4 {
+            assert_eq!(
+                drums_on(&e, step),
+                vec![(CLAP, 0.7)],
+                "after {fired}, {step}"
+            );
+        }
+        for step in start + 4..start + 6 {
+            assert_eq!(drums_on(&e, step), groove_on(step), "after {fired}, {step}");
+        }
+    }
+}
+
+/// Phrase end, length 1: the last beat of the phrase's last bar (4 bars: 60, 124 ...),
+/// for every phrase length. A press before that beat has started makes it, even in
+/// the phrase's last bar (fired 48, 59); one on or after it goes to the next phrase.
+#[test]
+fn a_beat_fill_at_phrase_end_plays_the_phrases_last_beat() {
+    for bars in [2u8, 4, 8, 16] {
+        let phrase = bars as usize * 16;
+        let mut e = fill_engine();
+        e.play();
+        for (id, line) in (1u32..).zip((phrase..=STEPS).step_by(phrase)) {
+            let start = line - 4;
+            assert_eq!(e.queue_fill_at(id, 0, bars, 1), reason::OK, "{bars} bars");
+            let seen = run_until(&mut e, event::FILL_ENDED, id);
+            assert_eq!(
+                find(&seen, event::FILL_QUEUED, id),
+                Some(ev(
+                    event::FILL_QUEUED,
+                    id,
+                    (start / 16 + 1) as f64,
+                    start as f64
+                )),
+                "{bars} bars, line {line}"
+            );
+            assert_eq!(
+                find(&seen, event::FILL_STARTED, id),
+                Some(ev(event::FILL_STARTED, id, start as f64, 12.0)),
+                "{bars} bars, line {line}"
+            );
+            assert_eq!(
+                find(&seen, event::FILL_ENDED, id),
+                Some(ev(event::FILL_ENDED, id, (line % STEPS) as f64, 0.0)),
+                "{bars} bars, line {line}"
+            );
+        }
+    }
+    for (fired, start) in [(5, 60usize), (48, 60), (59, 60), (60, 124), (63, 124)] {
+        let mut e = playing_at(fired);
+        assert_eq!(e.queue_fill_at(1, 0, 4, 1), reason::OK, "after {fired}");
+        let seen = run_until(&mut e, event::FILL_STARTED, 1);
+        assert_eq!(
+            seen[0],
+            ev(event::FILL_QUEUED, 1, (start / 16 + 1) as f64, start as f64),
+            "after {fired}"
+        );
+        assert_eq!(
+            find(&seen, event::FILL_STARTED, 1),
+            Some(ev(event::FILL_STARTED, 1, start as f64, 12.0)),
+            "after {fired}"
+        );
+    }
+}
+
+/// Beats 1 to 3 of a beat fill's bar play the groove as it is, a pattern edit
+/// included: the edited kick lane (hits on 52 and 60 only) plays 52, and the fill
+/// replaces 60 with its clap.
+#[test]
+fn a_beat_fill_keeps_the_edited_groove_under_beats_one_to_three() {
+    let mut e = playing_at(5);
+    assert_eq!(
+        e.queue_patterns(30, timing::NOW, 0, &drum(0, &[(52, 0.55), (60, 0.55)])),
+        0
+    );
+    assert_eq!(e.queue_fill_at(1, 0, 4, 1), reason::OK);
+    render_until_fired(&mut e, 66);
+    assert_eq!(
+        drums_on(&e, 48),
+        vec![(HATS, 0.4)],
+        "the edit: no kick on 48"
+    );
+    assert_eq!(drums_on(&e, 52), vec![(KICK, 0.55), (HATS, 0.4)]);
+    assert_eq!(drums_on(&e, 59), vec![(HATS, 0.4)]);
+    for step in 60..64 {
+        assert_eq!(drums_on(&e, step), vec![(CLAP, 0.7)], "step {step}");
+    }
+    assert_eq!(
+        drums_on(&e, 64),
+        vec![(HATS, 0.4)],
+        "the edit again after it"
+    );
+}
+
+/// A beat fill waits on a loop's wrap too, and a loop change re-announces it: a 1-bar
+/// loop set under a 16-bar phrase fill moves it to the loop's own last beat.
+#[test]
+fn a_loop_change_re_announces_a_beat_fill() {
+    let mut e = playing_at(35);
+    assert_eq!(e.queue_fill_at(1, 0, 16, 1), reason::OK);
+    assert_eq!(events(&mut e), vec![ev(event::FILL_QUEUED, 1, 16.0, 252.0)]);
+    e.set_loop(1);
+    let seen = run_until(&mut e, event::FILL_ENDED, 1);
+    assert_eq!(seen[0], ev(event::FILL_QUEUED, 1, 3.0, 44.0));
+    assert!(seen.contains(&ev(event::FILL_STARTED, 1, 44.0, 12.0)));
+    assert!(seen.contains(&ev(event::FILL_ENDED, 1, 32.0, 0.0)));
+}
+
+/// Cancel: a waiting beat fill can be cancelled until its last beat starts, even in
+/// the same bar (fired 59, the beat on 60), and nothing plays; once it has started it
+/// plays out its beat.
+#[test]
+fn a_beat_fill_cancels_until_its_beat_starts() {
+    let mut e = playing_at(5);
+    assert_eq!(e.queue_fill_at(1, 0, 4, 1), reason::OK);
+    render_until_fired(&mut e, 59);
+    events(&mut e);
+    assert!(e.cancel_fill(1));
+    assert_eq!(
+        events(&mut e),
+        vec![ev(event::FILL_CANCELLED, 1, 10.0, 0.0)]
+    );
+    render_until_fired(&mut e, 66);
+    assert!(events(&mut e).is_empty());
+    for step in 60..64 {
+        assert_eq!(drums_on(&e, step), groove_on(step), "step {step}");
+    }
+
+    let mut e = playing_at(5);
+    assert_eq!(e.queue_fill_at(1, 0, 4, 1), reason::OK);
+    render_until_fired(&mut e, 61);
+    assert!(!e.cancel_fill(1), "already playing");
+    let seen = run_until(&mut e, event::FILL_ENDED, 1);
+    assert!(seen.contains(&ev(event::FILL_ENDED, 1, 64.0, 0.0)));
+}
+
+/// Fill into, length 1: the fill plays the phrase's last beat (60..63) and the scene
+/// and its lanes commit on the next downbeat (64), the onset the fill ends, before
+/// that step's notes; beats 1 to 3 of that bar play the groove. Phrase 0 from step 5:
+/// the fill on 12, the scene on 16.
+#[test]
+fn a_beat_fill_into_lands_on_the_next_downbeat() {
+    let mut e = playing_at(5);
+    assert_eq!(e.queue_patterns(30, timing::BAR, 2, &drop_lanes()), 0);
+    assert_eq!(e.queue_fill_into(1, 0, 4, 1, 2, &scene(0.9), 0), reason::OK);
+    assert_eq!(
+        events(&mut e),
+        vec![
+            ev(event::FILL_QUEUED, 1, 4.0, 60.0),
+            ev(event::SCENE_QUEUED, 2, 5.0, 64.0),
+            ev(event::FILL_LINKED, 1, 2.0, 64.0),
+        ]
+    );
+    render_until_fired(&mut e, 65);
+    let at = trigger_sample(&e, 64);
+    assert_eq!(applies(&e), vec![(2, at)], "committed once, on 64");
+    assert!(committed_before_notes(&e, 2, at));
+    for step in 48..60 {
+        assert_eq!(drums_on(&e, step), groove_on(step), "step {step}");
+    }
+    for step in 60..64 {
+        assert_eq!(drums_on(&e, step), vec![(CLAP, 0.7)], "step {step}");
+    }
+    assert_eq!(drums_on(&e, 64), vec![(KICK, 0.55), (HATS, 0.4)]);
+    let got = events(&mut e);
+    assert!(got.contains(&ev(event::FILL_STARTED, 1, 60.0, 12.0)));
+    let landing: Vec<_> = got.iter().copied().filter(|x| x[2] == 64.0).collect();
+    assert_eq!(
+        landing,
+        vec![
+            ev(event::PATTERNS_APPLIED, 30, 64.0, 0.0),
+            ev(event::SCENE_APPLIED, 2, 64.0, 0.0),
+            ev(event::FILL_ENDED, 1, 64.0, 0.0),
+        ]
+    );
+
+    let mut e = playing_at(5);
+    assert_eq!(e.queue_fill_into(1, 0, 0, 1, 2, &scene(0.9), 0), reason::OK);
+    assert_eq!(
+        events(&mut e),
+        vec![
+            ev(event::FILL_QUEUED, 1, 1.0, 12.0),
+            ev(event::SCENE_QUEUED, 2, 2.0, 16.0),
+            ev(event::FILL_LINKED, 1, 2.0, 16.0),
+        ]
+    );
+    let seen = run_until(&mut e, event::SCENE_APPLIED, 2);
+    assert!(seen.contains(&ev(event::SCENE_APPLIED, 2, 16.0, 0.0)));
+    assert!(seen.contains(&ev(event::FILL_ENDED, 1, 16.0, 0.0)));
+}
+
+/// A beat Fill into cancelled before its beat cancels both parts; a bad length refuses
+/// both, part 2 (the fill).
+#[test]
+fn a_beat_fill_into_cancels_and_refuses_as_a_whole() {
+    let mut e = playing_at(5);
+    assert_eq!(e.queue_fill_into(1, 0, 4, 1, 2, &scene(0.9), 0), reason::OK);
+    render_until_fired(&mut e, 59);
+    events(&mut e);
+    assert!(e.cancel_fill(1));
+    assert_eq!(
+        events(&mut e),
+        vec![
+            ev(event::SCENE_CANCELLED, 2, 10.0, 0.0),
+            ev(event::FILL_CANCELLED, 1, 10.0, 0.0),
+        ]
+    );
+    let mut e = playing_at(5);
+    assert_eq!(
+        e.queue_fill_into(1, 0, 4, 2, 2, &scene(0.9), 0),
+        reason::INVALID
+    );
+    assert_eq!(
+        events(&mut e),
+        vec![
+            ev(event::FILL_REJECTED, 1, 1.0, detail::FILL as f64),
+            ev(event::SCENE_REJECTED, 2, 1.0, detail::FILL as f64),
+        ]
+    );
+}
+
+/// Rise + Fill, length 1, for 2, 4 and 8 bars: only the last beat of the Rise's last
+/// bar is the fill (end - 4 .. end), the rest of that bar the groove, and the landing
+/// scene and lanes commit on the next downbeat as the fill ends.
+#[test]
+fn a_rise_with_a_beat_fill_plays_the_last_beat_and_lands_on_the_downbeat() {
+    for bars in [2u32, 4, 8] {
+        let end = 16 + bars as usize * 16;
+        let fill = end - 4;
+        let mut e = playing_at(5);
+        let target = target_from(&e.base());
+        assert_eq!(e.queue_patterns(30, timing::BAR, 2, &rise_lanes(end)), 0);
+        assert_eq!(
+            e.queue_build_with_length(2, bars, &target, &scene(0.9), 1, 0, 0, 1),
+            reason::OK
+        );
+        assert_eq!(
+            events(&mut e),
+            vec![
+                ev(event::BUILD_QUEUED, 2, 2.0, 16.0),
+                ev(event::FILL_QUEUED, 1, (fill / 16 + 1) as f64, fill as f64),
+                ev(event::FILL_LINKED, 1, 2.0, end as f64),
+            ],
+            "{bars} bars"
+        );
+        render_until_fired(&mut e, end as i32 + 1);
+        let at = trigger_sample(&e, end);
+        assert!(committed_before_notes(&e, 2, at), "{bars} bars");
+        for step in end - 16..fill {
+            assert_eq!(drums_on(&e, step), groove_on(step), "{bars} bars, {step}");
+        }
+        for step in fill..end {
+            assert_eq!(drums_on(&e, step), vec![(CLAP, 0.7)], "{bars} bars, {step}");
+        }
+        assert_eq!(
+            drums_on(&e, end),
+            vec![(KICK, 0.55), (HATS, 0.4)],
+            "{bars} bars"
+        );
+        let got = events(&mut e);
+        assert!(got.contains(&ev(event::FILL_STARTED, 1, fill as f64, 12.0)));
+        let landing: Vec<_> = got.iter().copied().filter(|x| x[2] == end as f64).collect();
+        assert_eq!(
+            landing,
+            vec![
+                ev(event::PATTERNS_APPLIED, 30, end as f64, 0.0),
+                ev(event::BUILD_APPLIED, 2, end as f64, 1.0),
+                ev(event::FILL_ENDED, 1, end as f64, 0.0),
+            ],
+            "{bars} bars"
+        );
+    }
+}
+
+/// `queue_build_with` is `queue_build_with_length` with length 0, event for event and
+/// drum for drum; a bad length refuses the whole Rise, part 5 (the fill), and is
+/// ignored without a fill.
+#[test]
+fn queue_build_with_is_length_zero_and_a_bad_length_is_refused() {
+    let mut a = playing_at(5);
+    let mut b = playing_at(5);
+    let target = target_from(&a.base());
+    assert_eq!(a.queue_build_with(2, 2, &target, &scene(0.9), 1, 0, 0), 0);
+    assert_eq!(
+        b.queue_build_with_length(2, 2, &target, &scene(0.9), 1, 0, 0, 0),
+        0
+    );
+    assert_eq!(events(&mut a), events(&mut b));
+    render_until_fired(&mut a, 50);
+    render_until_fired(&mut b, 50);
+    assert_eq!(events(&mut a), events(&mut b));
+    for step in 6..50 {
+        assert_eq!(drums_on(&a, step), drums_on(&b, step), "step {step}");
+    }
+
+    let mut e = playing_at(5);
+    let target = target_from(&e.base());
+    assert_eq!(
+        e.queue_build_with_length(2, 2, &target, &[], 1, 0, 0, 2),
+        reason::INVALID
+    );
+    assert_eq!(
+        events(&mut e),
+        vec![
+            ev(event::FILL_REJECTED, 1, 1.0, 5.0),
+            ev(event::BUILD_REJECTED, 2, 1.0, 5.0),
+        ]
+    );
+    assert_eq!(
+        e.queue_build_with_length(3, 2, &target, &[], 0, 0, 0, 9),
+        reason::OK,
+        "no fill: the length is ignored"
+    );
 }

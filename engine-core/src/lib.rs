@@ -110,9 +110,9 @@ pub mod perform {
 /// `contracts/scenes.json` and `contracts/parameters.json`.
 pub mod scene {
     pub use crate::scheduler::{
-        accent, accent_fired, event, reason, slot_kind, timing, valid, SlotKind, Timing,
-        ECHO_TIME_OPTIONS, EVENT_CAPACITY, EVENT_WIDTH, FILL_LENGTHS, FILL_PHRASE_BARS, FX_BASE,
-        FX_KINDS, SCENE_LEN, SCENE_PARAMS, STEM_FIELDS,
+        accent, accent_fired, event, fill_length, reason, slot_kind, timing, valid, SlotKind,
+        Timing, ECHO_TIME_OPTIONS, EVENT_CAPACITY, EVENT_WIDTH, FILL_LENGTHS, FILL_PHRASE_BARS,
+        FX_BASE, FX_KINDS, SCENE_LEN, SCENE_PARAMS, STEM_FIELDS,
     };
 
     /// Timed builds (`docs/NIGHT7_PROTOCOL.md`): the lengths allowed, the codes for

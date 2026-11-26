@@ -17,6 +17,10 @@
  * track it was loaded with carries the four styles as its fills; a queued fill keeps
  * the style it was sent with.
  *
+ * Fill length (Night 10): Bar by default, Beat remembered; a beat fill plays only the
+ * bar's last beat with Fill, Phrase end, Fill → Drop and Rise + Fill, keeps its length
+ * once queued, and a library without beat fills marks Beat unavailable and plays the bar.
+ *
  * Every change of the pads, the fill buttons, the bar readout and the status line is
  * logged in the page with its time, so the checks read what the screen showed and for
  * how long, not a poll that can miss a bar.
@@ -649,8 +653,9 @@ export async function fillChecks({ open, check }) {
       await k.tempo(BPM);
       // Messages queued before the first Play reach the worklet once it boots.
       const loads = (await sent()).filter((m) => m.type === 'track');
-      check('fill style: the engine is loaded with the four styles as its fills',
-        loads.length > 0 && loads.every((m) => m.fills?.join() === 'classic,simple,busy,syncopated'), JSON.stringify(loads.map((m) => m.fills)));
+      // Night 10: the four beat fills follow them, so a style's index is unchanged.
+      check('fill style: the engine is loaded with the four styles as its first fills',
+        loads.length > 0 && loads.every((m) => m.fills?.slice(0, 4).join() === 'classic,simple,busy,syncopated'), JSON.stringify(loads.map((m) => m.fills)));
       check('fill style: with a mouse the Fill button\'s tooltip names the style',
         /^Busy fill: /.test((await k.fillBtn.getAttribute('title')) ?? ''), await k.fillBtn.getAttribute('title'));
       // Fill: index 2. Switched to Simple while it waits, it keeps Busy.
@@ -842,6 +847,205 @@ export async function fillChecks({ open, check }) {
     await page.close();
   }
 
+  // ---- Beat fills (Night 10): Bar or Beat, remembered; Beat plays only the bar's last
+  // beat, with Fill, Phrase end, Fill → Drop and Rise + Fill; a late press still catches
+  // this bar's last beat; a queued fill keeps its length; a track without beat fills
+  // marks Beat unavailable and plays the bar. Observed as what each request sends and
+  // how long the Fill button reads playing (a beat at 160 bpm is 375ms, a bar 1500ms).
+  {
+    const { page, errors } = await open(1440, 1000);
+    const k = kit(page);
+    try {
+      await page.addInitScript(() => {
+        const sent = (window.__FILL_SENT__ = []);
+        const post = MessagePort.prototype.postMessage;
+        MessagePort.prototype.postMessage = function (message, ...rest) {
+          if (message && typeof message === 'object' && ['track', 'mix', 'fill', 'fillInto', 'build'].includes(message.type)) {
+            const { type, index, fillIndex, length, fillLength, json } = message;
+            const fills = json ? JSON.parse(json).fills : undefined;
+            sent.push({ type, index, fillIndex, length, fillLength, fills: fills?.map((f) => f.id) });
+          }
+          return post.call(this, message, ...rest);
+        };
+      });
+      await page.reload({ waitUntil: 'networkidle' });
+      await page.waitForSelector('.scene-fill-tools');
+      const sent = () => page.evaluate(() => window.__FILL_SENT__);
+      const group = page.getByRole('radiogroup', { name: 'Fill length', exact: true });
+      const lengthRadio = (name) => group.getByRole('radio', { name, exact: true });
+      check('beat fill: a Fill length radio group of Bar and Beat beside Fill style, Bar checked',
+        (await page.locator('.scenes-panel .panel-actions .scene-fill-length').count()) === 1
+        && (await lengthRadio('Bar').getAttribute('aria-checked')) === 'true'
+        && (await lengthRadio('Beat').getAttribute('aria-checked')) === 'false');
+      check('beat fill: Bar is the default and is not stored until chosen',
+        await page.evaluate(() => localStorage.getItem('bckgrnd-msc:fill-length')) === null);
+      await lengthRadio('Beat').click();
+      check('beat fill: choosing Beat is stored as bckgrnd-msc:fill-length = beat',
+        await page.evaluate(() => localStorage.getItem('bckgrnd-msc:fill-length')) === 'beat');
+      await page.reload({ waitUntil: 'networkidle' });
+      await page.waitForSelector('.scene-fill-tools');
+      check('beat fill prefs: after a reload Beat is still checked', (await lengthRadio('Beat').getAttribute('aria-checked')) === 'true');
+      check('beat fill: the Fill button names a beat fill, on the bar\'s last beat',
+        (await k.fillBtn.getAttribute('aria-label')) === 'Classic beat fill for one beat, the last beat of this bar or the next',
+        await k.fillBtn.getAttribute('aria-label'));
+
+      await k.play();
+      await k.tempo(BPM);
+      const loads = (await sent()).filter((m) => m.type === 'track');
+      check('beat fill: the engine is loaded with the four styles, then the four beat fills',
+        loads.length > 0 && loads.every((m) => m.fills?.length === 8 && m.fills.slice(4).join() === 'classic-beat,simple-beat,busy-beat,syncopated-beat'),
+        JSON.stringify(loads.map((m) => m.fills)));
+
+      // One press at the start of `from`: what it says, what it sends, and where it plays.
+      const beatPress = async (tag, from, want, label, status) => {
+        await k.seekTo(from);
+        await k.record();
+        const n = (await sent()).length;
+        await k.fillBtn.click();
+        await k.waitText('.fill-button', / · Bar \d+$/);
+        const shown = await k.text(k.fillBtn);
+        const said = await k.statusText();
+        await k.waitFill('playing');
+        await k.waitFill('idle');
+        await page.waitForTimeout(300);
+        const log = await k.log();
+        const played = barsWhile(log, fillPlaying);
+        const msg = (await sent()).slice(n).find((m) => m.type === 'fill');
+        check(`${tag}: pressed in bar ${from}, the button reads "${label}"`, shown === label, shown);
+        check(`${tag}: the status says "${status}"`, said === status, said);
+        check(`${tag}: it sends length 1, Classic's beat fill (index 4)`, msg?.length === 1 && msg?.index === 4, JSON.stringify(msg));
+        check(`${tag}: it plays one beat, in bar ${want}`, played.bar === want && played.most + played.other < 800, JSON.stringify(played.ms));
+      };
+      await beatPress('beat fill next bar', 5, 5, 'Beat fill · Bar 5', 'Beat fill queued for the last beat of bar 5');
+      await k.fillAt('phrase');
+      await k.phrase(4);
+      await beatPress('beat fill phrase 4', 5, 8, 'Beat fill · Bar 8', 'Beat fill queued for the last beat of bar 8, the end of the phrase');
+      // Pressed at the start of the phrase's last bar: its last beat is still ahead.
+      await beatPress('beat fill late press', 8, 8, 'Beat fill · Bar 8', 'Beat fill queued for the last beat of bar 8, the end of the phrase');
+
+      // Cancel: a second press before its beat starts.
+      await k.seekTo(5);
+      await k.record();
+      await k.fillBtn.click();
+      await k.waitText('.fill-button', /^Beat fill · Bar 8$/);
+      const queuedAria = await k.fillBtn.getAttribute('aria-label');
+      await k.fillBtn.click();
+      await k.waitFill('idle');
+      await page.waitForTimeout(300);
+      check('beat fill cancel: the queued name says the last beat of bar 8',
+        queuedAria === 'Cancel the queued Classic beat fill, on the last beat of bar 8', queuedAria);
+      check('beat fill cancel: a second press cancels it', (await k.statusText()) === 'Fill cancelled' && !(await k.log()).some(fillPlaying), await k.statusText());
+
+      // A queued fill keeps its length: Bar chosen while a beat fill waits.
+      await k.seekTo(5);
+      await k.record();
+      await k.fillBtn.click();
+      await k.waitText('.fill-button', /^Beat fill · Bar 8$/);
+      await lengthRadio('Bar').click();
+      const kept = await k.text(k.fillBtn);
+      await k.waitFill('playing');
+      await k.waitFill('idle');
+      await page.waitForTimeout(300);
+      const keptPlay = barsWhile(await k.log(), fillPlaying);
+      check('beat fill: a queued fill keeps the length it was sent with', kept === 'Beat fill · Bar 8' && keptPlay.bar === 8 && keptPlay.most + keptPlay.other < 800,
+        `${kept} ${JSON.stringify(keptPlay.ms)}`);
+      check('beat fill: once it has played, the button names the new choice, a bar',
+        (await k.fillBtn.getAttribute('aria-label')) === 'Classic fill for one bar, ending on the next 4-bar phrase line', await k.fillBtn.getAttribute('aria-label'));
+      await lengthRadio('Beat').click();
+
+      // Fill → Drop with Beat, at the next bar: the beat fill on this bar's last beat,
+      // then Drop on the next downbeat.
+      await k.fillAt('bar');
+      const intoAria = await k.intoBtn.getAttribute('aria-label');
+      await k.seekTo(5);
+      await k.record();
+      let n = (await sent()).length;
+      await k.intoBtn.click();
+      await k.waitText('.fill-into-button', /^Beat · Bar 5 → Drop$/);
+      await k.waitState(DROP, ['active', 'modified']);
+      await page.waitForTimeout(300);
+      const intoLog = await k.log();
+      const intoMsg = (await sent()).slice(n).find((m) => m.type === 'fillInto');
+      // The pad turns Active on the onset the beat fill ends: the downbeat of bar 6,
+      // within the slack the other landing checks allow for the bar readout.
+      const landDelta = gap(intoLog, padActive(DROP), (e) => e.bar === 6);
+      check('beat fill into: the button reads "Beat · Bar 5 → Drop", and sends length 1',
+        intoMsg?.length === 1 && intoMsg?.index === 4, JSON.stringify(intoMsg));
+      check('beat fill into: Drop lands on the next downbeat, bar 6', landDelta !== null && Math.abs(landDelta) <= LAND_SLACK, `Δ${landDelta}ms`);
+      check('beat fill into: the fill played one beat, in bar 5', barsWhile(intoLog, (e) => e.into?.state === 'playing').bar === 5,
+        JSON.stringify(barsWhile(intoLog, (e) => e.into?.state === 'playing').ms));
+      check('beat fill into: at rest, Fill → Drop names the beat fill', intoAria === "Fill into Drop: a beat fill on the bar's last beat, then Drop on the downbeat", intoAria);
+
+      // Rise + Fill with Beat: the fill on the last beat of the Rise's last bar.
+      await k.riseOver(2);
+      await k.finishWithFill(true);
+      await k.nextBar();
+      const pressed = await k.barNow();
+      const N = wrapBar(pressed + 1);
+      await k.record();
+      n = (await sent()).length;
+      await k.pad(0).click();
+      await k.waitState(0, ['active', 'modified']);
+      await page.waitForTimeout(300);
+      const riseLog = await k.log();
+      const buildMsg = (await sent()).slice(n).find((m) => m.type === 'build');
+      const risePlay = barsWhile(riseLog, fillPlaying);
+      check('beat rise fill: the build sends fill length 1 and Classic\'s beat fill (4)', buildMsg?.fillLength === 1 && buildMsg?.fillIndex === 4, JSON.stringify(buildMsg));
+      check('beat rise fill: the status says it ends with a beat fill',
+        riseLog.some((e) => new RegExp(`rises over 2 bars from bar ${N}, ending with a beat fill$`).test(e.status)),
+        seq(riseLog, (e) => e.status).join(' | '));
+      check('beat rise fill: the fill plays one beat, in the Rise\'s last bar', risePlay.bar === wrapBar(N + 1) && risePlay.most + risePlay.other < 800,
+        `N=${N}; ${JSON.stringify(risePlay.ms)}`);
+      const riseLand = gap(riseLog, padActive(0), (e) => e.bar === wrapBar(N + 2));
+      check('beat rise fill: the scene lands on the next downbeat', riseLand !== null && Math.abs(riseLand) <= LAND_SLACK, `Δ${riseLand}ms`);
+    } catch (e) {
+      check('beat fill: the walk-through ran to the end', false, String(e.message).split('\n')[0]);
+    }
+    check('beat fill: no page errors', errors.length === 0, errors.join('; '));
+    await page.close();
+  }
+
+  // ---- Beat fills on a library without them: Beat is unavailable, with its reason, and
+  // a press plays (and names) the bar. ------------------------------------------------
+  {
+    const { page, errors } = await open(1440, 1000);
+    const k = kit(page);
+    try {
+      await page.route(/\/(library\/[a-z-]+\.json|api\/tracks\/[a-z-]+)$/, async (route) => {
+        const res = await route.fetch();
+        const body = await res.json();
+        delete body.beatFillStyles;
+        await route.fulfill({ response: res, json: body });
+      });
+      await page.evaluate(() => localStorage.setItem('bckgrnd-msc:fill-length', 'beat'));
+      await page.reload({ waitUntil: 'networkidle' });
+      await page.waitForSelector('.scene-fill-tools');
+      const beat = page.getByRole('radiogroup', { name: 'Fill length', exact: true }).getByRole('radio', { name: 'Beat', exact: true });
+      const why = await beat.evaluate((el) => ({
+        aria: el.getAttribute('aria-disabled'),
+        checked: el.getAttribute('aria-checked'),
+        described: (el.getAttribute('aria-describedby') ?? '').split(/\s+/).filter(Boolean).map((id) => document.getElementById(id)?.textContent?.trim()).join(' '),
+      }));
+      check('beat fill missing: Beat is aria-disabled, still the stored choice, described by its reason',
+        why.aria === 'true' && why.checked === 'true' && /no beat fills/.test(why.described), JSON.stringify(why));
+      check('beat fill missing: the Fill button names a bar fill',
+        (await k.fillBtn.getAttribute('aria-label')) === 'Classic fill for one bar, from the next bar', await k.fillBtn.getAttribute('aria-label'));
+      await k.play();
+      await k.tempo(BPM);
+      await k.seekTo(5);
+      await k.fillBtn.click();
+      await k.waitText('.fill-button', /^Fill · Bar 6$/);
+      check('beat fill missing: a press plays the bar, named so ("Fill · Bar 6")', true);
+      await k.waitFill('playing');
+      await k.waitFill('idle');
+      check('beat fill missing: the preference stays Beat', await page.evaluate(() => localStorage.getItem('bckgrnd-msc:fill-length')) === 'beat');
+    } catch (e) {
+      check('beat fill missing: the walk-through ran to the end', false, String(e.message).split('\n')[0]);
+    }
+    check('beat fill missing: no page errors', errors.length === 0, errors.join('; '));
+    await page.close();
+  }
+
   // ---- Preferences survive a reload. -------------------------------------------------
   {
     const { page, errors } = await open(1440, 1000);
@@ -915,7 +1119,10 @@ export async function fillChecks({ open, check }) {
         };
         // Night 9: a style other than Classic names itself in place of the word Fill.
         for (const [a, b] of [['Fill · Next phrase', 'Fill → Drop'], ['Drum fill', 'Fill · Next phrase → Drop'], ['Drum fill', 'Fill · Bar 16 → Drop'], ['Fill playing', 'Filling → Drop'],
-          ['Simple · Next phrase', 'Fill → Drop'], ['Synco · Next phrase', 'Fill → Drop'], ['Simple · Bar 16', 'Fill → Drop'], ['Simple playing', 'Filling → Drop']]) {
+          ['Simple · Next phrase', 'Fill → Drop'], ['Synco · Next phrase', 'Fill → Drop'], ['Simple · Bar 16', 'Fill → Drop'], ['Simple playing', 'Filling → Drop'],
+          // Night 10: a beat fill says so ("Synco beat · Next phrase", "Beat · Bar 16 → Drop").
+          ['Synco beat · Next phrase', 'Fill → Drop'], ['Simple beat · Bar 16', 'Fill → Drop'], ['Beat fill · Next phrase', 'Fill → Drop'],
+          ['Drum fill', 'Beat · Next phrase → Drop'], ['Simple beat playing', 'Filling → Drop']]) {
           fill.textContent = a;
           into.textContent = b;
           const h = Math.round(bar.getBoundingClientRect().height * 10) / 10;

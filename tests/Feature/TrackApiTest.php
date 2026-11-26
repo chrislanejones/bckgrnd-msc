@@ -46,6 +46,25 @@ final class TrackApiTest extends TestCase
         $this->assertSame($response->json('track.fills.0.id'), $response->json('fillStyles.0.id'));
     }
 
+    public function test_a_track_arrives_with_its_four_beat_fills_beside_it(): void
+    {
+        $response = $this->getJson('/api/tracks/warehouse')->assertOk();
+
+        $this->assertSame(['classic', 'simple', 'busy', 'syncopated'], array_column($response->json('beatFillStyles'), 'style'));
+        $this->assertCount(1, $response->json('track.fills'));
+        $this->assertArrayNotHasKey('beatFillStyles', $response->json('track'));
+    }
+
+    public function test_every_exported_library_track_has_its_beat_fills(): void
+    {
+        $dir = dirname(__DIR__, 2).'/public/library';
+        foreach (Library::all() as $id => $track) {
+            $exported = json_decode((string) file_get_contents("{$dir}/{$id}.json"), true);
+            $this->assertSame(['classic', 'simple', 'busy', 'syncopated'], array_column($exported['beatFillStyles'] ?? [], 'style'), "public/library/{$id}.json");
+            $this->assertCount(1, $exported['track']['fills'], "public/library/{$id}.json");
+        }
+    }
+
     public function test_an_unknown_track_is_a_json_404(): void
     {
         $this->getJson('/api/tracks/nope')

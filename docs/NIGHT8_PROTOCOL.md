@@ -19,8 +19,8 @@ allocates. Where this file and the code disagree, the code is wrong.
 
 - `phrase_bars` is 0 (the next bar, the Night 3 fill) or 2, 4, 8 or 16. Anything else
   is refused, reason 1.
-- `length` is 0, one bar. Anything else is refused, reason 1. The argument is there so
-  that more lengths fit later without changing the call (`NIGHT8_DECISIONS.md` §3).
+- `length` is 0, one bar, or (Night 10) 1, the bar's last beat: see the Night 10
+  addendum at the end. Anything else is refused, reason 1.
 - Other refusals are unchanged: 1 no such fill, 7 not playing, 3 a scratch, brake or
   backspin, 8 a fill already queued or playing.
 - The phrase length rides on the request. The engine keeps no phrase setting of its
@@ -63,10 +63,10 @@ No new kinds for phrase fills.
 | kind | name | a | b |
 |---|---|---|---|
 | 11 | fill queued | the bar it plays (1-based) | its first step |
-| 12 | fill started | step | 0, the first recipe position (one-bar fills only) |
+| 12 | fill started | step | the first recipe position it plays: 0, or 12 for a beat fill (Night 10) |
 
-The spec's "Phrase end · Beat" (`b` = 12) is not built: `NIGHT8_DECISIONS.md` §3 drops
-it.
+The spec's "Phrase end · Beat" (`b` = 12) was dropped in Night 8 (`NIGHT8_DECISIONS.md`
+§3) and came back in Night 10 as fill length 1, with dedicated one-beat patterns.
 
 ### Worklet messages
 
@@ -337,3 +337,56 @@ For the ADRs (`docs/NIGHT8_SPEC.md` as amended by `NIGHT8_DECISIONS.md`):
 | A replaced Rise's fill | Cancelled (11) while waiting, unlinked (52, 11) if playing | A Fill into's fill outlives its scene because it was the action; a Rise's fill was a part of the Rise |
 | The accent on a Rise with no landing scene | Fires on the end onset anyway | The Rise's end is the landing |
 | Event 51's re-announce | 51 comes once; a loop change re-sends 11 and 1 (or 41) | 51 is the tie, not a prediction |
+
+## Night 10 addendum: beat fills (length 1)
+
+`FILL_LENGTHS` is `[0, 1]` (`engine-core/src/scheduler.rs`, `scene::fill_length`):
+
+| length | name | What plays |
+|---|---|---|
+| 0 | bar | As before: the fill's 16 positions replace the drum lanes for the whole bar, from its bar line. Bit-identical to Night 9. |
+| 1 | beat | Only the bar's **last beat**, steps 12-15, from positions 12-15 of the fill's recipe. Beats 1-3 play the groove as it is, pattern edits included. It ends on the same downbeat a bar fill of that bar would. |
+
+Every path takes it:
+
+| Request | Length argument | With length 1 |
+|---|---|---|
+| `queue_fill_at(id, index, phrase, length)` | existing | Next bar (phrase 0) or phrase end (2/4/8/16): the last beat of the bar a bar fill would play by the same rule (see below) |
+| `queue_fill_into(…, phrase, length, …)` | existing | The beat fill, and the scene committing on the next downbeat, the onset the fill ends |
+| `queue_build_with_length(request_id, bars, target, land, fill_id, fill_index, accent, fill_length) -> u8` | **new** | Only the last beat of the Rise's last bar is the fill; the landing commits on the next downbeat as before. A bad length is refused as a whole, part 5 (the fill). Ignored without a fill. |
+| `queue_build_with(…, fill_id, fill_index, accent)` | unchanged | `queue_build_with_length(…, 0)` |
+| `queue_fill(id, index)` | unchanged | `queue_fill_at(id, index, 0, 0)` |
+
+- **Timing, and the late-press rule.** The rule is the one bar fills have always had:
+  the first start ahead that qualifies, counted from the step due next, never one
+  already passed (`fill_offset_for`). A bar fill's start is its bar line; a beat fill's
+  is step 12 of its bar, and the bar qualifies the same way (its end is a phrase line,
+  or the loop's wrap). So **a beat fill pressed before this bar's last beat has started
+  plays it**, even in the phrase's last bar (pressed on step 59, it plays 60-63 and ends
+  on the line at 64); pressed on or after step 12 it goes to the next qualifying bar,
+  with phrase 0 the next bar, with a phrase the next phrase end. Never refused for being
+  late.
+- `fill queued` `a` is the bar and `b` the first step (12 mod 16); `fill started` `b`
+  is 12, the first recipe position. `fill linked` `b` and a Fill into's `scene queued`
+  carry the downbeat it lands on, as before.
+- Cancel: a waiting beat fill can be cancelled until step 12 of its bar has fired;
+  once started it plays out its beat, the bar fill's rule.
+- Loop and tempo changes: as for bar fills (counted in onsets, re-announced on a loop
+  change).
+- A beat fill playing ends within a beat, so it never blocks a Rise; a waiting one does,
+  as any waiting fill does (the host withdraws it first).
+
+The lanes are 16-step bars like every fill: a beat fill's are silent before step 12,
+so nothing changes in `Fill` or the track JSON. The engine plays whatever positions
+12-15 of the fill it is given hold: the four dedicated one-beat patterns travel beside
+the track as `beatFillStyles` (`Fills::beatStyles`), and the host loads the engine with
+the four styles then the four beat fills, so a beat fill's index is 4-7.
+
+Worklet messages: `fill` and `fillInto` `length` 0 (or absent) or 1, anything else 255
+(refused); `build` gains `fillLength?` (0 or absent, the last bar; 1 its last beat) and
+calls `queue_build_with_length`. The host API: `queueFill(…, phrase, length)`,
+`queueFillInto(…, {length})`, `queueBuild(…, {fill: {requestId, index, length}})`, with
+`FillLength = 0 | 1` (`frontend/lib/engine.ts`).
+
+`FILL_LENGTHS` is not mirrored in `contracts/`: fill requests are performance, not
+project format, and the worklet's `fillLength` is the one copy outside the engine.

@@ -27,9 +27,42 @@ const FILL_GRID: usize = 16;
 /// a phrase: the fill plays the next bar, as it always has.
 pub const FILL_PHRASE_BARS: [u8; 5] = [0, 2, 4, 8, 16];
 
-/// The fill lengths `queue_fill_at` takes. Only 0, one bar, for now; the argument is
-/// there so more lengths fit later without changing the call.
-pub const FILL_LENGTHS: [u8; 1] = [0];
+/// The fill lengths `queue_fill_at`, `queue_fill_into` and `queue_build_with_length`
+/// take ([`fill_length`]): 0, one bar, and 1, one beat (Night 10).
+pub const FILL_LENGTHS: [u8; 2] = [fill_length::BAR, fill_length::BEAT];
+
+/// A fill's length on the wire (`docs/NIGHT8_PROTOCOL.md`, Night 10 addendum).
+///
+/// - [`BAR`]: the fill's sixteen steps replace the drum lanes for a whole bar, from
+///   its bar line.
+/// - [`BEAT`]: only the bar's last beat, steps 12 to 15. The fill starts on step 12 of
+///   its bar and plays positions 12 to 15 of its recipe; beats 1 to 3 play the groove
+///   as it is, pattern edits included. It ends on the same downbeat a bar fill of
+///   that bar would, so a Fill into's scene and a Rise's landing still commit there.
+///
+/// [`BAR`]: fill_length::BAR
+/// [`BEAT`]: fill_length::BEAT
+pub mod fill_length {
+    pub const BAR: u8 = 0;
+    pub const BEAT: u8 = 1;
+}
+
+/// The first of a fill's sixteen positions it plays, for `length`: 0 for a bar, 12
+/// for a beat. It starts on the step of its bar with that position, and plays to 16.
+#[inline]
+pub fn fill_first(length: u8) -> usize {
+    if length == fill_length::BEAT {
+        FILL_STEPS - 4
+    } else {
+        0
+    }
+}
+
+/// How many onsets a fill of `length` plays: 16 for a bar, 4 for a beat.
+#[inline]
+pub fn fill_span(length: u8) -> usize {
+    FILL_STEPS - fill_first(length)
+}
 
 /// Length of the scene vector: 8 stems x (volume, send, muted, solo), then 12 effects.
 pub const SCENE_LEN: usize = 44;
@@ -357,6 +390,8 @@ pub struct PendingFill {
     /// 0: the next bar. 2, 4, 8 or 16: the bar that ends on a phrase line of that many
     /// bars, or on the loop's wrap.
     pub phrase_bars: u8,
+    /// [`fill_length`]: the whole bar, or only its last beat.
+    pub length: u8,
     /// The onset serial its first step plays on: counted in onsets, so a tempo change
     /// moves nothing. Recomputed when the loop changes under it.
     pub start_serial: u64,
@@ -378,7 +413,8 @@ pub enum Link {
 pub struct ActiveFill {
     pub request_id: u32,
     pub index: u32,
-    /// Which of its sixteen steps the current onset plays, 0..16.
+    /// Which of its sixteen steps the current onset plays, 0..16 (12..16 for a beat
+    /// fill, which starts on its bar's step 12).
     pub pos: usize,
     /// The request it leads into, if any.
     pub link: Link,
@@ -496,16 +532,17 @@ impl Scheduler {
         if matches!(f.link, Link::Build(_)) {
             return;
         }
-        let ahead = fill_offset(t, f.phrase_bars);
+        let ahead = fill_offset_for(t, f.phrase_bars, f.length);
         f.start_serial = serial + 1 + ahead as u64;
         let (id, start_serial, link) = (f.request_id, f.start_serial, f.link);
+        let span = fill_span(f.length);
         let step = walk(t, ahead);
         self.events
             .push(event::FILL_QUEUED, id, (step / 16 + 1) as f64, step as f64);
         if let Link::Scene(scene) = link {
             if let Some(p) = self.scene.as_mut().filter(|p| p.request_id == scene) {
-                p.due = start_serial + FILL_STEPS as u64;
-                let land = walk(t, ahead + FILL_STEPS);
+                p.due = start_serial + span as u64;
+                let land = walk(t, ahead + span);
                 self.events.push(
                     event::SCENE_QUEUED,
                     scene,
@@ -530,9 +567,9 @@ impl Scheduler {
     }
 
     /// Queue fill `index` (already checked against the track) for the bar
-    /// `phrase_bars` picks ([`fill_offset`]), and report `fill queued`. The caller has
-    /// already checked the arguments and refused a request while
-    /// [`Scheduler::fill_busy`].
+    /// `phrase_bars` picks ([`fill_offset_for`]), the whole bar or its last beat
+    /// (`length`), and report `fill queued`. The caller has already checked the
+    /// arguments and refused a request while [`Scheduler::fill_busy`].
     ///
     /// `link` ties it to the request it leads into. A build's fill is not timed here:
     /// it waits, unarmed, until the build starts and [`Scheduler::arm_fill`] sets it.
@@ -541,6 +578,7 @@ impl Scheduler {
         request_id: u32,
         index: u32,
         phrase_bars: u8,
+        length: u8,
         link: Link,
         t: &Transport,
     ) {
@@ -548,16 +586,18 @@ impl Scheduler {
             request_id,
             index,
             phrase_bars,
+            length,
             start_serial: u64::MAX,
             link,
         });
         self.announce_fill(t);
     }
 
-    /// Time the waiting fill tied to `partner` to start on onset serial `start`.
-    pub fn arm_fill(&mut self, partner: Link, start: u64) {
+    /// Time the waiting fill tied to `partner` for the bar starting on onset serial
+    /// `bar`: on it, for a bar fill, or 12 onsets on, its last beat, for a beat fill.
+    pub fn arm_fill(&mut self, partner: Link, bar: u64) {
         if let Some(f) = self.fill.as_mut().filter(|f| f.link == partner) {
-            f.start_serial = start;
+            f.start_serial = bar + fill_first(f.length) as u64;
         }
     }
 
@@ -612,7 +652,8 @@ impl Scheduler {
 
     /// The fill's part of an onset, run after [`Scheduler::on_onset`] has counted it
     /// and after any scene due here has been committed: end an active fill that has
-    /// played its sixteen steps, then start a pending one whose bar this is. Leaves
+    /// played its sixteen steps (its last four, for a beat), then start a pending one
+    /// whose bar (or last beat) this is. Leaves
     /// [`Scheduler::active_fill`] describing what this onset's drums play.
     #[inline]
     pub fn fill_onset(&mut self, step: usize) {
@@ -625,22 +666,27 @@ impl Scheduler {
                     .push(event::FILL_ENDED, id, step as f64, reason::OK as f64);
             }
         }
-        // Due on its own onset. The bar-line check only guards against a start that
-        // somehow fell off the grid: the fill then waits for the next bar line.
-        let due = self
-            .fill
-            .as_ref()
-            .is_some_and(|f| self.serial >= f.start_serial && step.is_multiple_of(FILL_GRID));
+        // Due on its own onset. The grid check only guards against a start that somehow
+        // fell off it: the fill then waits for the next bar line (or the next bar's
+        // last beat, for a beat fill).
+        let due = self.fill.as_ref().is_some_and(|f| {
+            self.serial >= f.start_serial && step % FILL_GRID == fill_first(f.length)
+        });
         if due {
             if let Some(f) = self.fill.take() {
                 self.active_fill = Some(ActiveFill {
                     request_id: f.request_id,
                     index: f.index,
-                    pos: 0,
+                    pos: fill_first(f.length),
                     link: f.link,
                 });
-                self.events
-                    .push(event::FILL_STARTED, f.request_id, step as f64, 0.0);
+                // `b`: the first recipe position it plays, 0 or 12 (a beat fill).
+                self.events.push(
+                    event::FILL_STARTED,
+                    f.request_id,
+                    step as f64,
+                    fill_first(f.length) as f64,
+                );
             }
         }
     }
@@ -762,12 +808,23 @@ impl Scheduler {
 /// press goes to the next phrase end. Bounded: a phrase end or the loop's last bar
 /// turns up within one pass of the song.
 pub fn fill_offset(t: &Transport, phrase_bars: u8) -> usize {
+    fill_offset_for(t, phrase_bars, fill_length::BAR)
+}
+
+/// [`fill_offset`] for a fill of `length` ([`fill_length`]): a bar fill starts on the
+/// bar line, a beat fill on step 12 of the same bar, its last beat. The same rule as a
+/// bar fill's, on that step: the first one ahead whose bar ends on the phrase line (or
+/// the loop's wrap), never one already passed. So a beat fill pressed before this
+/// bar's last beat has started can still play it, and one pressed during or after it
+/// goes to the next one that qualifies.
+pub fn fill_offset_for(t: &Transport, phrase_bars: u8, length: u8) -> usize {
     let phrase = phrase_bars as usize * FILL_GRID;
+    let first = fill_first(length);
     let loop_end = t.loop_start + t.loop_steps;
     let mut step = t.step;
     for ahead in 0..=STEPS {
-        if step.is_multiple_of(FILL_GRID) {
-            let end = step + FILL_GRID;
+        if step % FILL_GRID == first {
+            let end = step - first + FILL_GRID;
             if phrase == 0 || end.is_multiple_of(phrase) || (t.loop_steps > 0 && end == loop_end) {
                 return ahead;
             }

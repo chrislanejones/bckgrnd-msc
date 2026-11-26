@@ -39,6 +39,8 @@ import {
 } from '../lib/scenes';
 import {
   FILL_CHOICES,
+  FILL_LENGTH_LABEL,
+  FILL_LENGTHS,
   FILL_MODE_LABEL,
   FILL_STYLE_HINT,
   FILL_STYLE_LABEL,
@@ -57,6 +59,7 @@ import {
   fillingLine,
   type FillAt,
   type FillJob,
+  type FillLength,
   type FillChoice,
   type FillMode,
   type FillStyle,
@@ -88,6 +91,25 @@ export type FillControls = {
   onAt: (at: FillAt) => void;
   onPhraseBars: (bars: PhraseBars) => void;
   onRiseFill: (on: boolean) => void;
+  /** Fill length (Night 10), the preference: the whole bar or its last beat. */
+  length: FillLength;
+  onLength: (length: FillLength) => void;
+  /** Why Beat can't play on this track (a press plays the bar), or null. */
+  lengthUnavailable?: string | null;
+};
+
+/** The length a press plays: Bar while Beat is unavailable on this track. */
+const playLength = (length: FillLength, unavailable: string | null | undefined): FillLength =>
+  unavailable ? 'bar' : length;
+
+/** The Fill style menu's props: the choice, what Random and Rotate play next, and the length. */
+export type FillStyleMenu = {
+  style: FillChoice;
+  next: Record<FillMode, FillStyle>;
+  onStyle: (style: FillChoice) => void;
+  length: FillLength;
+  onLength: (length: FillLength) => void;
+  lengthUnavailable?: string | null;
 };
 
 type Props = {
@@ -324,8 +346,8 @@ export function SceneHeader({
   compare,
 }: {
   status: string;
-  /** Fill style, when the track has fills: the choice and how to change it. */
-  fillStyle?: { style: FillChoice; next: Record<FillMode, FillStyle>; onStyle: (style: FillChoice) => void };
+  /** Fill style, when the track has fills: the choice and how to change it, and the length. */
+  fillStyle?: FillStyleMenu;
   /** Compare A/B's fold: the toggle sits here, the row it opens ends the toolbar. */
   compare?: CompareFold;
 }) {
@@ -522,26 +544,70 @@ function FillTools({
  * mouse width from 900 to 1280px, and a second fill row would break the toolbar's
  * three 32px rows (tools/verify-ui-fills.mjs).
  */
-function FillStyleSelect({ style, next, onStyle }: { style: FillChoice; next: Record<FillMode, FillStyle>; onStyle: (style: FillChoice) => void }) {
+function FillStyleSelect({ style, next, onStyle, length, onLength, lengthUnavailable }: FillStyleMenu) {
   const title = isFillMode(style)
     ? `Fill style: ${FILL_MODE_LABEL[style]}, next ${FILL_STYLE_LABEL[next[style]]} (${FILL_STYLE_HINT[next[style]]})`
     : `Fill style: ${FILL_STYLE_LABEL[style]}, ${FILL_STYLE_HINT[style]}`;
   return (
-    <label className="scene-fill-style" title={title}>
-      <span className="control-label">Fill style</span>
-      <select
-        className="fill-style-select"
-        value={style}
-        onChange={(event) => onStyle(event.target.value as FillChoice)}
-      >
-        {/* Random and Rotate say what the next press plays: "Rotate · next Busy". */}
-        {FILL_CHOICES.map((choice) => (
-          <option key={choice} value={choice}>
-            {fillChoiceLabel(choice, isFillMode(choice) ? next[choice] : choice)}
-          </option>
-        ))}
-      </select>
-    </label>
+    <>
+      <label className="scene-fill-style" title={title}>
+        <span className="control-label">Fill style</span>
+        <select
+          className="fill-style-select"
+          value={style}
+          onChange={(event) => onStyle(event.target.value as FillChoice)}
+        >
+          {/* Random and Rotate say what the next press plays: "Rotate · next Busy". */}
+          {FILL_CHOICES.map((choice) => (
+            <option key={choice} value={choice}>
+              {fillChoiceLabel(choice, isFillMode(choice) ? next[choice] : choice)}
+            </option>
+          ))}
+        </select>
+      </label>
+      <FillLengthPicker length={length} onLength={onLength} unavailable={lengthUnavailable ?? null} />
+    </>
+  );
+}
+
+/**
+ * Fill length (Night 10): Bar or Beat, beside Fill style. Minimal on purpose (a two-pill
+ * radio group); its look and place are the layout's to settle. Beat stays pickable as
+ * the preference on a track without beat fills, but is aria-disabled there with the
+ * reason, and a press plays the bar.
+ */
+function FillLengthPicker({
+  length,
+  onLength,
+  unavailable,
+}: {
+  length: FillLength;
+  onLength: (length: FillLength) => void;
+  unavailable: string | null;
+}) {
+  const reasonId = useId();
+  return (
+    <div className="segmented scene-fill-length" role="radiogroup" aria-label="Fill length">
+      {FILL_LENGTHS.map((l) => {
+        const off = l === 'beat' && unavailable !== null;
+        return (
+          <button
+            key={l}
+            type="button"
+            role="radio"
+            className="segment tap"
+            aria-checked={length === l}
+            aria-disabled={off || undefined}
+            aria-describedby={off ? reasonId : undefined}
+            title={off ? `Beat: ${unavailable}` : l === 'beat' ? 'Fill only the last beat of the bar' : 'Fill the whole bar'}
+            onClick={() => onLength(l)}
+          >
+            {FILL_LENGTH_LABEL[l]}
+          </button>
+        );
+      })}
+      {unavailable ? <span id={reasonId} hidden>Unavailable: {unavailable}</span> : null}
+    </div>
   );
 }
 
@@ -565,6 +631,8 @@ function FillButton({
   const own = fillButtonJob(fill.job);
   const state = own ? own.status : 'idle';
   const phrase = fillPhrase(fill.at, fill.phraseBars);
+  // A queued fill keeps the length it was sent with; at rest, what a press plays.
+  const length = own ? (own.length ?? 'bar') : playLength(fill.length, fill.lengthUnavailable);
   const off = state === 'playing' || (state === 'idle' && fill.unavailable !== null);
   const reason = fillReason(fill);
   return (
@@ -573,9 +641,9 @@ function FillButton({
       className={cx('fill-button tap', state !== 'idle' && 'is-on')}
       data-state={state}
       aria-disabled={off || undefined}
-      aria-label={fillButtonAria(fill.job, fill.name, phrase)}
+      aria-label={fillButtonAria(fill.job, fill.name, phrase, length)}
       aria-describedby={reason ? reasonId : undefined}
-      title={reason ?? fillButtonTitle(fill.name, own ? own.phrase : phrase)}
+      title={reason ?? fillButtonTitle(fill.name, own ? own.phrase : phrase, length)}
       onClick={off ? (reason && onUnavailable ? () => onUnavailable(`Fill: ${reason}`) : undefined) : fill.onFill}
     >
       {fillButtonLabel(fill.job)}
@@ -600,7 +668,7 @@ function FillIntoButton({
   const own = fillIntoJob(fill.job);
   const state = own ? own.status : 'idle';
   const phrase = fillPhrase(fill.at, fill.phraseBars);
-  const aria = fillIntoAria(fill.job, fill.intoName, phrase);
+  const aria = fillIntoAria(fill.job, fill.intoName, phrase, playLength(fill.length, fill.lengthUnavailable));
   const reason = fillIntoReason(fill);
   return (
     <button

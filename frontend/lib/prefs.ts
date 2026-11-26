@@ -11,6 +11,8 @@ export const PREF = {
   phraseBars: 'bckgrnd-msc:fill-phrase-bars',
   /** Fill style (Night 9): `classic`, `simple`, `busy` or `syncopated`. */
   fillStyle: 'bckgrnd-msc:fill-style',
+  /** Fill length (Night 10): `bar` (the whole bar) or `beat` (its last beat). */
+  fillLength: 'bckgrnd-msc:fill-length',
   /** How many bars Rise rises over: 2, 4 or 8. */
   riseBars: 'bckgrnd-msc:rise-bars',
   /** Finish with Fill on Rise: `on` or `off`. */
