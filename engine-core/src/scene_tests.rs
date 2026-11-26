@@ -96,10 +96,19 @@ pub(crate) fn triggers_at(e: &Engine, sample: u64) -> Vec<usize> {
         .collect()
 }
 
+/// The waiting events as `[kind, id, a, b]`, without the serial column.
 pub(crate) fn events(e: &mut Engine) -> Vec<[f64; 4]> {
+    events_with_serial(e)
+        .into_iter()
+        .map(|[k, id, a, b, _]| [k, id, a, b])
+        .collect()
+}
+
+/// The waiting events, all [`EVENT_WIDTH`] columns.
+pub(crate) fn events_with_serial(e: &mut Engine) -> Vec<[f64; EVENT_WIDTH]> {
     let mut out = [0.0f64; EVENT_CAPACITY * EVENT_WIDTH];
     let n = e.take_events_into(&mut out) as usize;
-    out.as_chunks::<4>().0[..n].to_vec()
+    out.as_chunks::<EVENT_WIDTH>().0[..n].to_vec()
 }
 
 pub(crate) fn ev(kind: u8, id: u32, a: f64, b: f64) -> [f64; 4] {

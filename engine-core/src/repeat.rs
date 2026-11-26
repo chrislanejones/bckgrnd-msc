@@ -223,13 +223,17 @@ impl Repeat {
 
     /// A transport onset of `step`. `eighth` is the length in samples of the eighth the
     /// transport is playing now. Engages (or re-captures) on a grid line of the division.
-    pub fn on_onset(&mut self, step: usize, eighth: f64) {
+    /// True only when a stutter starts here (it was armed); a re-capture of one already
+    /// engaged is false.
+    pub fn on_onset(&mut self, step: usize, eighth: f64) -> bool {
         if !self.held || self.release_left > 0 || !step.is_multiple_of(self.grid_steps()) {
-            return;
+            return false;
         }
-        if self.phase == Phase::Armed || self.regrid {
+        let fresh = self.phase == Phase::Armed;
+        if fresh || self.regrid {
             self.engage(eighth);
         }
+        fresh
     }
 
     fn engage(&mut self, eighth: f64) {
@@ -395,7 +399,7 @@ mod tests {
             let x = sine(n);
             assert_eq!(r.process(x), x);
         }
-        r.on_onset(1, 12_000.0); // off the eighth grid
+        assert!(!r.on_onset(1, 12_000.0), "off the eighth grid");
         assert!(!r.looping());
         r.release();
         assert!(!r.active(), "nothing captured: released at once");

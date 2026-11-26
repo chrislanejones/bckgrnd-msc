@@ -118,7 +118,7 @@ struct Rig {
     r: [f32; 128],
     events: [f64; EVENT_CAPACITY * EVENT_WIDTH],
     /// Every event drained so far, recorded outside the counted window.
-    seen: Vec<[f64; 4]>,
+    seen: Vec<[f64; EVENT_WIDTH]>,
     /// Allocations counted so far, and where.
     allocs: Vec<(String, usize)>,
 }
@@ -159,7 +159,7 @@ impl Rig {
         let ((seen, drained), n) = counted(|| {
             e.process(l, r);
             let n = e.take_events_into(events) as usize;
-            let seen = events.as_chunks::<4>().0[..n]
+            let seen = events.as_chunks::<EVENT_WIDTH>().0[..n]
                 .iter()
                 .any(|x| x[0] == kind as f64);
             (seen, n)
@@ -169,7 +169,7 @@ impl Rig {
         }
         // Reserved up front, and outside the counted window either way.
         self.seen
-            .extend_from_slice(&self.events.as_chunks::<4>().0[..drained]);
+            .extend_from_slice(&self.events.as_chunks::<EVENT_WIDTH>().0[..drained]);
         seen
     }
 
@@ -511,4 +511,45 @@ fn a_held_beat_repeat_across_divisions_allocates_and_frees_nothing() {
         rig.block();
     }
     assert!(rig.allocs.is_empty(), "allocated: {:?}", rig.allocs);
+    // The start and end events (Night 11) came out of the counted calls.
+    for id in [30, 33] {
+        assert!(rig.saw(event::REPEAT_STARTED, id), "61 for {id}");
+        assert!(rig.saw(event::REPEAT_ENDED, id), "62 for {id}");
+    }
+}
+
+/// Beat Repeat's start and end events (61, 62) on the audio path, where the lease and
+/// a brake end it, allocate and free nothing; and every event's serial column never
+/// goes down.
+#[test]
+fn beat_repeat_events_and_the_serial_column_allocate_and_free_nothing() {
+    use bckgrnd_msc_engine::perform::{kind, repeat_ended};
+    let mut rig = Rig::with_track(library("warehouse"));
+    // The lease runs out inside a render call: 21 then 62 from `process`.
+    assert!(rig.call("begin", |e| e.gesture_begin(40, kind::BEAT_REPEAT)));
+    rig.until(event::REPEAT_STARTED);
+    rig.until(event::REPEAT_ENDED);
+    let ended = rig.seen.iter().find(|x| x[0] == event::REPEAT_ENDED as f64);
+    assert_eq!(
+        ended.map(|x| (x[1], x[3])),
+        Some((40.0, repeat_ended::LEASE))
+    );
+    // Two tokens, a brake.
+    assert!(rig.call("begin", |e| e.gesture_begin(41, kind::BEAT_REPEAT)));
+    assert!(rig.call("begin", |e| e.gesture_begin(42, kind::BEAT_REPEAT)));
+    rig.until(event::REPEAT_STARTED);
+    rig.call("brake", |e| e.brake());
+    for _ in 0..(48_000 / 128) {
+        rig.block();
+    }
+    assert!(rig.saw(event::REPEAT_ENDED, 41));
+    assert!(
+        !rig.saw(event::REPEAT_STARTED, 42),
+        "one stutter, one start"
+    );
+    assert!(rig.allocs.is_empty(), "allocated: {:?}", rig.allocs);
+    assert!(
+        rig.seen.windows(2).all(|w| w[0][4] <= w[1][4]),
+        "a serial went down"
+    );
 }

@@ -4,8 +4,10 @@
 //! held effects alongside it.
 
 use super::*;
-use crate::perform::{ended, kind};
-use crate::scene_tests::{engine, ev, events, render, render_until_fired, RATES};
+use crate::perform::{ended, kind, repeat_ended};
+use crate::scene_tests::{
+    engine, ev, events, events_with_serial, render, render_until_fired, RATES,
+};
 use crate::scheduler::event;
 
 const REPEAT: u8 = kind::BEAT_REPEAT;
@@ -174,12 +176,13 @@ fn seams_division_changes_and_release_do_not_click() {
         };
         r.hold();
         step(&mut r, &mut out, 333);
-        r.on_onset(0, eighth);
+        assert!(r.on_onset(0, eighth), "armed: a stutter starts");
         step(&mut r, &mut out, (eighth * 3.3) as usize);
         assert!(r.looping());
         assert!(r.set_division(16));
         step(&mut r, &mut out, 1000);
-        r.on_onset(3, eighth); // the next sixteenth line: re-captures
+        // The next sixteenth line re-captures: the same stutter, not a new one.
+        assert!(!r.on_onset(3, eighth));
         step(&mut r, &mut out, (eighth * 2.1) as usize);
         r.release();
         step(&mut r, &mut out, (sr * 0.02) as usize);
@@ -346,4 +349,219 @@ fn two_repeat_tokens_release_in_either_order() {
     assert!(e.repeat_looping());
     assert!(e.gesture_end(20));
     assert!(!e.repeat.held());
+}
+
+// Night 11: `repeat started` (61) and `repeat ended` (62), for the take recorder
+// (`docs/NIGHT10_PROTOCOL.md`, Events).
+
+/// The 61s and 62s waiting, as `[kind, id, a, b]`.
+fn repeat_events(e: &mut Engine) -> Vec<[f64; 4]> {
+    events(e)
+        .into_iter()
+        .filter(|x| x[0] == event::REPEAT_STARTED as f64 || x[0] == event::REPEAT_ENDED as f64)
+        .collect()
+}
+
+/// Render until a `repeat started` comes out, one sample at a time, and return it with
+/// its serial and the serial the engine had right after.
+fn until_started(e: &mut Engine) -> ([f64; 5], u64) {
+    let (mut l, mut r) = ([0.0f32; 1], [0.0f32; 1]);
+    for _ in 0..(e.sample_rate as usize * 4) {
+        e.process(&mut l, &mut r);
+        if let Some(x) = events_with_serial(e)
+            .into_iter()
+            .find(|x| x[0] == event::REPEAT_STARTED as f64)
+        {
+            return (x, e.scheduler.serial());
+        }
+    }
+    panic!("never started");
+}
+
+#[test]
+fn it_reports_the_grid_line_it_engaged_on_with_its_division_and_serial() {
+    for sr in RATES {
+        for d in [4u8, 8, 16] {
+            let mut e = engine(sr);
+            assert!(e.set_repeat_division(d));
+            e.play();
+            render_until_fired(&mut e, 5);
+            render(&mut e, 37, 37);
+            let _ = events(&mut e);
+            assert!(e.gesture_begin(7, REPEAT));
+            let (x, serial) = until_started(&mut e);
+            let step = e.transport.visual_step as f64;
+            assert_eq!(
+                x[..4],
+                ev(event::REPEAT_STARTED, 7, step, d as f64),
+                "{sr} 1/{d}"
+            );
+            assert_eq!(x[2] as usize % grid(d), 0, "on the grid");
+            assert_eq!(x[4], serial as f64, "the serial of the onset it engaged on");
+            assert!(e.repeat.active());
+        }
+    }
+}
+
+#[test]
+fn a_press_let_go_before_the_grid_line_reports_nothing() {
+    let mut e = engine(48_000.0);
+    assert!(e.set_repeat_division(4));
+    e.play();
+    render_until_fired(&mut e, 5);
+    let _ = events(&mut e);
+    assert!(e.gesture_begin(7, REPEAT));
+    render(&mut e, 64, 64);
+    assert!(e.gesture_end(7));
+    render(&mut e, 48_000, 128);
+    assert!(repeat_events(&mut e).is_empty());
+}
+
+/// Every path that ends a stutter reports 62 once, with the token 61 named, the step
+/// of the last onset and its own reason.
+#[test]
+fn every_end_path_reports_its_reason_once() {
+    let sr = 48_000.0;
+    let paths: [(&str, Act, f64); 10] = [
+        (
+            "release",
+            |e| assert!(e.gesture_end(9)),
+            repeat_ended::RELEASE,
+        ),
+        (
+            "release fx",
+            Engine::release_gestures,
+            repeat_ended::RELEASE_FX,
+        ),
+        ("panic", Engine::panic, repeat_ended::PANIC),
+        ("stop", Engine::stop, repeat_ended::STOP),
+        (
+            "track load",
+            |e| e.load_track(crate::scene_tests::groove()),
+            repeat_ended::TRACK,
+        ),
+        (
+            "end of score",
+            Engine::end_score,
+            repeat_ended::END_OF_SCORE,
+        ),
+        ("brake", Engine::brake, repeat_ended::PLATTER),
+        ("backspin", Engine::backspin, repeat_ended::PLATTER),
+        ("scratch", Engine::scratch_start, repeat_ended::PLATTER),
+        ("lease", |e| render(e, 48_000 * 3, 128), repeat_ended::LEASE),
+    ];
+    for (what, end, why) in paths {
+        let mut e = looping(sr);
+        let step = e.transport.visual_step as f64;
+        let serial = e.scheduler.serial() as f64;
+        end(&mut e);
+        render(&mut e, 4_800, 128);
+        let got: Vec<[f64; 5]> = events_with_serial(&mut e)
+            .into_iter()
+            .filter(|x| x[0] == event::REPEAT_ENDED as f64 || x[0] == event::REPEAT_STARTED as f64)
+            .collect();
+        assert_eq!(got.len(), 1, "{what}: {got:?}");
+        assert_eq!(got[0][..2], [event::REPEAT_ENDED as f64, 9.0], "{what}");
+        assert_eq!(got[0][3], why, "{what}");
+        if what != "lease" {
+            // Raised between onsets, by the call: the last onset's step and serial.
+            assert_eq!((got[0][2], got[0][4]), (step, serial), "{what}");
+        }
+    }
+}
+
+#[test]
+fn two_tokens_share_one_start_and_one_end_named_for_the_first() {
+    // Both held before the grid line: one 61, for the token begun first.
+    let mut e = engine(48_000.0);
+    e.play();
+    render_until_fired(&mut e, 5);
+    let _ = events(&mut e);
+    assert!(e.gesture_begin(30, REPEAT));
+    assert!(e.gesture_begin(20, REPEAT));
+    let (x, _) = until_started(&mut e);
+    assert_eq!(x[1], 30.0, "the token held longest, not the lowest");
+    // The first let go: still one stutter, nothing reported.
+    assert!(e.gesture_end(30));
+    render(&mut e, 38_400, 128);
+    assert!(e.repeat_looping());
+    assert!(repeat_events(&mut e).is_empty());
+    // The last let go: the end, named for the token the start named.
+    assert!(e.gesture_end(20));
+    let got = repeat_events(&mut e);
+    assert_eq!(got.len(), 1);
+    assert_eq!(
+        (got[0][0], got[0][1], got[0][3]),
+        (event::REPEAT_ENDED as f64, 30.0, repeat_ended::RELEASE)
+    );
+
+    // A second token joining a stutter already engaged reports nothing of its own.
+    let mut e = looping(48_000.0);
+    assert!(e.gesture_begin(21, REPEAT));
+    assert!(e.gesture_end(21));
+    render(&mut e, 9_600, 128);
+    assert!(repeat_events(&mut e).is_empty());
+    assert!(e.gesture_end(9));
+    assert_eq!(repeat_events(&mut e)[0][1], 9.0);
+}
+
+#[test]
+fn a_division_change_or_a_restart_while_engaged_is_not_a_new_start() {
+    let mut e = looping(48_000.0);
+    assert!(e.set_repeat_division(16));
+    render(&mut e, 9_600, 128);
+    e.play();
+    render(&mut e, 9_600, 128);
+    assert!(e.repeat_looping());
+    assert!(repeat_events(&mut e).is_empty());
+}
+
+/// Let go and pressed again inside the release fade: the first stutter ended, and the
+/// new one starts on a later grid line once the fade is done.
+#[test]
+fn a_press_inside_the_release_fade_is_a_new_stutter() {
+    let mut e = looping(48_000.0);
+    assert!(e.gesture_end(9));
+    assert!(e.gesture_begin(10, REPEAT));
+    let ended = repeat_events(&mut e);
+    assert_eq!((ended.len(), ended[0][1]), (1, 9.0));
+    let (x, _) = until_started(&mut e);
+    assert_eq!(x[1], 10.0);
+}
+
+/// Every event carries the onset serial: monotonic across a seek, a loop wrap, Stop and
+/// a track load, where the step jumps, wraps or starts over.
+#[test]
+fn the_serial_never_goes_down_and_is_never_reset() {
+    let mut e = engine(48_000.0);
+    e.play();
+    let mut all = Vec::new();
+    let mut id = 1;
+    let mut step = |e: &mut Engine, all: &mut Vec<[f64; 5]>| {
+        let v = crate::scene_tests::scene(0.3 + 0.01 * (id % 10) as f32);
+        e.queue_scene(id, crate::scheduler::timing::BEAT, &v);
+        id += 1;
+        render(e, 9_600, 128);
+        all.extend(events_with_serial(e));
+    };
+    for _ in 0..4 {
+        step(&mut e, &mut all);
+    }
+    e.jump(200);
+    step(&mut e, &mut all);
+    e.set_loop(1);
+    for _ in 0..8 {
+        step(&mut e, &mut all);
+    }
+    let before = e.scheduler.serial();
+    e.stop();
+    e.load_track(crate::scene_tests::groove());
+    assert_eq!(e.scheduler.serial(), before, "Stop and a load keep it");
+    e.play();
+    for _ in 0..4 {
+        step(&mut e, &mut all);
+    }
+    assert!(all.len() > 20, "{}", all.len());
+    assert!(all.windows(2).all(|w| w[0][4] <= w[1][4]), "went down");
+    assert!(all.last().unwrap()[4] > before as f64);
 }

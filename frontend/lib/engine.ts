@@ -68,6 +68,22 @@ export const ENGINE_EVENT = {
   fillLinked: 51,
   fillUnlinked: 52,
   accentFired: 53,
+  /** Beat Repeat engaged on its grid line (docs/NIGHT10_PROTOCOL.md, Events). */
+  repeatStarted: 61,
+  /** That stutter ended, on any path; `b` is `REPEAT_ENDED`. */
+  repeatEnded: 62,
+} as const;
+
+/** `b` of `repeatEnded`: why the stutter stopped. 0 and 1 mean what they do for `gestureExpired`. */
+export const REPEAT_ENDED = {
+  lease: 0,
+  platter: 1,
+  release: 2,
+  releaseFx: 3,
+  panic: 4,
+  stop: 5,
+  track: 6,
+  endOfScore: 7,
 } as const;
 
 /**
@@ -159,6 +175,15 @@ export const DEFAULT_REPEAT_DIVISION: RepeatDivision = 8;
  * | fillLinked | id of the request the fill leads into | predicted landing step |
  * | fillUnlinked | reason (`ENGINE_REASON`) its partner went (10, or 11 for a replaced Rise) | 0 |
  * | accentFired | step the crash accent fired on (-1 for a Now launch) | `ACCENT_FIRED` |
+ * | repeatStarted | step it engaged on | division (4, 8 or 16) |
+ * | repeatEnded | step of the last onset (-1 if none since a seek or Play) | `REPEAT_ENDED` |
+ *
+ * For `repeatStarted` and `repeatEnded`, `requestId` is the Beat Repeat token held
+ * longest when the stutter engaged; both events of one stutter carry the same one.
+ *
+ * `s` is the deck engine's onset serial when the event was raised: it never goes down
+ * and is never reset (not by Stop or a track load), so it places an event in a take
+ * where a step, which wraps and jumps, cannot. Between onsets it is the last onset's.
  *
  * A phrase fill's `fillQueued` names the bar it plays (the phrase's last), and comes
  * again if a loop change moves it (docs/NIGHT8_PROTOCOL.md).
@@ -169,13 +194,15 @@ export type EngineEvent = {
   requestId: number;
   a: number;
   b: number;
+  /** The onset serial at the event (docs/NIGHT3_PROTOCOL.md, Events). */
+  s: number;
 };
 
 type WorkletMessage =
   | { type: 'telemetry'; frame: Float32Array }
   | { type: 'mixEnd'; deck: Deck }
   | { type: 'error'; command: string; message: string }
-  | { type: 'sceneEvents'; deck: Deck; events: number[] }
+  | { type: 'sceneEvents'; deck: Deck; events: number[]; s: number[] }
   | { type: 'sceneCancelResult'; deck: Deck; requestId: number; cancelled: boolean }
   | { type: 'fillCancelResult'; deck: Deck; requestId: number; cancelled: boolean }
   | { type: 'patternsCancelResult'; deck: Deck; requestId: number; cancelled: boolean }
@@ -354,6 +381,7 @@ export class EngineHost {
           requestId: raw[k + 1],
           a: raw[k + 2],
           b: raw[k + 3],
+          s: message.s[k / 4],
         });
       }
       if (events.length > 0) for (const listener of this.sceneListeners) listener(events);

@@ -97,7 +97,7 @@ pub use track::{DrumStep, Fill, NoteEvent, Perc, Stem, Track, TrackKind, FILL_ST
 /// capacity, the lease, and what Filter Hold does. Beat Repeat's divisions and ramps
 /// are `docs/NIGHT10_PROTOCOL.md`.
 pub mod perform {
-    pub use crate::gesture::{ended, kind, LEASE_SECONDS, MAX_GESTURES};
+    pub use crate::gesture::{ended, kind, repeat_ended, LEASE_SECONDS, MAX_GESTURES};
     pub use crate::mixer::{FILTER_HOLD_OPEN, FILTER_HOLD_Q, FILTER_HOLD_TRIM};
     pub use crate::repeat::{
         DEFAULT_DIVISION as REPEAT_DEFAULT_DIVISION, DIVISIONS as REPEAT_DIVISIONS,
@@ -127,6 +127,7 @@ pub mod scene {
         pub use crate::fills::detail;
     }
 }
+use gesture::repeat_ended;
 use scheduler::{reason, SCENE_LEN};
 pub use transport::Transport;
 
@@ -510,6 +511,9 @@ pub struct Engine {
     /// Beat Repeat's stutter, between the stem sum and the master chain. Follows whether
     /// a kind 3 gesture is held; its division is a live setting, never saved.
     repeat: repeat::Repeat,
+    /// The token `repeat started` (61) named for the stutter engaged now, until its
+    /// `repeat ended` (62). None while armed, idle or fading out.
+    repeat_token: Option<u32>,
     /// Whether any stem was soloed on the previous sample, to catch entering solo.
     solo_was: bool,
     /// The all-cut gate, 0..1, and how far it moves per sample. See `render_sample`.
@@ -617,6 +621,7 @@ impl Engine {
             echo_latch: false,
             gestures: gesture::Gestures::new(sr),
             repeat: repeat::Repeat::new(sr),
+            repeat_token: None,
             solo_was: false,
             cut_gate: 1.0,
             cut_step: 1.0 / (CUT_FADE_SECONDS * sr).max(1.0),
@@ -655,7 +660,7 @@ impl Engine {
 
     pub fn stop(&mut self) {
         self.interrupt(reason::STOPPED);
-        self.release_overrides();
+        self.release_overrides(repeat_ended::STOP);
         self.let_go_of_the_platter();
         self.transport.stop();
         for v in self.voices.iter_mut().flatten() {
@@ -675,7 +680,7 @@ impl Engine {
     /// Unlike the interactive Stop command this deliberately does not reset returns.
     pub fn end_score(&mut self) {
         self.interrupt(reason::STOPPED);
-        self.release_overrides();
+        self.release_overrides(repeat_ended::END_OF_SCORE);
         self.transport.stop();
         for v in self.voices.iter_mut().flatten() {
             v.release();
@@ -1003,7 +1008,8 @@ impl Engine {
     /// existing consumers and pinned by perform_tests and tests/smoothing.rs.
     pub fn set_echo(&mut self, on: bool) {
         self.echo_latch = on;
-        self.apply_overrides();
+        // Never moves Beat Repeat, so the reason is never reported.
+        self.apply_overrides(repeat_ended::RELEASE);
     }
 
     /// Echo time in beats: 0.25 a sixteenth, 0.75 a dotted eighth (the default), 1 a
@@ -1365,7 +1371,8 @@ impl Engine {
     pub fn gesture_begin(&mut self, token: u32, kind: u8) -> bool {
         let began = self.gestures.begin(token, kind);
         if began {
-            self.apply_overrides();
+            // A begin never ends a stutter, so the reason is never reported.
+            self.apply_overrides(repeat_ended::RELEASE);
         }
         began
     }
@@ -1375,7 +1382,7 @@ impl Engine {
     pub fn gesture_end(&mut self, token: u32) -> bool {
         let ended = self.gestures.end(token);
         if ended {
-            self.apply_overrides();
+            self.apply_overrides(repeat_ended::RELEASE);
         }
         ended
     }
@@ -1407,8 +1414,13 @@ impl Engine {
     /// End every override, and the latched echo throw, leaving the working mix as it
     /// is: Release FX. Echo repeats already in the line ring out on the base feedback.
     pub fn release_gestures(&mut self) {
+        self.release_gestures_for(repeat_ended::RELEASE_FX);
+    }
+
+    /// Release FX, reporting an engaged Beat Repeat's end as `why`.
+    fn release_gestures_for(&mut self, why: f64) {
         self.echo_latch = false;
-        self.release_overrides();
+        self.release_overrides(why);
     }
 
     /// Panic: cancel the pending scene and fill (`panic`), cut short an active fill,
@@ -1417,7 +1429,7 @@ impl Engine {
     /// is queued.
     pub fn panic(&mut self) {
         self.interrupt(reason::PANIC);
-        self.release_gestures();
+        self.release_gestures_for(repeat_ended::PANIC);
         self.stop();
         self.transitions.reset();
     }
@@ -1433,6 +1445,13 @@ impl Engine {
         self.scheduler.events.len() as u32
     }
 
+    /// The onset serial now: onsets fired since the engine was made, the fifth column of
+    /// every event ([`scene::EVENT_WIDTH`]). Never reset, not by Stop or a track load.
+    /// For the worklet, to stamp the refusals it raises itself; an f64, exact to 2^53.
+    pub fn onset_serial(&self) -> f64 {
+        self.scheduler.serial() as f64
+    }
+
     /// Events overwritten before they were drained, since the engine was made. The
     /// ring keeps the newest [`scene::EVENT_CAPACITY`]; anything above zero here means
     /// requests arrived faster than the host drained them.
@@ -1440,8 +1459,9 @@ impl Engine {
         self.scheduler.events.dropped()
     }
 
-    /// Move waiting events into `out`, four numbers each (`[kind, request id, a, b]`),
-    /// oldest first. Returns how many were moved; any that did not fit stay queued.
+    /// Move waiting events into `out`, five numbers each (`[kind, request id, a, b,
+    /// serial]`, [`scene::EVENT_WIDTH`]), oldest first. Returns how many were moved; any
+    /// that did not fit stay queued.
     pub fn take_events_into(&mut self, out: &mut [f64]) -> u32 {
         self.scheduler.events.drain_into(out)
     }
@@ -1470,17 +1490,21 @@ impl Engine {
             }
             let onset = self.transport.tick();
             if let Some(step) = onset {
+                // Count the onset first, so every event raised on it carries its serial
+                // (EVENT_WIDTH). Nothing below reads the scheduler before this.
+                let due = self.scheduler.on_onset(step);
                 // 0. A held Beat Repeat engages on its grid line, before this onset's
                 //    sample is rendered, so the slice starts on it.
                 if self.repeat.held() && !self.transport.in_gesture() {
                     let eighth = self.eighth_samples();
-                    self.repeat.on_onset(step, eighth);
+                    if self.repeat.on_onset(step, eighth) {
+                        self.repeat_started(step);
+                    }
                 }
                 // The order on a boundary is fixed (NIGHT3_PROTOCOL.md, Timing):
                 // 1. Apply a pattern edit due here, then commit the scene (with any
                 //    lanes it sets, which win over the edit's for the same lane), so
                 //    this step's notes are already in both. NIGHT4_PROTOCOL.md.
-                let due = self.scheduler.on_onset(step);
                 if self.edit_due(step) {
                     if let Some(e) = self.edit.take() {
                         self.apply_patterns(e, step as i32);
@@ -1539,7 +1563,7 @@ impl Engine {
         }
         // Leases count rendered audio, once per call.
         if self.gestures.tick(n as u32, &mut self.scheduler.events) {
-            self.apply_overrides();
+            self.apply_overrides(repeat_ended::LEASE);
         }
     }
 
@@ -1723,20 +1747,37 @@ impl Engine {
             gesture::ended::PLATTER,
             &mut self.scheduler.events,
         ) {
-            self.apply_overrides();
+            self.apply_overrides(repeat_ended::PLATTER);
         }
     }
 
-    /// End every held gesture (not the latch) and put the base back.
-    fn release_overrides(&mut self) {
+    /// End every held gesture (not the latch) and put the base back. An engaged Beat
+    /// Repeat's end is reported with `why`.
+    fn release_overrides(&mut self, why: f64) {
         self.gestures.clear();
-        self.apply_overrides();
+        self.apply_overrides(why);
+    }
+
+    /// A Beat Repeat stutter engaged on the grid line of `step`: `repeat started` (61)
+    /// for the token held longest. Cold: once per press.
+    #[inline(never)]
+    fn repeat_started(&mut self, step: usize) {
+        if let Some(token) = self.gestures.first(gesture::kind::BEAT_REPEAT) {
+            self.repeat_token = Some(token);
+            self.scheduler.events.push(
+                scheduler::event::REPEAT_STARTED,
+                token,
+                step as f64,
+                self.repeat.division() as f64,
+            );
+        }
     }
 
     /// Point the master at the base or at the overrides held over it. The master
-    /// keeps the base values itself; this only says which treatment is on.
+    /// keeps the base values itself; this only says which treatment is on. If this
+    /// lets go of an engaged Beat Repeat, `repeat ended` (62) reports it with `why`.
     #[inline(never)]
-    fn apply_overrides(&mut self) {
+    fn apply_overrides(&mut self, why: f64) {
         let echo = self.echo_latch || self.gestures.holds(gesture::kind::ECHO_THROW);
         if echo != self.master.echo_on() {
             self.master.set_echo(echo);
@@ -1748,6 +1789,12 @@ impl Engine {
             self.repeat.hold();
         } else if !repeat && self.repeat.held() {
             self.repeat.release();
+            if let Some(token) = self.repeat_token.take() {
+                let step = self.transport.visual_step as f64;
+                self.scheduler
+                    .events
+                    .push(scheduler::event::REPEAT_ENDED, token, step, why);
+            }
         }
     }
 
@@ -2111,7 +2158,7 @@ impl Engine {
     /// re-applies the faders so a loaded track's mix is heard immediately.
     pub fn load_track(&mut self, track: Track) {
         self.interrupt(reason::TRACK);
-        self.release_overrides();
+        self.release_overrides(repeat_ended::TRACK);
         self.track = track;
         self.kick_root_hz = self.track.kick_root_hz();
         for stem in Stem::ALL {
