@@ -99,7 +99,7 @@ import { LANE_IDS, type LaneId, type ScenePatterns } from './patterns';
 import { usePatternWorkspace } from './workspace';
 import { useProjectHistory } from './project-history';
 import type { Fill, LibraryResponse, Mix, StemId, TrackArrangement, TrackSummary } from './types';
-import { RecordingSession, RequestCatalog, fromEngine, rememberBook, rememberFill, type LogEntry, type PerformanceRecording, type RecordingState } from './recording';
+import { RecordingSession, RequestCatalog, downloadTake as saveTakeFile, fromEngine, rememberBook, rememberFill, type LogEntry, type PerformanceRecording, type RecordingState, type TakeExport } from './recording';
 
 /** The scene slot Fill → Drop leads into: the fourth, whatever it is named now. */
 const FILL_INTO_SLOT: SceneSlotId = 'drop';
@@ -613,7 +613,7 @@ export function useInstrument() {
 
   /** Cue rewinds the live deck and starts that same deck. */
   function cue() {
-    recorder.interrupt('cue');
+    recorder.interrupt('cue', lastPlayingStep.current);
     engine.cue();
     void engine.play(liveDeck);
   }
@@ -1550,6 +1550,9 @@ export function useInstrument() {
     const token = nextToken.current++;
     heldTokens.current[kind] = token;
     setHeld((h) => ({ ...h, [kind]: true }));
+    // A Beat Repeat is in the take once the engine engages it (event 61); the press
+    // itself is only logged, so a release before the grid line is seen there.
+    if (kind === 'repeat') recorder.record({ status: 'pressed', kind: 'repeat', requestId: token });
     leaseTimers.current[kind] = window.setInterval(() => engine.gestureRenew(token), 1000);
     void engine
       .gestureBegin(token, HELD_GESTURE[kind])
@@ -1563,6 +1566,7 @@ export function useInstrument() {
     const token = heldTokens.current[kind];
     if (token === null) return;
     engine.gestureEnd(token);
+    if (kind === 'repeat') recorder.record({ status: 'released', kind: 'repeat', requestId: token });
     clearHeld(kind);
   }
 
@@ -1750,7 +1754,7 @@ export function useInstrument() {
    * same as Cancel scene, which restores the mix without stopping playback.
    */
   function panic() {
-    recorder.interrupt('panic');
+    recorder.interrupt('panic', lastPlayingStep.current);
     engine.panic();
     cancelTempoGlide();
     clearHeld('echo');
@@ -1862,8 +1866,8 @@ export function useInstrument() {
   const recordedTrack = useRef<string | null>(null);
   useEffect(() => {
     if (recorder.state !== 'recording') return;
-    if (mixing) recorder.interrupt('mix');
-    else if (track?.id !== recordedTrack.current) recorder.interrupt('track');
+    if (mixing) recorder.interrupt('mix', lastPlayingStep.current);
+    else if (track?.id !== recordedTrack.current) recorder.interrupt('track', lastPlayingStep.current);
   }, [recorder, mixing, track?.id]);
 
   // A transport Stop ends it too: the engine's own frames going from playing to stopped
@@ -1871,12 +1875,16 @@ export function useInstrument() {
   // from before Play would read as a Stop.
   const recordSawPlaying = useRef(false);
   const framePlaying = useRef(false);
+  /** The song step of the engine's last playing frame: where a Beat Repeat held at the take's stop ends. */
+  const lastPlayingStep = useRef(-1);
   useEffect(
     () =>
       engine.subscribe((t) => {
         framePlaying.current = t.playing;
-        if (t.playing) recordSawPlaying.current = true;
-        else if (recordSawPlaying.current && recorder.state === 'recording') recorder.interrupt('stop');
+        if (t.playing) {
+          recordSawPlaying.current = true;
+          if (t.step >= 0) lastPlayingStep.current = t.step % STEPS;
+        } else if (recordSawPlaying.current && recorder.state === 'recording') recorder.interrupt('stop', lastPlayingStep.current);
       }),
     [recorder],
   );
@@ -1886,11 +1894,23 @@ export function useInstrument() {
     recordedTrack.current = track.id;
     // Armed if the engine's last frame was playing; otherwise by its first one that is.
     recordSawPlaying.current = framePlaying.current;
-    recorder.start(track.id, bpm, songStepRef.current);
+    if (!framePlaying.current) lastPlayingStep.current = -1;
+    recorder.start(track.id, bpm, songStepRef.current, new Date().toISOString());
   };
-  const stopRecording = () => recorder.stop('user');
+  const stopRecording = () => recorder.stop('user', lastPlayingStep.current);
   const clearRecording = () => recorder.clear();
-  const recordingActions = useStable({ startRecording, stopRecording, clearRecording });
+  /** A copy of the take (contracts/performance.json), or null. Memo it on `log`, which changes with the take. */
+  const recording = () => recorder.recording();
+  /** The take as its own file, `{ filename, json }`, or null with no take. Never part of a project. */
+  const exportTake = () => recorder.exportTake();
+  /** Save the take (or the export given) as a file in the browser. False with no take. */
+  const downloadTake = (exported?: TakeExport | null) => {
+    const t = exported ?? recorder.exportTake();
+    if (!t) return false;
+    saveTakeFile(t);
+    return true;
+  };
+  const recordingActions = useStable({ startRecording, stopRecording, clearRecording, recording, exportTake, downloadTake });
 
   // The developer log: `__BCKGRND_RECORDING__.table()` in the console, and the checks.
   useEffect(() => {
@@ -1899,6 +1919,8 @@ export function useInstrument() {
       recording: () => recorder.recording(),
       log: () => recorder.log,
       table: () => console.table(recorder.log),
+      exportTake: () => recorder.exportTake(),
+      download: () => recordingActions.downloadTake(),
       start: () => recordingActions.startRecording(),
       stop: () => recordingActions.stopRecording(),
       clear: () => recordingActions.clearRecording(),
@@ -2067,6 +2089,8 @@ declare global {
       recording: () => PerformanceRecording | null;
       log: () => readonly LogEntry[];
       table: () => void;
+      exportTake: () => TakeExport | null;
+      download: () => boolean;
       start: () => void;
       stop: () => void;
       clear: () => void;

@@ -1,33 +1,47 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://bckgrnd-msc/contracts/performance.json",
-  "$comment": "A performance recording, version 1 (docs/PERFORMANCE_EVENTS.md). Only actions the engine applied, each at the engine step it applied on. Separate from the project format: a recording is never part of a project, a snapshot or an export. Written by frontend/lib/recording.ts. Kept to the JSON Schema subset tools/check-recording.mjs validates: type, const, enum, required, properties, additionalProperties, minimum, maximum, maxItems, items, oneOf, $ref.",
+  "$comment": "A performance recording, version 2 (docs/PERFORMANCE_EVENTS.md). Only actions the engine applied, each at the engine step and onset it applied on. A standalone document: a take exports as its own file and is never part of a project, a snapshot or a project export. Written by frontend/lib/recording.ts. Kept to the JSON Schema subset tools/check-recording.mjs validates: type, const, enum, required, properties, additionalProperties, minimum, maximum, maxItems, items, oneOf, $ref.",
   "title": "bckgrnd-msc performance recording",
   "type": "object",
-  "required": ["format", "version", "track", "bpm", "stepsPerBar", "startedAtStep", "stoppedBy", "truncated", "events"],
+  "required": ["format", "version", "track", "bpm", "stepsPerBar", "recordedAt", "startedAtStep", "stoppedBy", "truncated", "events"],
   "additionalProperties": false,
   "properties": {
     "format": { "const": "bckgrnd-msc/performance" },
-    "version": { "const": 1 },
+    "version": {
+      "const": 2,
+      "$comment": "2: onsets, Beat Repeat, fill length, recordedAt. A v2 reader refuses version 1 (never exported, no onsets) and any newer version."
+    },
     "track": { "type": "string", "$comment": "The track id the take was recorded on. A track change ends the take." },
     "bpm": { "type": "number", "minimum": 1, "$comment": "Tempo when Record was pressed. Positions are musical, so tempo changes do not move them." },
     "stepsPerBar": { "const": 16 },
-    "startedAtStep": { "type": "integer", "minimum": -1, "maximum": 255, "$comment": "The song step sounding when Record was pressed; -1 if no step had sounded yet (stopped, or before Play's first onset)." },
+    "recordedAt": { "type": "string", "$comment": "When Record was pressed, ISO 8601 UTC. A label for the file, never a position." },
+    "startedAtStep": {
+      "type": "integer",
+      "minimum": -1,
+      "maximum": 255,
+      "$comment": "The song step sounding when Record was pressed; -1 if no step had sounded yet (stopped, or before Play's first onset)."
+    },
     "stoppedBy": { "enum": [null, "user", "stop", "panic", "track", "mix", "cap"] },
     "truncated": { "type": "boolean", "$comment": "True when the 10,000-event cap ended the take." },
-    "events": { "type": "array", "maxItems": 10000, "items": { "$ref": "#/$defs/event" } }
+    "events": {
+      "type": "array",
+      "maxItems": 10000,
+      "items": { "$ref": "#/$defs/event" }
+    }
   },
   "$defs": {
     "reservedKinds": {
-      "$comment": "Kinds a later version may add (Beat Repeat, filter and echo holds, other gestures). A v1 reader refuses them; a v1 writer never writes them.",
-      "enum": ["repeat", "filter", "echo", "gesture"]
+      "$comment": "Kinds a later version may add (filter and echo holds, other gestures). A v2 reader refuses them; a v2 writer never writes them.",
+      "enum": ["filter", "echo", "gesture"]
     },
     "event": {
       "oneOf": [
         { "$ref": "#/$defs/scene" },
         { "$ref": "#/$defs/fill" },
         { "$ref": "#/$defs/rise" },
-        { "$ref": "#/$defs/fillInto" }
+        { "$ref": "#/$defs/fillInto" },
+        { "$ref": "#/$defs/repeat" }
       ]
     },
     "seq": { "type": "integer", "minimum": 1 },
@@ -40,7 +54,7 @@
     "slot": { "enum": ["full", "sparse", "build", "drop"] },
     "scene": {
       "type": "object",
-      "required": ["seq", "kind", "requestId", "step", "bar", "beat", "sixteenth", "slot", "name", "timing", "crash"],
+      "required": ["seq", "kind", "requestId", "step", "bar", "beat", "sixteenth", "onset", "pass", "slot", "name", "timing", "crash"],
       "additionalProperties": false,
       "properties": {
         "seq": { "$ref": "#/$defs/seq" },
@@ -50,6 +64,8 @@
         "bar": { "$ref": "#/$defs/bar" },
         "beat": { "$ref": "#/$defs/beat" },
         "sixteenth": { "$ref": "#/$defs/sixteenth" },
+        "onset": { "$ref": "#/$defs/onset" },
+        "pass": { "$ref": "#/$defs/pass" },
         "offGrid": { "$ref": "#/$defs/offGrid" },
         "slot": { "$ref": "#/$defs/slot" },
         "name": { "type": "string" },
@@ -59,7 +75,7 @@
     },
     "fill": {
       "type": "object",
-      "required": ["seq", "kind", "requestId", "step", "bar", "beat", "sixteenth", "style", "phraseBars", "link", "outcome"],
+      "required": ["seq", "kind", "requestId", "step", "bar", "beat", "sixteenth", "onset", "pass", "style", "length", "phraseBars", "link", "outcome"],
       "additionalProperties": false,
       "properties": {
         "seq": { "$ref": "#/$defs/seq" },
@@ -69,19 +85,23 @@
         "bar": { "$ref": "#/$defs/bar" },
         "beat": { "$ref": "#/$defs/beat" },
         "sixteenth": { "$ref": "#/$defs/sixteenth" },
+        "onset": { "$ref": "#/$defs/onset" },
+        "pass": { "$ref": "#/$defs/pass" },
         "offGrid": { "$ref": "#/$defs/offGrid" },
         "style": { "type": ["string", "null"] },
+        "length": { "$ref": "#/$defs/fillLength" },
         "phraseBars": { "enum": [0, 2, 4, 8, 16] },
         "link": { "enum": ["none", "fillInto", "rise"] },
         "partner": { "$ref": "#/$defs/requestId" },
         "outcome": { "enum": ["played", "cutShort", "open"] },
         "endStep": { "$ref": "#/$defs/step" },
+        "endOnset": { "$ref": "#/$defs/onset" },
         "reason": { "type": "integer", "minimum": 1 }
       }
     },
     "rise": {
       "type": "object",
-      "required": ["seq", "kind", "requestId", "step", "bar", "beat", "sixteenth", "slot", "name", "bars", "withFill", "outcome", "crash"],
+      "required": ["seq", "kind", "requestId", "step", "bar", "beat", "sixteenth", "onset", "pass", "slot", "name", "bars", "withFill", "outcome", "crash"],
       "additionalProperties": false,
       "properties": {
         "seq": { "$ref": "#/$defs/seq" },
@@ -91,6 +111,8 @@
         "bar": { "$ref": "#/$defs/bar" },
         "beat": { "$ref": "#/$defs/beat" },
         "sixteenth": { "$ref": "#/$defs/sixteenth" },
+        "onset": { "$ref": "#/$defs/onset" },
+        "pass": { "$ref": "#/$defs/pass" },
         "offGrid": { "$ref": "#/$defs/offGrid" },
         "slot": { "$ref": "#/$defs/slot" },
         "name": { "type": "string" },
@@ -99,13 +121,14 @@
         "fillRequestId": { "$ref": "#/$defs/requestId" },
         "outcome": { "enum": ["landed", "cancelled", "replaced", "open"] },
         "endStep": { "$ref": "#/$defs/step" },
+        "endOnset": { "$ref": "#/$defs/onset" },
         "reason": { "type": "integer", "minimum": 1 },
         "crash": { "type": "boolean" }
       }
     },
     "fillInto": {
       "type": "object",
-      "required": ["seq", "kind", "requestId", "step", "bar", "beat", "sixteenth", "slot", "name", "fillRequestId", "crash"],
+      "required": ["seq", "kind", "requestId", "step", "bar", "beat", "sixteenth", "onset", "pass", "slot", "name", "fillRequestId", "length", "crash"],
       "additionalProperties": false,
       "properties": {
         "seq": { "$ref": "#/$defs/seq" },
@@ -115,11 +138,51 @@
         "bar": { "$ref": "#/$defs/bar" },
         "beat": { "$ref": "#/$defs/beat" },
         "sixteenth": { "$ref": "#/$defs/sixteenth" },
+        "onset": { "$ref": "#/$defs/onset" },
+        "pass": { "$ref": "#/$defs/pass" },
         "offGrid": { "$ref": "#/$defs/offGrid" },
         "slot": { "$ref": "#/$defs/slot" },
         "name": { "type": "string" },
         "fillRequestId": { "$ref": "#/$defs/requestId" },
+        "length": { "$ref": "#/$defs/fillLength" },
         "crash": { "type": "boolean" }
+      }
+    },
+    "onset": {
+      "type": "integer",
+      "minimum": 0,
+      "$comment": "Onsets since the take's first event (0): the engine's monotonic onset serial less the first event's. Never wraps or jumps."
+    },
+    "pass": {
+      "type": "integer",
+      "minimum": 1,
+      "$comment": "1-based run through the song, for people: +1 per wrap, at least +1 across a loop, cue or seek since the event before. A label; onset is the position."
+    },
+    "fillLength": { "enum": ["bar", "beat"], "$comment": "The effective length the fill played: the bar, or only its last beat." },
+    "repeat": {
+      "$comment": "A Beat Repeat that engaged (event 61) and where it ended (event 62, a recapture, or the take's stop). A press released before its grid line never engaged and is not here.",
+      "type": "object",
+      "required": ["seq", "kind", "token", "step", "bar", "beat", "sixteenth", "onset", "pass", "division", "endedBy"],
+      "additionalProperties": false,
+      "properties": {
+        "seq": { "$ref": "#/$defs/seq" },
+        "kind": { "const": "repeat" },
+        "token": { "type": "integer", "minimum": 1, "$comment": "The gesture token: session-local, one hold. Not a request id." },
+        "step": { "$ref": "#/$defs/step" },
+        "bar": { "$ref": "#/$defs/bar" },
+        "beat": { "$ref": "#/$defs/beat" },
+        "sixteenth": { "$ref": "#/$defs/sixteenth" },
+        "onset": { "$ref": "#/$defs/onset" },
+        "pass": { "$ref": "#/$defs/pass" },
+        "offGrid": { "$ref": "#/$defs/offGrid" },
+        "division": { "enum": [4, 8, 16] },
+        "endedBy": {
+          "enum": ["engine", "recapture", "take", "open"],
+          "$comment": "engine: event 62; recapture: the same hold captured again, the next repeat with this token carries on; take: the take stopped while held, closed at the stop; open: still held, in a take still recording."
+        },
+        "endStep": { "$ref": "#/$defs/step" },
+        "endOnset": { "$ref": "#/$defs/onset" },
+        "reason": { "type": "integer", "minimum": 0, "$comment": "Event 62's reason code (engine only)." }
       }
     }
   }
