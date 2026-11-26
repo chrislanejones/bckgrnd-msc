@@ -549,3 +549,15 @@ not. Things to settle before or while building it:
   and waits for `gotpointercapture`. 23 of 24 standalone runs passed after the fix. The one
   failure was before the Panic check was split, so it isn't named; the Panic check now
   also waits for the engine's Stop. (Tara)
+
+## Found in Night 11 recording (11-26-2026)
+
+- **A take's onsets start at its first event, not at the Record press.** Telemetry carries
+  the song step only, so the host has no onset serial for the press. A timeline can't show
+  the empty bars between Record and the first event by onset (`startedAtStep` still says
+  where Record was pressed). Fix: the live deck's serial on the telemetry frame (Silas),
+  then fix the origin at the press. A change to v2's meaning of `onset`, so before takes
+  are imported anywhere. (recording)
+- **A repeat held when the take stops ends at an estimate.** `endOnset` counts forward
+  from the last engine event to the last playing frame's step. Right unless a loop, a cue
+  or a seek came after that event. The same telemetry serial would make it exact. (recording)
