@@ -1698,3 +1698,322 @@ fn queue_build_with_is_length_zero_and_a_bad_length_is_refused() {
         "no fill: the length is ignored"
     );
 }
+
+// -- Night 11 QA: beat fills at the wrap, in loops, and cancelled ---------------------
+
+/// The events for request `id` in `seen`, in order.
+fn for_id(seen: &[[f64; 4]], id: u32) -> Vec<[f64; 4]> {
+    seen.iter().copied().filter(|x| x[1] == id as f64).collect()
+}
+
+/// Every step the trace has drums on plays exactly the groove: no fill lane is stuck.
+fn only_the_groove(e: &Engine, label: &str) {
+    let mut steps: Vec<usize> = e
+        .trace
+        .iter()
+        .filter_map(|t| match *t {
+            Trace::Drum(_, s, _) => Some(s),
+            _ => None,
+        })
+        .collect();
+    steps.dedup();
+    assert!(!steps.is_empty(), "{label}: nothing played");
+    for step in steps {
+        assert_eq!(drums_on(e, step), groove_on(step), "{label}, step {step}");
+    }
+}
+
+/// The song's wrap, 16-bar phrase end, both lengths: a beat fill plays 252..255 (a bar
+/// fill 240..255), ends on the wrap (`fill ended` on step 0) after exactly its four
+/// onsets, and step 0 onward is the groove: nothing runs into the next pass.
+#[test]
+fn a_fill_at_the_song_wrap_ends_on_step_zero() {
+    for (length, start) in [(1u8, 252usize), (0, 240)] {
+        let label = format!("length {length}");
+        let mut e = playing_at(5);
+        assert_eq!(e.queue_fill_at(1, 0, 16, length), reason::OK);
+        render_until_fired(&mut e, 250);
+        render_until_fired(&mut e, 4);
+        let first = crate::scheduler::fill_first(length) as f64;
+        assert_eq!(
+            for_id(&events(&mut e), 1),
+            vec![
+                ev(event::FILL_QUEUED, 1, 16.0, start as f64),
+                ev(event::FILL_STARTED, 1, start as f64, first),
+                ev(event::FILL_ENDED, 1, 0.0, 0.0),
+            ],
+            "{label}"
+        );
+        for step in 6..start {
+            assert_eq!(drums_on(&e, step), groove_on(step), "{label}, {step}");
+        }
+        for step in start..STEPS {
+            assert_eq!(drums_on(&e, step), vec![(CLAP, 0.7)], "{label}, {step}");
+        }
+        for step in 0..4 {
+            assert_eq!(drums_on(&e, step), groove_on(step), "{label}, {step}");
+        }
+        assert_eq!((e.pending_fill(), e.active_fill()), (None, None), "{label}");
+    }
+}
+
+/// A beat fill inside a 1-bar loop (16..32), at phrase 4 (the loop's wrap is its phrase
+/// end) or the next bar: it plays 28..31 once, ends on the loop's start (16), and the
+/// next pass is the groove. Pressed during the beat (fired 29) it waits a pass.
+#[test]
+fn a_beat_fill_inside_a_one_bar_loop() {
+    for (fired, phrase) in [(20, 4u8), (20, 0), (29, 4), (29, 0)] {
+        let label = format!("fired {fired}, phrase {phrase}");
+        let mut e = playing_at(fired);
+        e.set_loop(1);
+        events(&mut e);
+        assert_eq!(e.queue_fill_at(1, 0, phrase, 1), reason::OK, "{label}");
+        let mut seen = run_until(&mut e, event::FILL_STARTED, 1);
+        e.trace.clear();
+        render_until_fired(&mut e, 17);
+        seen.extend(events(&mut e));
+        assert_eq!(
+            for_id(&seen, 1),
+            vec![
+                ev(event::FILL_QUEUED, 1, 2.0, 28.0),
+                ev(event::FILL_STARTED, 1, 28.0, 12.0),
+                ev(event::FILL_ENDED, 1, 16.0, 0.0),
+            ],
+            "{label}"
+        );
+        for step in 29..32 {
+            assert_eq!(drums_on(&e, step), vec![(CLAP, 0.7)], "{label}, {step}");
+        }
+        assert_eq!(drums_on(&e, 16), groove_on(16), "{label}: the loop's start");
+        // The next pass: the fill played once, the loop's last beat is the groove again.
+        e.trace.clear();
+        render_until_fired(&mut e, 16);
+        only_the_groove(&e, &label);
+        assert!(events(&mut e).is_empty(), "{label}");
+    }
+}
+
+/// A loop changed while a beat fill plays (the beat on 60, changed after 61): the fill
+/// keeps counting its own four onsets and ends on whatever the clock plays next. A
+/// 1-bar loop (48..64) ends it on 48, a 2-bar loop (32..64) on 32, and turning a 1-bar
+/// loop off on 64. Nothing is re-announced for a fill already playing.
+#[test]
+fn a_loop_change_while_a_beat_fill_plays_ends_it_on_the_next_onset() {
+    for (from, to, end) in [(0u32, 1u32, 48usize), (0, 2, 32), (1, 0, 64)] {
+        let label = format!("loop {from} -> {to}");
+        let mut e = playing_at(50);
+        e.set_loop(from);
+        events(&mut e);
+        assert_eq!(e.queue_fill_at(1, 0, 4, 1), reason::OK, "{label}");
+        render_until_fired(&mut e, 61);
+        assert_eq!(e.active_fill(), Some(1), "{label}");
+        events(&mut e);
+        e.set_loop(to);
+        assert!(events(&mut e).is_empty(), "{label}: nothing re-announced");
+        e.trace.clear();
+        let seen = run_until(&mut e, event::FILL_ENDED, 1);
+        assert_eq!(
+            seen,
+            vec![ev(event::FILL_ENDED, 1, end as f64, 0.0)],
+            "{label}"
+        );
+        render_until_fired(&mut e, end as i32 + 2);
+        for step in 62..64 {
+            assert_eq!(drums_on(&e, step), vec![(CLAP, 0.7)], "{label}, {step}");
+        }
+        for step in end..end + 2 {
+            assert_eq!(drums_on(&e, step), groove_on(step), "{label}, {step}");
+        }
+    }
+}
+
+/// Stop, seek, a track change and panic end a plain beat fill with exactly one outcome,
+/// waiting (after 50: `fill cancelled`) or during its beat (after 61: `fill ended`, step
+/// -1), and leave nothing behind: played again, every step is the groove and nothing
+/// more is said about it.
+#[test]
+fn interruptions_end_a_beat_fill_with_one_outcome() {
+    type Action = fn(&mut Engine);
+    let cases: [(&str, Action, u8); 4] = [
+        ("stop", |e| e.stop(), reason::STOPPED),
+        ("seek", |e| e.jump(0), reason::TRANSPORT),
+        ("load", |e| e.load_track(fill_track()), reason::TRACK),
+        ("panic", |e| e.panic(), reason::PANIC),
+    ];
+    for playing_fill in [false, true] {
+        for (name, action, why) in cases {
+            let label = format!("{name}, fill playing {playing_fill}");
+            let mut e = playing_at(5);
+            assert_eq!(e.queue_fill_at(1, 0, 4, 1), reason::OK);
+            render_until_fired(&mut e, if playing_fill { 61 } else { 50 });
+            events(&mut e);
+            action(&mut e);
+            let want = if playing_fill {
+                ev(event::FILL_ENDED, 1, -1.0, why as f64)
+            } else {
+                ev(event::FILL_CANCELLED, 1, why as f64, 0.0)
+            };
+            assert_eq!(for_id(&events(&mut e), 1), vec![want], "{label}");
+            assert_eq!((e.pending_fill(), e.active_fill()), (None, None), "{label}");
+            assert!(!e.cancel_fill(1), "{label}");
+            if !e.is_playing() {
+                e.play();
+            }
+            e.trace.clear();
+            render(&mut e, 3600 * 20, 128);
+            only_the_groove(&e, &label);
+            assert!(for_id(&events(&mut e), 1).is_empty(), "{label}");
+        }
+    }
+}
+
+/// Fill → Drop with a beat fill, cancelled during its beat (after 61) from either part:
+/// the scene and its lanes are cancelled, the fill plays out its beat unlinked and ends
+/// on 64, which is the track's own downbeat. Panic during the beat ends both at once.
+#[test]
+fn a_beat_fill_into_cancelled_during_its_beat_plays_out_the_beat() {
+    for by_fill in [true, false] {
+        let label = format!("by fill {by_fill}");
+        let mut e = playing_at(5);
+        assert_eq!(e.queue_patterns(30, timing::BAR, 2, &drop_lanes()), 0);
+        assert_eq!(e.queue_fill_into(1, 0, 4, 1, 2, &scene(0.9), 0), reason::OK);
+        render_until_fired(&mut e, 61);
+        events(&mut e);
+        let cancelled = if by_fill {
+            e.cancel_fill(1)
+        } else {
+            e.cancel_scene(2)
+        };
+        assert!(cancelled, "{label}");
+        assert_eq!(
+            events(&mut e),
+            vec![
+                ev(event::SCENE_CANCELLED, 2, 10.0, 0.0),
+                ev(event::FILL_UNLINKED, 1, 10.0, 0.0),
+                ev(event::PATTERNS_CANCELLED, 30, 10.0, 0.0),
+            ],
+            "{label}"
+        );
+        let seen = run_until(&mut e, event::FILL_ENDED, 1);
+        assert_eq!(seen, vec![ev(event::FILL_ENDED, 1, 64.0, 0.0)], "{label}");
+        render_until_fired(&mut e, 66);
+        for step in 60..64 {
+            assert_eq!(drums_on(&e, step), vec![(CLAP, 0.7)], "{label}, {step}");
+        }
+        assert_eq!(drums_on(&e, 64), groove_on(64), "{label}: no Drop lanes");
+        assert!(applies(&e).is_empty() && lane_ids(&e).is_empty(), "{label}");
+        assert!(!e.cancel_fill(1) && !e.cancel_scene(2), "{label}");
+    }
+
+    let mut e = playing_at(5);
+    assert_eq!(e.queue_patterns(30, timing::BAR, 2, &drop_lanes()), 0);
+    assert_eq!(e.queue_fill_into(1, 0, 4, 1, 2, &scene(0.9), 0), reason::OK);
+    render_until_fired(&mut e, 61);
+    events(&mut e);
+    e.panic();
+    let got = events(&mut e);
+    assert_eq!(
+        for_id(&got, 1),
+        vec![ev(event::FILL_ENDED, 1, -1.0, reason::PANIC as f64)]
+    );
+    assert_eq!(
+        for_id(&got, 2),
+        vec![ev(event::SCENE_CANCELLED, 2, reason::PANIC as f64, 0.0)]
+    );
+    assert_eq!(
+        (e.pending_fill(), e.active_fill(), e.pending_scene()),
+        (None, None, None)
+    );
+    assert!(e.scene_lanes.is_none());
+}
+
+/// Rise + Fill with a beat fill (2 bars from 16: the beat on 44, the landing on 48),
+/// cancelled from either part. Unlike a bar fill, a cancel in the Rise's last bar but
+/// before its last beat (after 36) still cancels the fill outright; only during the
+/// beat (after 45) is it unlinked and played out, ending on 48. Either way the base is
+/// restored, nothing lands, and 48 is the track's own downbeat. Panic during the beat
+/// ends both.
+#[test]
+fn cancelling_a_rise_with_a_beat_fill() {
+    let queue = |e: &mut Engine| {
+        let target = target_from(&e.base());
+        assert_eq!(e.queue_patterns(30, timing::BAR, 2, &rise_lanes(48)), 0);
+        assert_eq!(
+            e.queue_build_with_length(2, 2, &target, &scene(0.9), 1, 0, 0, 1),
+            reason::OK
+        );
+        events(e);
+    };
+    for by_fill in [false, true] {
+        for at in [20, 36, 45] {
+            let label = format!("by fill {by_fill}, after {at}");
+            let in_beat = at == 45;
+            let mut e = playing_at(5);
+            let before = e.base();
+            queue(&mut e);
+            render_until_fired(&mut e, at);
+            events(&mut e);
+            let cancelled = if by_fill {
+                e.cancel_fill(1)
+            } else {
+                e.cancel_build(2)
+            };
+            assert!(cancelled, "{label}");
+            let fill = if in_beat {
+                ev(event::FILL_UNLINKED, 1, 10.0, 0.0)
+            } else {
+                ev(event::FILL_CANCELLED, 1, 10.0, 0.0)
+            };
+            assert_eq!(
+                events(&mut e),
+                vec![
+                    ev(event::BUILD_CANCELLED, 2, 10.0, 0.0),
+                    ev(event::PATTERNS_CANCELLED, 30, 10.0, 0.0),
+                    fill,
+                ],
+                "{label}"
+            );
+            render_until_fired(&mut e, 49);
+            let got = events(&mut e);
+            if in_beat {
+                assert_eq!(got, vec![ev(event::FILL_ENDED, 1, 48.0, 0.0)], "{label}");
+                for step in 46..48 {
+                    assert_eq!(drums_on(&e, step), vec![(CLAP, 0.7)], "{label}, {step}");
+                }
+            } else {
+                assert!(got.is_empty(), "{label}: {got:?}");
+                for step in 44..48 {
+                    assert_eq!(drums_on(&e, step), groove_on(step), "{label}, {step}");
+                }
+            }
+            assert_eq!(e.base(), before, "{label}: restored");
+            assert!(applies(&e).is_empty() && lane_ids(&e).is_empty(), "{label}");
+            assert_eq!(drums_on(&e, 48), groove_on(48), "{label}");
+            assert!(!e.cancel_fill(1) && !e.cancel_build(2), "{label}");
+        }
+    }
+
+    let mut e = playing_at(5);
+    queue(&mut e);
+    render_until_fired(&mut e, 45);
+    events(&mut e);
+    e.panic();
+    let got = events(&mut e);
+    assert_eq!(
+        for_id(&got, 1),
+        vec![ev(event::FILL_ENDED, 1, -1.0, reason::PANIC as f64)]
+    );
+    assert_eq!(
+        for_id(&got, 2),
+        vec![ev(event::BUILD_CANCELLED, 2, reason::PANIC as f64, 0.0)]
+    );
+    assert_eq!(
+        (
+            e.pending_build(),
+            e.active_build(),
+            e.pending_fill(),
+            e.active_fill()
+        ),
+        (None, None, None, None)
+    );
+}

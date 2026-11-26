@@ -177,7 +177,14 @@ export async function repeatChecks({ open, check }) {
     // The transport shows stopped once the engine reports its Stop, a moment later.
     await page.waitForFunction(() => document.querySelector('.app')?.getAttribute('data-playing') === 'no', null, T).catch(() => {});
     check('repeat: Panic clears a held repeat', (await pressed()) === 'false');
-    check('repeat: Panic stops the transport', (await page.locator('.app').getAttribute('data-playing')) === 'no');
+    // Intermittent in the full suite only (Night 10, Night 11: 1 of 2 suite runs, 0 of
+    // 16 standalone). On a failure, say what the screen shows so the cause can be found.
+    const afterPanic = await page.evaluate(() => ({
+      playing: document.querySelector('.app')?.getAttribute('data-playing'),
+      status: document.querySelector('.scene-status')?.textContent?.trim().slice(0, 120),
+      play: document.querySelector('.play')?.getAttribute('aria-label'),
+    }));
+    check('repeat: Panic stops the transport', afterPanic.playing === 'no', afterPanic.playing === 'no' ? '' : JSON.stringify(afterPanic));
     await touch('touchEnd', at);
 
     // The division: picked, sent, remembered across a reload.

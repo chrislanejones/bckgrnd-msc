@@ -7,6 +7,7 @@ namespace Tests\Unit;
 use App\Support\Music\Fills;
 use App\Support\Music\Library;
 use App\Support\Music\Phrase;
+use App\Support\Music\Track;
 use PHPUnit\Framework\TestCase;
 
 /**
@@ -258,6 +259,27 @@ final class FillsTest extends TestCase
             // Syncopated: the kick off the beat on 14, claps on 13 and 15, none on 12.
             $this->assertSame([14], $on($sync['kick']), "{$track->id} syncopated kick");
             $this->assertSame([13, 15], $on($sync['clap']), "{$track->id} syncopated clap");
+        }
+    }
+
+    /**
+     * Night 11 QA. Every library track plays all four drum lanes, so "only the track's
+     * own lanes" needs a track that doesn't: a lane it never plays stays silent in every
+     * beat fill (vel() caps at the lane's peak, 0), and the lanes it does play keep
+     * their sketch. No beat fill reaches the percussion or the melodic lanes.
+     */
+    public function test_a_lane_the_track_never_plays_stays_silent_in_its_beat_fills(): void
+    {
+        $silent = array_fill(0, Phrase::GROOVE_STEPS, 0.0);
+        foreach (Library::all() as $track) {
+            $args = get_object_vars($track);
+            $without = new Track(...[...$args, 'clap' => $silent, 'hatOpen' => $silent]);
+            foreach (Fills::beatStyles($without) as $i => $fill) {
+                $this->assertSame(array_fill(0, Fills::BAR, 0.0), $fill['clap'], "{$track->id} {$fill['id']}: no clap");
+                $this->assertSame(array_fill(0, Fills::BAR, 0.0), $fill['hatOpen'], "{$track->id} {$fill['id']}: no open hat");
+                $this->assertSame(Fills::beatStyles($track)[$i]['kick'], $fill['kick'], "{$track->id} {$fill['id']}: its kick as before");
+                $this->assertSame(Fills::beatStyles($track)[$i]['hat'], $fill['hat'], "{$track->id} {$fill['id']}: its hats as before");
+            }
         }
     }
 

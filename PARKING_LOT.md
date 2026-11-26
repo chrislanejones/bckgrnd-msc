@@ -602,3 +602,27 @@ not. Things to settle before or while building it:
 - The serial column (`EVENT_WIDTH` 5, `docs/NIGHT3_PROTOCOL.md` § The onset serial)
   answers "a take has no elapsed position" above on the engine side. The recorder's use
   of it is the recording agent's. (Silas, recording)
+
+## Night 11 — beat fills QA (11-26-2026)
+
+- **The engine can't tell a beat fill's index from a bar fill's.** `queue_fill_at`,
+  `queue_fill_into` and `queue_build_with_length` accept any loaded index at either
+  length: index 0-3 at length 1 plays a bar fill's last beat, 4-7 at length 0 plays three
+  silent beats and then the beat fill. The track's `fills` carry no kind, so the engine
+  has nothing to check against. The app host is pinned by `check-scenes` (every library
+  shape, choice, cursor and preference sends an index of the length it sends). Any other
+  host (the MCP, a future one) is unguarded. A fix gives the engine the bar-fill count
+  at load, or a per-fill length. (Silas)
+- **`php artisan test` under-counts in a worktree without `.env`.** The 19 tests that boot
+  the app warn (or raise a notice) reading the missing `.env`, and artisan's summary
+  counts them as warnings, not passed: 299 passed of 318 here, while `vendor/bin/phpunit`
+  says OK (318 tests). That is the "298 vs 308" in the recorder's notes: 316 − 18 tonight
+  before the QA tests, 308 all green at night10/run in a checkout with `.env`. Read the
+  phpunit total, or give the test bootstrap its own env. (Scotty)
+- **"repeat: Panic stops the transport" is intermittent in the full desktop suite only.**
+  Failed 1 of 2 suite runs tonight; 0 of 16 standalone runs (12 with diagnostics armed),
+  and not with the track fetch delayed 1.5 s (the step before does wait for the new
+  track). Not touched by the beat-fills work. Telemetry posts at ~30 Hz, so 5 s still
+  "playing" after Panic is not a slow repaint: something kept or restarted playback. The
+  check now prints the transport state and status line on failure; read that on the
+  next occurrence before changing any timing. (Tara)

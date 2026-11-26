@@ -1006,15 +1006,25 @@ export async function fillChecks({ open, check }) {
   }
 
   // ---- Beat fills on a library without them: Beat is unavailable, with its reason, and
-  // a press plays (and names) the bar. ------------------------------------------------
-  {
+  // a press plays (and names) the bar. Two shapes: an export from before Night 10 (no
+  // beatFillStyles), and beat fills without fillStyles (Night 11 QA: the engine is
+  // never loaded with them, so Beat must not send length 1 with a bar fill's index).
+  for (const [tag, drop] of [['beat fill missing', 'beatFillStyles'], ['beat fill without styles', 'fillStyles']]) {
     const { page, errors } = await open(1440, 1000);
     const k = kit(page);
     try {
+      await page.addInitScript(() => {
+        const sent = (window.__FILL_SENT__ = []);
+        const post = MessagePort.prototype.postMessage;
+        MessagePort.prototype.postMessage = function (message, ...rest) {
+          if (message && typeof message === 'object' && message.type === 'fill') sent.push({ index: message.index, length: message.length });
+          return post.call(this, message, ...rest);
+        };
+      });
       await page.route(/\/(library\/[a-z-]+\.json|api\/tracks\/[a-z-]+)$/, async (route) => {
         const res = await route.fetch();
         const body = await res.json();
-        delete body.beatFillStyles;
+        delete body[drop];
         await route.fulfill({ response: res, json: body });
       });
       await page.evaluate(() => localStorage.setItem('bckgrnd-msc:fill-length', 'beat'));
@@ -1026,23 +1036,26 @@ export async function fillChecks({ open, check }) {
         checked: el.getAttribute('aria-checked'),
         described: (el.getAttribute('aria-describedby') ?? '').split(/\s+/).filter(Boolean).map((id) => document.getElementById(id)?.textContent?.trim()).join(' '),
       }));
-      check('beat fill missing: Beat is aria-disabled, still the stored choice, described by its reason',
+      check(`${tag}: Beat is aria-disabled, still the stored choice, described by its reason`,
         why.aria === 'true' && why.checked === 'true' && /no beat fills/.test(why.described), JSON.stringify(why));
-      check('beat fill missing: the Fill button names a bar fill',
+      check(`${tag}: the Fill button names a bar fill`,
         (await k.fillBtn.getAttribute('aria-label')) === 'Classic fill for one bar, from the next bar', await k.fillBtn.getAttribute('aria-label'));
       await k.play();
       await k.tempo(BPM);
       await k.seekTo(5);
       await k.fillBtn.click();
       await k.waitText('.fill-button', /^Fill · Bar 6$/);
-      check('beat fill missing: a press plays the bar, named so ("Fill · Bar 6")', true);
+      check(`${tag}: a press plays the bar, named so ("Fill · Bar 6")`, true);
+      const fillMsg = (await page.evaluate(() => window.__FILL_SENT__)).at(-1);
+      // A bar is length 0, left off the message (the worklet reads absent as 0).
+      check(`${tag}: it sends a bar (no length) and Classic's bar fill (index 0)`, fillMsg !== undefined && (fillMsg.length ?? 0) === 0 && fillMsg.index === 0, JSON.stringify(fillMsg));
       await k.waitFill('playing');
       await k.waitFill('idle');
-      check('beat fill missing: the preference stays Beat', await page.evaluate(() => localStorage.getItem('bckgrnd-msc:fill-length')) === 'beat');
+      check(`${tag}: the preference stays Beat`, await page.evaluate(() => localStorage.getItem('bckgrnd-msc:fill-length')) === 'beat');
     } catch (e) {
-      check('beat fill missing: the walk-through ran to the end', false, String(e.message).split('\n')[0]);
+      check(`${tag}: the walk-through ran to the end`, false, String(e.message).split('\n')[0]);
     }
-    check('beat fill missing: no page errors', errors.length === 0, errors.join('; '));
+    check(`${tag}: no page errors`, errors.length === 0, errors.join('; '));
     await page.close();
   }
 
