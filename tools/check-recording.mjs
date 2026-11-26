@@ -425,6 +425,7 @@ function rig() {
   const [e] = s.recording().events;
   check('no serial: the step is kept, no onset or pass is made up', e.step === 16 && !('onset' in e) && !('pass' in e) && !('serial' in input));
   check('no serial: such a take does not validate as v2', valid(s.recording()).length > 0);
+  check('no serial: the session will not export it', s.exportTake() === null);
   check('describe: no pass without an onset', r.describeEvent(e).position === 'Bar 2.1');
 }
 

@@ -53,7 +53,8 @@ like its style.
 ## Open questions
 - Is length 0 bit-identical to Night 9? The commit and the protocol say so, but
   PARKING_LOT (11-25-2026) says the bypass hash check has to be rerun.
-- The take contract (ADR-026) records a fill's style and step but has no length field.
+- ~~The take contract (ADR-026) has no length field.~~ Answered by ADR-026's v2
+  amendment: `fill` and `fillInto` record the length that played.
 - The MCP companion (vendored engine has only `queue_fill`) reads neither fill field.
 - Whether the four recipes sound right is for Chris to judge by ear. Not claimed here.
 

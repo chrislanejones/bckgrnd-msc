@@ -303,10 +303,13 @@ export class RecordingSession {
     return this.take ? structuredClone(this.take) : null;
   }
 
-  /** The take as its own file (`TakeExport`), or null with no take. */
+  /**
+   * The take as its own file (`TakeExport`), or null with no take, or when an event has
+   * no onset (an engine without serials): such a file would claim v2 and not be one.
+   */
   exportTake(): TakeExport | null {
     const take = this.recording();
-    return take ? exportTake(take) : null;
+    return take && hasOnsets(take) ? exportTake(take) : null;
   }
 
   subscribe(listener: () => void): () => void {
@@ -579,6 +582,11 @@ export function takeFilename(track: string, recordedAt: string): string {
 }
 
 /** A take as a standalone, versioned JSON document. Never part of a project. */
+/** Whether every event carries an onset, which a v2 export needs. */
+export function hasOnsets(take: PerformanceRecording): boolean {
+  return take.events.every((e) => typeof (e as { onset?: unknown }).onset === 'number');
+}
+
 export function exportTake(take: PerformanceRecording): TakeExport {
   return { filename: takeFilename(take.track, take.recordedAt), json: `${JSON.stringify(take, null, 2)}\n` };
 }
@@ -601,6 +609,7 @@ export function parseTake(text: string): PerformanceRecording {
   if (d.version > PERFORMANCE_VERSION) throw new Error(`This take is version ${d.version}, newer than this app reads (${PERFORMANCE_VERSION}).`);
   if (d.version < PERFORMANCE_VERSION) throw new Error(`Version ${d.version} takes are not read: they were never exported and have no onsets.`);
   if (!Array.isArray(d.events)) throw new Error('This take has no events.');
+  if (!hasOnsets(d as PerformanceRecording)) throw new Error('This take has an event with no onset.');
   return d as PerformanceRecording;
 }
 

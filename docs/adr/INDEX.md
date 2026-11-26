@@ -39,7 +39,7 @@ and is marked `(backfilled)`.
 | [023](023-scene-accents-bump-the-project-to-version-4.md) | The scene accent bumps the project to version 4 with a v3 → v4 migration, not an optional v3 field | draft | 2026-11-19 |
 | [024](024-fill-styles-ship-beside-the-track-not-inside-it.md) | Four fill styles ship as `fillStyles` beside the track, not in `track.fills` (a project's hashed source); the host picks one by style key, and Fill Style is an app preference | draft | 2026-11-24 |
 | [025](025-beat-repeat-is-gesture-kind-3-looping-the-pre-master-feed.md) | Beat Repeat is held-gesture kind 3: it loops the five-channel pre-master feed from the next grid line, releases at once, and its division is an app preference, not project data | draft | 2026-11-25 |
-| [026](026-a-performance-take-is-its-own-v1-contract-of-applied-events-at-song-steps.md) | A performance take is its own versioned contract (`bckgrnd-msc/performance` v1), held in memory and outside the project format: only applied scenes, fills and Rises, at engine song steps; elapsed position and replay are deferred | draft | 2026-11-25 |
+| [026](026-a-performance-take-is-its-own-v1-contract-of-applied-events-at-song-steps.md) | A performance take is its own versioned contract (`bckgrnd-msc/performance` v1), held in memory and outside the project format: only applied scenes, fills and Rises, at engine song steps; elapsed position and replay are deferred. **Amended 2026-11-26 (v2, draft):** every event has an engine `onset` from the take's first event, Beat Repeat is one `repeat` event, fills record the length that played, a take exports as its own file, and v2 readers refuse v1 | draft | 2026-11-25 |
 | [027](027-one-beat-fills-are-dedicated-recipes-beside-the-track-played-as-fill-length-1.md) | One-beat fills are four dedicated PHP recipes shipped as `beatFillStyles` beside the track, played as engine fill length 1 (steps 12-15) at index 4-7; Bar stays the default and a library without them plays the bar; Fill length is an app preference | draft | 2026-11-26 |
 
 Night 8's new event numbers (51 and up) and reason 11 (`linked`) are protocol, not
@@ -49,3 +49,8 @@ not in an ADR.
 Night 9 amended three drafts instead of adding ADRs for bug fixes: ADR-015 (the host
 keeps one record per request id), ADR-019 (a Rise keeps its own record and is followed
 in exact values) and ADR-016 (tone notes no longer allocate on the audio path).
+
+Night 11's events drawer (`frontend/ui/EventsDrawer.tsx`) is the first fixed sheet over
+the page, but it doesn't get an ADR. It's UI only: it reads the take and changes no data
+shape, storage or boundary. Its one stored value is an open/closed app preference
+(`bckgrnd-msc:events-open`). If a second overlay copies it, that's the time to write one.
