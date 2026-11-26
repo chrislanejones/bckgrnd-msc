@@ -3,9 +3,13 @@
  *
  * tools/check-recording.mjs holds the pure module to its rules; this plays a short
  * take in the browser through `window.__BCKGRND_RECORDING__`: start, a scene on the next
- * bar, a fill, a queued scene canceled, a 2-bar Rise, stop. Then the take must hold
- * exactly the applied three, in order, on bar lines, and the canceled one only in the
- * log. A transport Stop ends a take by itself.
+ * bar, a fill, a queued scene canceled, a 2-bar Rise, a held Beat Repeat, stop. Then the
+ * take must hold exactly the applied four, in order, the three requests on bar lines,
+ * the canceled one only in the log, and its export must validate against
+ * contracts/performance.json (v2). A transport Stop ends a take by itself.
+ *
+ * The repeat and the onsets need the engine's Night 11 events (61/62 and `s` on every
+ * event); on an engine without them those checks fail.
  *
  * Run by tools/verify-ui.mjs (recordingChecks), or on its own:
  *   node tools/verify-ui-recording.mjs [baseUrl]
@@ -13,6 +17,7 @@
 
 import { existsSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
+import { performanceValidator } from './performance-schema.mjs';
 
 const RT = { timeout: 30000 };
 const SPARSE = 1;
@@ -77,11 +82,25 @@ export async function recordingChecks({ open, check }) {
       await page.getByRole('radio', { name: 'Rise over 2 bars' }).click();
       await k.pad(DROP).click();
       await k.waitClosed('rise');
+
+      // A Beat Repeat, held past a grid line, then let go: kept from engage to end.
+      at = 'Beat Repeat';
+      const repeatPad = page.getByRole('button', { name: 'Beat repeat, while held', exact: true });
+      await repeatPad.scrollIntoViewIfNeeded();
+      const rb = await repeatPad.boundingBox();
+      await page.mouse.move(rb.x + rb.width / 2, rb.y + rb.height / 2);
+      await page.mouse.down();
+      await page.waitForFunction(() => (window.__BCKGRND_RECORDING__.recording()?.events ?? []).some((e) => e.kind === 'repeat'), null, RT);
+      await page.waitForTimeout(600);
+      await page.mouse.up();
+      await page.waitForFunction(() => (window.__BCKGRND_RECORDING__.recording()?.events ?? []).some((e) => e.kind === 'repeat' && e.endedBy !== 'open'), null, RT);
       await k.rec('stop');
 
       const doc = await k.rec('recording');
       const log = await k.rec('log');
-      const events = doc?.events ?? [];
+      const all = doc?.events ?? [];
+      const repeat = all.find((e) => e.kind === 'repeat');
+      const events = all.filter((e) => e.kind !== 'repeat');
       const said = events.map((e) => `${e.kind}:${e.slot ?? e.style}@${e.step}`).join(' ');
       check('recording: Stop stops, by the user', (await k.rec('state')) === 'stopped' && doc?.stoppedBy === 'user');
       check('recording: the take holds the scene, the fill and the Rise, in that order',
@@ -103,7 +122,32 @@ export async function recordingChecks({ open, check }) {
         canceled !== undefined && log.some((l) => l.requestId === canceled.requestId && l.status === 'queued') && log.filter((l) => l.requestId === canceled.requestId).every((l) => !l.recorded),
         log.map((l) => `${l.requestId}:${l.status}`).join(' '));
       check('recording: the header names the track, 16 steps a bar',
-        doc?.format === 'bckgrnd-msc/performance' && doc.version === 1 && typeof doc.track === 'string' && doc.stepsPerBar === 16 && Number.isInteger(doc.startedAtStep) && doc.startedAtStep >= -1 && doc.startedAtStep <= 255, JSON.stringify({ track: doc?.track, startedAtStep: doc?.startedAtStep }));
+        doc?.format === 'bckgrnd-msc/performance' && doc.version === 2 && typeof doc.track === 'string' && doc.stepsPerBar === 16 && Number.isInteger(doc.startedAtStep) && doc.startedAtStep >= -1 && doc.startedAtStep <= 255, JSON.stringify({ track: doc?.track, startedAtStep: doc?.startedAtStep }));
+
+      // v2: the repeat, onsets, and the export.
+      check('recording: the repeat is in the take, after the Rise',
+        repeat !== undefined && all.indexOf(repeat) === 3 && all.length === 4, all.map((e) => e.kind).join(' '));
+      check('recording: the repeat engaged on an eighth grid line, and ended after it',
+        repeat?.division === 8 && repeat.step % 2 === 0 && repeat.endedBy === 'engine' && repeat.endOnset > repeat.onset, JSON.stringify(repeat));
+      check('recording: every event has an onset, the first 0, never going back, seq order',
+        all.length > 0 && all[0].onset === 0 && all.every((e, i) => Number.isInteger(e.onset) && Number.isInteger(e.pass) && (i === 0 || e.onset >= all[i - 1].onset)),
+        all.map((e) => `${e.kind}@${e.step}/${e.onset}`).join(' '));
+      check('recording: onsets agree with steps while the song runs straight',
+        events.length === 3 && [1, 2].every((i) => events[i].onset - events[i - 1].onset === ahead(events[i - 1].step, events[i].step)), said);
+      check('recording: the fill says the length it played', events[1]?.length === 'bar' || events[1]?.length === 'beat', JSON.stringify(events[1]));
+      at = 'export';
+      const exported = await k.rec('exportTake');
+      const parsed = exported ? JSON.parse(exported.json) : null;
+      check('recording: export names the file bckgrnd-take-<track>-<YYYY-MM-DD-HHmm>.json',
+        /^bckgrnd-take-[a-z0-9-]+-\d{4}-\d{2}-\d{2}-\d{4}\.json$/.test(exported?.filename ?? '') && exported.filename.includes(doc.track.toLowerCase()), exported?.filename);
+      const errs = parsed ? performanceValidator()(parsed) : ['no export'];
+      check('recording: the export validates against contracts/performance.json (v2)', errs.length === 0, errs.slice(0, 4).join('; '));
+      check('recording: the export is the take', JSON.stringify(parsed) === JSON.stringify(doc));
+      const download = await Promise.all([
+        page.waitForEvent('download', { timeout: 5000 }),
+        page.evaluate(() => window.__BCKGRND_RECORDING__.download()),
+      ]).then(([d]) => d.suggestedFilename()).catch((e) => `no download: ${String(e.message).split('\n')[0]}`);
+      check('recording: the download helper saves it under that name', download === exported?.filename, download);
 
       // A transport Stop ends a take by itself; Clear empties it.
       at = 'transport Stop';
