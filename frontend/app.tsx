@@ -11,7 +11,7 @@
  * file only decides where things go. React holds no audio state and no musical clock.
  */
 
-import { useCallback, useEffect, useId, useMemo, useState } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { useInstrument } from './lib/instrument';
 import { param } from './lib/contract';
 import { STEM_ORDER, soundingMap, stemState, stemStateLabel } from './lib/stems';
@@ -30,6 +30,7 @@ import { CompareBar } from './ui/CompareBar';
 import { SCENE_SLOTS } from './lib/contract';
 import { PanicButton, TransportBar } from './ui/Transport';
 import { RecordToggle } from './ui/RecordToggle';
+import { EventsDrawer, EventsToggle, useEventsOpen } from './ui/EventsDrawer';
 
 type View = 'perform' | 'mix' | 'edit';
 
@@ -71,6 +72,11 @@ export function App() {
   // On a phone the inspector is a sheet from the right, closed until asked for.
   const [knobsOpen, setKnobsOpen] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  // The take's event inspector (Night 11): folded by default, remembered per viewer.
+  const [eventsOpen, setEventsOpen] = useEventsOpen();
+  const eventsId = useId();
+  const eventsToggle = useRef<HTMLButtonElement>(null);
+  const closeEvents = useCallback(() => setEventsOpen(false), [setEventsOpen]);
   const [selected, setSelected] = useState<StemId>('kick');
   const [inspectorTab, setInspectorTab] = useState<InspectorTab>('master');
   // Compare A/B folds into the scenes header (Night 9B): closed until chosen, remembered
@@ -155,6 +161,8 @@ export function App() {
       // A modal dialog owns the keyboard: nothing behind it may play, cut or launch.
       if (document.querySelector('dialog[open]')) return;
       if (event.key === 'Escape') {
+        // Handled already: the events drawer closes itself on an Esc from inside it.
+        if (event.defaultPrevented) return;
         if (drawerOpen) {
           setDrawerOpen(false);
           return;
@@ -166,6 +174,11 @@ export function App() {
         if (phone && knobsOpen) {
           setKnobsOpen(false);
           document.querySelector<HTMLElement>('[aria-controls="inspector"]')?.focus();
+        }
+        // The events drawer last: it is non-modal, so a sheet opened over it goes first.
+        if (eventsOpen && !libraryOpen && !(phone && knobsOpen)) {
+          setEventsOpen(false);
+          if (document.activeElement === document.body) eventsToggle.current?.focus();
         }
         return;
       }
@@ -265,7 +278,17 @@ export function App() {
         liveDeck={inst.liveDeck}
         onTogglePlay={() => void inst.togglePlay()}
         onPanic={phone ? undefined : inst.panic}
-        record={<RecordToggle recording={inst.recording} />}
+        record={
+          <RecordToggle recording={inst.recording}>
+            <EventsToggle
+              open={eventsOpen}
+              onToggle={() => setEventsOpen(!eventsOpen)}
+              controls={eventsId}
+              count={inst.recording.count}
+              buttonRef={eventsToggle}
+            />
+          </RecordToggle>
+        }
         libraryToggle={
           libraryDocked
             ? undefined
@@ -658,6 +681,8 @@ export function App() {
         onStem={setSelected}
         phone={phone}
       />
+
+      <EventsDrawer id={eventsId} open={eventsOpen} source={inst.recording} onClose={closeEvents} returnFocus={eventsToggle} />
 
       {phone ? (
         <div className="phone-dock">

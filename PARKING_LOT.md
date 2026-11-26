@@ -561,3 +561,20 @@ not. Things to settle before or while building it:
 - **A repeat held when the take stops ends at an estimate.** `endOnset` counts forward
   from the last engine event to the last playing frame's step. Right unless a loop, a cue
   or a seek came after that event. The same telemetry serial would make it exact. (recording)
+- **Events drawer, at the merge with `night11/recording`:** `frontend/ui/EventsDrawer.tsx`
+  carries stand-ins for `describeEvent` / `describePosition` and optional
+  `recording()` / `exportTake()` / `downloadTake()` on `TakeSource`, because this branch
+  was cut before the recorder's API. Delete the two stand-ins, import `describeEvent`
+  from `lib/recording`, and drop the `?`s and the window fallback. Nothing else reads
+  the take. (Lacey, at merge)
+- **The phone's stopped-take Clear can now go.** The events drawer offers Clear, so the
+  Record cell's × (which squeezes the phone's track name, above) could live only in the
+  drawer on the phone. Needs `verify-ui-recording.mjs`'s "stopped shows ... a Clear
+  button" check to look in the drawer there. (Lacey, Tara)
+- **The stopped-take × at 1180-1279 px is unmeasured with the Events toggle beside it.**
+  Idle and recording fit (measured: the meter gives way, CLIP drops its word); the
+  stopped state adds 36 px more and may push the track name to its 8rem floor and past
+  it. Measure, and if it overflows, take the same fix as the phone note above. (Lacey)
+- **Events drawer is a new overlay pattern** (non-modal, fixed under the transport, Esc
+  and focus handled in the component). If it becomes the pattern for other inspectors,
+  it may want an ADR. (Dara)

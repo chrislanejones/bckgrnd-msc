@@ -7,8 +7,12 @@
  * the count in its name and tooltip ("Recording · 7 events"). Stopped: a solid dot, the
  * take's count, and Clear. The word "Rec" shows where the bar has room; at 1280 and on
  * the phone it is the dot alone, and the name stays the full one.
+ *
+ * Night 11: the Events toggle sits between the dot and Clear (`children`), opening the
+ * take's event inspector (ui/EventsDrawer.tsx).
  */
 
+import type { ReactNode } from 'react';
 import { X } from 'lucide-react';
 import type { RecordingState } from '../lib/recording';
 
@@ -22,7 +26,8 @@ export type RecordingControls = {
 
 const events = (n: number) => `${n} event${n === 1 ? '' : 's'}`;
 
-export function RecordToggle({ recording }: { recording: RecordingControls }) {
+/** `children`: the Events toggle (Night 11), between the dot and Clear. */
+export function RecordToggle({ recording, children }: { recording: RecordingControls; children?: ReactNode }) {
   const { state, count } = recording;
   const name =
     state === 'recording'
@@ -51,6 +56,7 @@ export function RecordToggle({ recording }: { recording: RecordingControls }) {
           Rec
         </span>
       </button>
+      {children}
       {state === 'stopped' ? (
         <button
           type="button"

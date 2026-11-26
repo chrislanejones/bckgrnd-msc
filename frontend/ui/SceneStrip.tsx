@@ -23,7 +23,7 @@
  * Bar 9, then Filling into Drop, then Active.
  */
 
-import { useCallback, useEffect, useId, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useRef, useState, type KeyboardEvent } from 'react';
 import { ChevronRight, MoreHorizontal, X, Zap } from 'lucide-react';
 import type { Scene, SceneSlotId } from '../lib/contract';
 import { SCENE_SLOTS } from '../lib/contract';
@@ -549,9 +549,13 @@ function FillStyleSelect({ style, next, onStyle, length, onLength, lengthUnavail
     ? `Fill style: ${FILL_MODE_LABEL[style]}, next ${FILL_STYLE_LABEL[next[style]]} (${FILL_STYLE_HINT[next[style]]})`
     : `Fill style: ${FILL_STYLE_LABEL[style]}, ${FILL_STYLE_HINT[style]}`;
   return (
-    <>
+    <div className="scene-fill-set">
       <label className="scene-fill-style" title={title}>
-        <span className="control-label">Fill style</span>
+        {/* "Fill" on screen; the menu's name stays "Fill style" (the visible word is in it). */}
+        <span className="control-label">
+          <span aria-hidden="true">Fill</span>
+          <span className="sr-only">Fill style</span>
+        </span>
         <select
           className="fill-style-select"
           value={style}
@@ -566,15 +570,18 @@ function FillStyleSelect({ style, next, onStyle, length, onLength, lengthUnavail
         </select>
       </label>
       <FillLengthPicker length={length} onLength={onLength} unavailable={lengthUnavailable ?? null} />
-    </>
+    </div>
   );
 }
 
 /**
- * Fill length (Night 10): Bar or Beat, beside Fill style. Minimal on purpose (a two-pill
- * radio group); its look and place are the layout's to settle. Beat stays pickable as
- * the preference on a track without beat fills, but is aria-disabled there with the
- * reason, and a press plays the bar.
+ * Fill length (Night 10; placed Night 11): Bar or Beat, joined to the Fill style menu's
+ * right edge as one pill, so "Fill [Classic | Bar | Beat]" reads as one setting: what
+ * the fill sounds like and how much of the bar it takes. 24px with a mouse like the
+ * menu, so the header keeps one row; 44 x 44 on touch. A radio group with one tab stop
+ * and the arrow keys, like the other pickers. Beat stays pickable as the preference on
+ * a track without beat fills, but is aria-disabled there with the reason, and a press
+ * plays the bar.
  */
 function FillLengthPicker({
   length,
@@ -586,8 +593,16 @@ function FillLengthPicker({
   unavailable: string | null;
 }) {
   const reasonId = useId();
+  const pick = (event: KeyboardEvent<HTMLButtonElement>) => {
+    const step = event.key === 'ArrowRight' || event.key === 'ArrowDown' ? 1 : event.key === 'ArrowLeft' || event.key === 'ArrowUp' ? -1 : 0;
+    if (!step) return;
+    event.preventDefault();
+    const i = (FILL_LENGTHS.indexOf(length) + step + FILL_LENGTHS.length) % FILL_LENGTHS.length;
+    onLength(FILL_LENGTHS[i]!);
+    (event.currentTarget.parentElement?.querySelectorAll<HTMLButtonElement>('[role="radio"]')[i])?.focus();
+  };
   return (
-    <div className="segmented scene-fill-length" role="radiogroup" aria-label="Fill length">
+    <div className="scene-fill-length" role="radiogroup" aria-label="Fill length">
       {FILL_LENGTHS.map((l) => {
         const off = l === 'beat' && unavailable !== null;
         return (
@@ -597,6 +612,8 @@ function FillLengthPicker({
             role="radio"
             className="segment tap"
             aria-checked={length === l}
+            tabIndex={length === l ? 0 : -1}
+            onKeyDown={pick}
             aria-disabled={off || undefined}
             aria-describedby={off ? reasonId : undefined}
             title={off ? `Beat: ${unavailable}` : l === 'beat' ? 'Fill only the last beat of the bar' : 'Fill the whole bar'}
