@@ -660,3 +660,26 @@ not. Things to settle before or while building it:
   no host race found in the code. Both checks now print the transport, pads and the worklet
   port's traffic when they fail, so the next failure names the cause. (Tara)
 
+
+## Night 12 — Panic and stale telemetry (11-28-2026)
+
+- **Fixed: a telemetry frame from before Panic could say "playing" after it.** The worklet
+  posts telemetry from its render loop; one posted just before it handled Panic is read
+  on the page just after the host applied Panic, and set the transport back to playing.
+  The next frame corrected it about 33 ms later, unless the audio thread stalled. Forced
+  in a test (hold the last frame before Panic, drop every later one, deliver it after
+  Panic), `data-playing` stayed `yes`. Transport commands (Play, Stop, Panic, Cue, a
+  mix) now carry a serial that the worklet echoes in telemetry `[15]`, and the host drops
+  a frame older than its newest transport command. verify-ui "stale telemetry" pins it.
+- **Is that what failed in the suite?** It fits: both checks wait for `data-playing` to
+  read `no`, and only the full suite is loaded enough to stall. But it needs the render
+  thread to stall for the check's whole wait (5 s, 8 s) with the context still
+  `running`, and no run has shown that stall. (A suspended context can't cause it: the
+  host reads playing as `t.playing && engine.running`.) The port trail in the mixing
+  check now shows, on the next failure, whether frames stopped arriving after Panic. If
+  they did not, look elsewhere. (Tara)
+- **A stalled audio thread says nothing to the user.** `onstatechange` reports a context
+  that leaves `running`, but a render thread that stops calling `process` while the
+  context still reads `running` shows nothing: the meters freeze and the playhead stops
+  with no message. A host watchdog (no telemetry for, say, 1 s while playing) could say
+  "Audio has stalled". Not built. (Chris, Felix)

@@ -164,12 +164,15 @@ type DeckId = 'a' | 'b';
  * Layout: `[0..7]` stem levels, `[8]` visual step, `[9]` playing, `[10]` live deck
  * (0 = A, 1 = B), `[11]` mixing, `[12]` / `[13]` master peak left / right since the
  * last frame (linear, of what actually leaves the worklet), `[14]` 1 if any sample
- * since the last frame went past full scale. One array instead of an object because
- * this crosses the thread ~30 times a second and the meters are read every frame.
+ * since the last frame went past full scale, `[15]` the `serial` of the last
+ * transport command handled (Play, Stop, Panic, Cue, a mix; 0 before any), so the
+ * host can drop a frame measured before its newest one. One array instead of an
+ * object because this crosses the thread ~30 times a second and the meters are read
+ * every frame.
  *
  * Telemetry is transient: none of it is ever saved (contracts/README.md).
  */
-const TELEMETRY_LEN = 15;
+const TELEMETRY_LEN = 16;
 
 /** Stem indices, in the order of `Stem::ALL` in the engine. */
 const STEM_KICK = 0;
@@ -259,6 +262,8 @@ class EngineProcessor extends AudioWorkletProcessor {
   private mixRight = new Float32Array(128);
   private levels = new Float32Array(8);
   private telemetry = new Float32Array(TELEMETRY_LEN);
+  /** The last transport command's `serial` (telemetry `[15]`). */
+  private transportSerial = 0;
 
   /** Highest absolute output sample per channel since the last telemetry frame. */
   private peakL = 0;
@@ -357,6 +362,11 @@ class EngineProcessor extends AudioWorkletProcessor {
   }
 
   private receive(message: Inbound): void {
+    // A transport command's number, acknowledged in telemetry `[15]` from the next
+    // frame on. Taken before the command runs, so a command that throws still clears
+    // the frames before it.
+    const serial = (message as { serial?: unknown }).serial;
+    if (typeof serial === 'number') this.transportSerial = serial;
     switch (message.type) {
       case 'init':
         this.boot(message.wasm, message.sampleRate);
@@ -1282,6 +1292,7 @@ class EngineProcessor extends AudioWorkletProcessor {
       this.telemetry[12] = this.peakL;
       this.telemetry[13] = this.peakR;
       this.telemetry[14] = this.peakL > 1 || this.peakR > 1 ? 1 : 0;
+      this.telemetry[15] = this.transportSerial;
       this.peakL = 0;
       this.peakR = 0;
       this.port.postMessage({ type: 'telemetry', frame: this.telemetry.slice() });
