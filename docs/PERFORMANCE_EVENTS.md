@@ -100,7 +100,10 @@ and `snapshot.ts` are unchanged.
 | `loopBars` | The loop in bars, 0 for none. The same value as `mix.params['performance.loopBars']`, at the top for a reader that wants only the loop. |
 
 The schema names every parameter and stem id from `contracts/parameters.json`, and
-`tools/check-recording.mjs` fails if the two lists drift apart.
+`tools/check-recording.mjs` fails if the two lists drift apart. The recorder always
+writes every one. A reader **requires none of them** and accepts ids it doesn't know,
+so a take recorded before or after a parameter or stem is added or removed still opens.
+Opening is view only, so a missing value has nothing to break.
 
 Readers **reject** an unknown `format`, a newer `version`, and version 1.
 

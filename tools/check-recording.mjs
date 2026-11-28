@@ -450,7 +450,7 @@ function rig() {
     JSON.stringify(schemaParams) === JSON.stringify(registry.parameters.map((q) => q.id)), schemaParams.join(' '));
   check('initial: the schema names every stem and stem parameter',
     JSON.stringify(Object.keys(schema.$defs.initial.properties.mix.properties.stems.properties)) === JSON.stringify(registry.stems)
-      && JSON.stringify(schema.$defs.stemSettings.required) === JSON.stringify(registry.stemParameters.map((q) => q.id)));
+      && JSON.stringify(Object.keys(schema.$defs.stemSettings.properties)) === JSON.stringify(registry.stemParameters.map((q) => q.id)));
   check('initial: optional for a reader', !schema.required.includes('initial') && 'initial' in schema.properties);
 
   const { s, c, feed, at } = rig();
@@ -483,6 +483,18 @@ function rig() {
     opened.ok && opened.take.events.map((e) => `${e.kind}${e.length ? `:${e.length}` : ''}`).join(' ') === 'scene fill:bar fill:beat repeat',
     opened.ok ? opened.take.events.map((e) => e.kind).join(' ') : '');
   check('open: a v2 file without initial still opens', r.openTakeText(JSON.stringify((({ initial: _i, ...rest }) => rest)(doc)), valid).ok === true);
+  {
+    // A parameter or stem added or removed later must not lock older takes out.
+    const drift = JSON.parse(out.json);
+    delete drift.initial.mix.params['fx.width'];
+    drift.initial.mix.params['fx.future'] = 0.5;
+    delete drift.initial.mix.stems.arp;
+    drift.initial.mix.stems.choir = { volume: 0.5, send: 0, muted: false, solo: false, pan: 0 };
+    check('open: a take with a parameter or stem added or removed since still opens', r.openTakeText(JSON.stringify(drift), valid).ok === true, r.openTakeText(JSON.stringify(drift), valid).error);
+    check('initial: the recorder writes every parameter and stem',
+      JSON.stringify(Object.keys(doc.initial.mix.params)) === JSON.stringify(registry.parameters.map((q) => q.id))
+        && JSON.stringify(Object.keys(doc.initial.mix.stems)) === JSON.stringify(registry.stems));
+  }
 
   const bad = (text) => r.openTakeText(text, valid);
   const v1 = bad(JSON.stringify({ ...doc, version: 1 }));

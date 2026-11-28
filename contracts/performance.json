@@ -188,8 +188,7 @@
     },
     "stemSettings": {
       "type": "object",
-      "required": ["volume", "send", "muted", "solo"],
-      "additionalProperties": false,
+      "$comment": "Always written in full; a reader requires none and accepts stem parameters it does not know.",
       "properties": {
         "volume": { "type": "number", "minimum": 0, "maximum": 1 },
         "send": { "type": "number", "minimum": 0, "maximum": 1 },
@@ -221,10 +220,8 @@
           "additionalProperties": false,
           "properties": {
             "params": {
-              "$comment": "Every contracts/parameters.json parameter, by id. A toggle is 0 or 1.",
+              "$comment": "Every contracts/parameters.json parameter, by id. A toggle is 0 or 1. Always written in full; a reader requires none and accepts ids it does not know, so a take still opens after a parameter is added or removed (opening is view only).",
               "type": "object",
-              "required": ["transport.bpm", "transport.swing", "master.level", "fx.low", "fx.mid", "fx.high", "fx.filter", "fx.stereo", "fx.filterQ", "fx.echoFeedback", "fx.echoReturn", "fx.reverbMix", "fx.reverbDecay", "fx.width", "fx.echoTime", "performance.loopBars", "performance.echoThrow"],
-              "additionalProperties": false,
               "properties": {
                 "transport.bpm": { "type": "number", "minimum": 40, "maximum": 200 },
                 "transport.swing": { "type": "number", "minimum": 0, "maximum": 1 },
@@ -246,10 +243,8 @@
               }
             },
             "stems": {
-              "$comment": "Every stem's contracts/parameters.json stem parameters.",
+              "$comment": "Every stem's contracts/parameters.json stem parameters. Always written in full; a reader requires none and accepts stems it does not know, so a take still opens after a stem is added or removed (opening is view only).",
               "type": "object",
-              "required": ["kick", "clap", "hats", "bass", "stab", "lead", "pad", "arp"],
-              "additionalProperties": false,
               "properties": {
                 "kick": { "$ref": "#/$defs/stemSettings" },
                 "clap": { "$ref": "#/$defs/stemSettings" },
