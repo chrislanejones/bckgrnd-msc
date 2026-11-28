@@ -1,0 +1,196 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://bckgrnd-msc/contracts/arrangement.json",
+  "$comment": "A working arrangement, version 1 (docs/ARRANGEMENT.md). An editable document made from a performance take (or started empty), never the take itself and never part of a project. Positions are steps from the arrangement's start (bar 1 beat 1 is 0) and never wrap. Linked pairs are one event: a Fill into is a fill with `into`, a Rise + Fill is a rise with `withFill`, a Beat Repeat is one span. Written and read by frontend/lib/arrangement.ts; kept to the JSON Schema subset frontend/lib/take-schema.ts validates. `initial`, `stemSettings` and `fillLength` are copied from contracts/performance.json (tools/check-arrangement.mjs keeps them equal).",
+  "title": "bckgrnd-msc arrangement",
+  "type": "object",
+  "required": ["format", "version", "track", "bpm", "stepsPerBar", "lengthBars", "source", "createdAt", "events"],
+  "additionalProperties": false,
+  "properties": {
+    "format": { "const": "bckgrnd-msc/arrangement" },
+    "version": { "const": 1 },
+    "track": { "type": "string" },
+    "bpm": { "type": "number", "minimum": 40, "maximum": 200 },
+    "stepsPerBar": { "const": 16 },
+    "lengthBars": { "type": "integer", "minimum": 1, "maximum": 1024, "$comment": "The arrangement's length; every event and landing sits before lengthBars * 16." },
+    "source": {
+      "oneOf": [
+        { "type": "null" },
+        { "$ref": "#/$defs/source" }
+      ],
+      "$comment": "The take it was made from, or null for one started empty."
+    },
+    "initial": { "$ref": "#/$defs/initial" },
+    "createdAt": { "type": "string", "$comment": "ISO 8601 UTC. A label; never a position." },
+    "events": {
+      "type": "array",
+      "maxItems": 10000,
+      "items": { "$ref": "#/$defs/event" }
+    }
+  },
+  "$defs": {
+    "source": {
+      "type": "object",
+      "required": ["track", "recordedAt", "events"],
+      "additionalProperties": false,
+      "properties": {
+        "track": { "type": "string" },
+        "recordedAt": { "type": "string" },
+        "events": { "type": "integer", "minimum": 0, "$comment": "The take's event count." }
+      }
+    },
+    "id": { "type": "string", "$comment": "Stable within the arrangement; unique." },
+    "at": { "type": "integer", "minimum": 0, "$comment": "Steps from the arrangement's start: bar 1 beat 1 is 0. Never wraps." },
+    "slot": { "enum": ["full", "sparse", "build", "drop"] },
+    "event": {
+      "oneOf": [
+        { "$ref": "#/$defs/scene" },
+        { "$ref": "#/$defs/fill" },
+        { "$ref": "#/$defs/rise" },
+        { "$ref": "#/$defs/repeat" }
+      ]
+    },
+    "scene": {
+      "$comment": "A scene change at `at` (any sixteenth).",
+      "type": "object",
+      "required": ["id", "kind", "at", "slot", "crash"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "kind": { "const": "scene" },
+        "at": { "$ref": "#/$defs/at" },
+        "slot": { "$ref": "#/$defs/slot" },
+        "crash": { "type": "boolean" }
+      }
+    },
+    "fill": {
+      "$comment": "A fill starting at `at`: a bar line for a bar fill, beat 4 (bar line + 12) for a beat fill.",
+      "type": "object",
+      "required": ["id", "kind", "at", "style", "length"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "kind": { "const": "fill" },
+        "at": { "$ref": "#/$defs/at" },
+        "style": { "type": ["string", "null"] },
+        "length": { "$ref": "#/$defs/fillLength" },
+        "into": { "$ref": "#/$defs/slot", "$comment": "Fill into: the scene lands on the next bar line after the fill starts." },
+        "crash": { "type": "boolean", "$comment": "The landing's crash accent; only with into." }
+      }
+    },
+    "rise": {
+      "$comment": "A Rise starting on a bar line and landing its scene at at + bars * 16.",
+      "type": "object",
+      "required": ["id", "kind", "at", "slot", "bars", "withFill", "crash"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "kind": { "const": "rise" },
+        "at": { "$ref": "#/$defs/at" },
+        "slot": { "$ref": "#/$defs/slot" },
+        "bars": { "enum": [2, 4, 8] },
+        "withFill": { "type": "boolean", "$comment": "Its fill plays the Rise's last bar; part of the Rise, not a separate event." },
+        "crash": { "type": "boolean" }
+      }
+    },
+    "repeat": {
+      "$comment": "A Beat Repeat held from `at` (on its division's grid) for `length` steps.",
+      "type": "object",
+      "required": ["id", "kind", "at", "division", "length"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "kind": { "const": "repeat" },
+        "at": { "$ref": "#/$defs/at" },
+        "division": { "enum": [4, 8, 16] },
+        "length": { "type": "integer", "minimum": 1, "$comment": "Steps held." }
+      }
+    },
+    "stemSettings": {
+      "type": "object",
+      "$comment": "Always written in full; a reader requires none and accepts stem parameters it does not know.",
+      "properties": {
+        "volume": { "type": "number", "minimum": 0, "maximum": 1 },
+        "send": { "type": "number", "minimum": 0, "maximum": 1 },
+        "muted": { "type": "boolean" },
+        "solo": { "type": "boolean" }
+      }
+    },
+    "initial": {
+      "$comment": "What the performer started from when Record was pressed. Optional for a reader (a v2 take may lack it); a v2 writer always writes it. Never a project: nothing here is saved into one.",
+      "type": "object",
+      "required": ["track", "bpm", "swing", "scene", "mix", "fill", "repeatDivision", "loopBars"],
+      "additionalProperties": false,
+      "properties": {
+        "track": { "type": "string" },
+        "bpm": { "type": "number", "minimum": 40, "maximum": 200 },
+        "swing": { "type": "number", "minimum": 0, "maximum": 1 },
+        "scene": {
+          "type": "object",
+          "required": ["slot", "modified"],
+          "additionalProperties": false,
+          "properties": {
+            "slot": { "enum": [null, "full", "sparse", "build", "drop"], "$comment": "The active scene slot, or null when none is active." },
+            "modified": { "type": "boolean", "$comment": "The mix had moved away from the active scene." }
+          }
+        },
+        "mix": {
+          "type": "object",
+          "required": ["params", "stems"],
+          "additionalProperties": false,
+          "properties": {
+            "params": {
+              "$comment": "Every contracts/parameters.json parameter, by id. A toggle is 0 or 1. Always written in full; a reader requires none and accepts ids it does not know, so a take still opens after a parameter is added or removed (opening is view only).",
+              "type": "object",
+              "properties": {
+                "transport.bpm": { "type": "number", "minimum": 40, "maximum": 200 },
+                "transport.swing": { "type": "number", "minimum": 0, "maximum": 1 },
+                "master.level": { "type": "number", "minimum": 0, "maximum": 1 },
+                "fx.low": { "type": "number", "minimum": 0, "maximum": 1.4 },
+                "fx.mid": { "type": "number", "minimum": 0, "maximum": 1.4 },
+                "fx.high": { "type": "number", "minimum": 0, "maximum": 1.4 },
+                "fx.filter": { "type": "number", "minimum": 0, "maximum": 1 },
+                "fx.stereo": { "type": "number", "minimum": 0, "maximum": 1 },
+                "fx.filterQ": { "type": "number", "minimum": 0.5, "maximum": 6 },
+                "fx.echoFeedback": { "type": "number", "minimum": 0, "maximum": 0.9 },
+                "fx.echoReturn": { "type": "number", "minimum": 0, "maximum": 1 },
+                "fx.reverbMix": { "type": "number", "minimum": 0, "maximum": 0.5 },
+                "fx.reverbDecay": { "type": "number", "minimum": 0.2, "maximum": 2.5 },
+                "fx.width": { "type": "number", "minimum": 0, "maximum": 1.5 },
+                "fx.echoTime": { "type": "number" },
+                "performance.loopBars": { "type": "number" },
+                "performance.echoThrow": { "enum": [0, 1] }
+              }
+            },
+            "stems": {
+              "$comment": "Every stem's contracts/parameters.json stem parameters. Always written in full; a reader requires none and accepts stems it does not know, so a take still opens after a stem is added or removed (opening is view only).",
+              "type": "object",
+              "properties": {
+                "kick": { "$ref": "#/$defs/stemSettings" },
+                "clap": { "$ref": "#/$defs/stemSettings" },
+                "hats": { "$ref": "#/$defs/stemSettings" },
+                "bass": { "$ref": "#/$defs/stemSettings" },
+                "stab": { "$ref": "#/$defs/stemSettings" },
+                "lead": { "$ref": "#/$defs/stemSettings" },
+                "pad": { "$ref": "#/$defs/stemSettings" },
+                "arp": { "$ref": "#/$defs/stemSettings" }
+              }
+            }
+          }
+        },
+        "fill": {
+          "type": "object",
+          "required": ["style", "length"],
+          "additionalProperties": false,
+          "properties": {
+            "style": { "type": "string", "$comment": "The Fill style menu's choice: a style, or random or rotate." },
+            "length": { "$ref": "#/$defs/fillLength", "$comment": "What a press would play: the effective length." }
+          }
+        },
+        "repeatDivision": { "enum": [4, 8, 16] },
+        "loopBars": { "type": "integer", "minimum": 0, "$comment": "The loop in bars, 0 for none; the same as mix.params['performance.loopBars']." }
+      }
+    },
+    "fillLength": { "enum": ["bar", "beat"], "$comment": "The effective length the fill played: the bar, or only its last beat." }
+  }
+}

@@ -116,6 +116,20 @@ import {
   type TakeExport,
 } from './recording';
 import { validateTake } from './take-schema';
+import {
+  ArrangementEditor,
+  DEFAULT_SNAP,
+  SNAPS,
+  SNAP_PREF,
+  emptyArrangement,
+  exportArrangement as arrangementFile,
+  fromTake as arrangeTake,
+  openArrangementText,
+  type InsertProps,
+  type Result as ArrangementResult,
+  type Snap,
+  type UpdateProps,
+} from './arrangement';
 
 /** The scene slot Fill → Drop leads into: the fourth, whatever it is named now. */
 const FILL_INTO_SLOT: SceneSlotId = 'drop';
@@ -1977,7 +1991,83 @@ export function useInstrument() {
   const openedRef = useRef(openedView.opened);
   openedRef.current = openedView.opened;
 
+  // ---- The working arrangement (docs/ARRANGEMENT.md) ----------------------------------
+  //
+  // An editable document made from a take (the opened one, else the live one) or started
+  // empty. The take is never touched; nothing here reaches the engine. No replay.
+  const fillDefaults = useRef({ fillStyle: fillPick.style as string | null, fillLength: playLength });
+  fillDefaults.current = { fillStyle: fillPick.style, fillLength: playLength };
+  const arrangerRef = useRef<ArrangementEditor | null>(null);
+  arrangerRef.current ??= new ArrangementEditor({ snap: readChoice(SNAP_PREF, SNAPS, DEFAULT_SNAP), defaults: () => fillDefaults.current });
+  const arranger = arrangerRef.current;
+  const arrangementOf = (a: ArrangementEditor) => ({
+    working: a.working,
+    dirty: a.dirty,
+    conflicts: a.conflicts,
+    notes: a.notes,
+    canUndo: a.canUndo,
+    canRedo: a.canRedo,
+    snap: a.snap,
+    selected: a.selected,
+  });
+  const [arrangementView, setArrangementView] = useState(() => arrangementOf(arranger));
+  useEffect(() => arranger.subscribe(() => setArrangementView(arrangementOf(arranger))), [arranger]);
+
+  const arrangementActions = useStable({
+    /** Arrange the opened take, else the live one. The take itself is never changed. */
+    fromTake: (): ArrangementResult => {
+      const take = openedView.opened ?? recorder.recording();
+      if (!take) return { ok: false, reason: 'No take to arrange: record one, or open a take file.' };
+      if (take.events.some((e) => typeof (e as { onset?: unknown }).onset !== 'number')) {
+        return { ok: false, reason: 'This take has events with no onset, so they can\'t be placed.' };
+      }
+      const { arrangement, notes } = arrangeTake(take);
+      arranger.load(arrangement, notes);
+      return { ok: true };
+    },
+    /** An empty arrangement for the current track: 16 bars, starting from the mix as it is. */
+    startEmpty: (): ArrangementResult => {
+      if (!track) return { ok: false, reason: 'Load a track first.' };
+      arranger.load(emptyArrangement(track.id, bpm, { initial: initialState() }));
+      return { ok: true };
+    },
+    setSnap: (snap: Snap) => {
+      arranger.setSnap(snap);
+      writeChoice(SNAP_PREF, arranger.snap);
+    },
+    select: (id: string | null) => arranger.select(id),
+    move: (id: string, at: number) => arranger.move(id, at),
+    nudge: (id: string, dir: -1 | 1, by?: Snap) => arranger.nudge(id, dir, by),
+    remove: (id: string) => arranger.remove(id),
+    duplicate: (id: string) => arranger.duplicate(id),
+    insert: <K extends 'scene' | 'fill'>(kind: K, at: number, props?: InsertProps[K]) => arranger.insert(kind, at, props),
+    update: (id: string, props: UpdateProps) => arranger.update(id, props),
+    undo: () => arranger.undo(),
+    redo: () => arranger.redo(),
+    /** The arrangement as its own file, or null with none open. */
+    exportArrangement: () => (arranger.working ? arrangementFile(arranger.working) : null),
+    /** Download it (`bckgrnd-arrangement-<track>-<YYYY-MM-DD-HHmm>.json`); no longer dirty. */
+    save: (): boolean => {
+      const doc = arranger.working;
+      if (!doc) return false;
+      saveTakeFile(arrangementFile(doc));
+      arranger.markSaved();
+      return true;
+    },
+    /** Open an arrangement file, or a take v2 file (converted). A refusal leaves what was open. */
+    open: (text: string, filename?: string): ArrangementResult => {
+      const opened = openArrangementText(text);
+      if (!opened.ok) return { ok: false, reason: filename ? `Couldn't open ${filename}: ${opened.reason}` : opened.reason };
+      arranger.load(opened.arrangement, opened.notes);
+      return { ok: true };
+    },
+    close: () => arranger.close(),
+  });
+
   // The developer log: `__BCKGRND_RECORDING__.table()` in the console, and the checks.
+  useEffect(() => {
+    window.__BCKGRND_ARRANGEMENT__ = () => arrangerRef.current;
+  }, []);
   useEffect(() => {
     window.__BCKGRND_RECORDING__ = {
       state: () => recorder.state,
@@ -2142,6 +2232,8 @@ export function useInstrument() {
       !sameMix({ params: project.params, stems: project.stems }, compare[compare.listening]!),
     /** The performance recording: what Lacey's Record indicator binds to. */
     recording: { ...recordingView, ...openedView, ...recordingActions },
+    /** The working arrangement and its edits (docs/ARRANGEMENT.md): what the arrangement editor binds to. */
+    arrangement: { ...arrangementView, ...arrangementActions },
     // intents, each with one identity for the life of the app
     ...actions,
   };
@@ -2151,6 +2243,8 @@ export type Instrument = ReturnType<typeof useInstrument>;
 
 declare global {
   interface Window {
+    /** The arrangement editor, for the checks and the console (docs/ARRANGEMENT.md). */
+    __BCKGRND_ARRANGEMENT__?: () => ArrangementEditor | null;
     /** The performance recording, for the checks and the console (docs/PERFORMANCE_EVENTS.md). */
     __BCKGRND_RECORDING__?: {
       state: () => RecordingState;
