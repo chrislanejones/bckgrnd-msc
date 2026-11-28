@@ -268,9 +268,12 @@ export async function arrangementChecks({ open, check }) {
       const head = (await page.locator('.arrangement-head').textContent()) ?? '';
       check('editor: Arrange this take makes a working arrangement, headed "from" its take',
         /from /.test(head) && (await arr.getByRole('radio', { name: 'Edit', exact: true }).getAttribute('aria-checked')) === 'true', head);
+      // The conversion's notes (what it chose: "a cancelled Rise was dropped"), quietly, when it has any.
       const status0 = (await page.locator('.arrangement-status').textContent()) ?? '';
-      check('editor: the conversion notes show once, quietly, on the status line',
-        status0.length > 0 && (await page.locator('.arrangement-status').getAttribute('data-tone')) === 'note', status0);
+      const notes = await page.evaluate(() => window.__BCKGRND_ARRANGEMENT__?.()?.notes ?? []);
+      check('editor: the conversion notes show once, quietly, on the status line (none: nothing shown)',
+        notes.length === 0 ? status0 === '' : status0 === notes.join(' · ') && (await page.locator('.arrangement-status').getAttribute('data-tone')) === 'note',
+        `notes ${JSON.stringify(notes)}, status "${status0}"`);
       const opened = await measure(page);
       check('editor: editing, the page is the same height and the toolbar 70px',
         opened.pageH === closed.pageH && opened.toolbar === closed.toolbar && opened.toolbar <= MOUSE_TOOLBAR_MAX && opened.pageW <= 1440,
@@ -320,17 +323,20 @@ export async function arrangementChecks({ open, check }) {
       check('editor: focus stays on the nudged event', (await page.evaluate(() => document.activeElement?.dataset.kind)) === 'scene');
 
       at = 'refused move';
-      const f0 = await stepOf('fill');
-      const fillMarker = page.locator('.arrangement-marker[data-kind="fill"]').first();
-      const fb = await fillMarker.boundingBox();
-      await page.mouse.move(fb.x + 10, fb.y + fb.height / 2);
+      // The model snaps every kind to its own grid, so a refusal is a conflict: a scene
+      // change dropped inside the Rise (bar 4 to its landing at bar 6) is one.
+      const riseStart = await stepOf('rise');
+      const sb = await sceneMarker.boundingBox();
+      const target = riseStart + 16;
+      await page.mouse.move(sb.x + 6, sb.y + sb.height / 2);
       await page.mouse.down();
-      await page.mouse.move(fb.x + 10 + 24, fb.y + fb.height / 2, { steps: 5 });
+      await page.mouse.move(sb.x + 6 + (target - s3) * 6, sb.y + sb.height / 2, { steps: 8 });
+      const dropGhost = await page.evaluate(() => Boolean(document.querySelector('.arrangement-ghost')));
       await page.mouse.up();
       await page.waitForSelector('.arrangement-ghost', { state: 'detached', timeout: 2000 });
       const refused = { tone: await page.locator('.arrangement-status').getAttribute('data-tone'), text: await page.locator('.arrangement-status').textContent() };
-      check('editor: a refused drop springs back, and the status line says why',
-        (await stepOf('fill')) === f0 && refused.tone === 'refused' && (refused.text ?? '').length > 3, JSON.stringify(refused));
+      check('editor: a refused drop (a scene inside the Rise) springs back, and the status line says why',
+        dropGhost && (await stepOf('scene')) === s3 && refused.tone === 'refused' && /Rise/.test(refused.text ?? ''), JSON.stringify(refused));
 
       at = 'delete, undo, redo';
       const n0 = await count();
@@ -492,18 +498,21 @@ export async function arrangementChecks({ open, check }) {
       check(`${w}px editor: the sheet is inside the window`,
         editing.drawer && editing.drawer.x >= -0.5 && editing.drawer.r <= w + 0.5 && editing.drawer.b <= h + 0.5 && editing.drawer.y >= 0, JSON.stringify(editing.drawer));
       if (touch) {
+        check(`${w}px editor: the tools are one 44px row that scrolls sideways, the status line under it`, tools.h <= 80, `${tools.h}px`);
         const small = await page.evaluate(() => [...document.querySelectorAll('.arrangement button, .arrangement select')]
           .filter((b) => b.getClientRects().length && (b.getBoundingClientRect().width < 44 || b.getBoundingClientRect().height < 44))
           .map((b) => `${b.getAttribute('aria-label') ?? b.textContent.trim()} ${Math.round(b.getBoundingClientRect().width)}x${Math.round(b.getBoundingClientRect().height)}`));
         check(`${w}px editor: every button and menu in it is 44 x 44 or more, editing`, small.length === 0, small.join(', '));
         const left = () => page.evaluate(() => document.querySelector('.arrangement-marker[aria-current="true"]')?.parentElement.style.left);
+        // A one-scene take makes a 1-bar arrangement: nudge by a sixteenth, inside it.
+        await arr.getByRole('radio', { name: 'Snap to the sixteenth', exact: true }).click();
         const l0 = await left();
         await arr.getByRole('button', { name: 'Nudge later', exact: true }).click();
         const l1 = await left();
         check(`${w}px editor: the inspector's ▶ nudges the selection (dragging is hard on a phone)`, l0 !== l1 && Boolean(l1), `${l0} -> ${l1}`);
       }
     } catch (e) {
-      check(`${w}px arrangement: the walk-through ran to the end`, false, String(e.message).split('\n')[0]);
+      check(`${w}px arrangement: the walk-through ran to the end`, false, String(e.message).split('\n').slice(0, process.env.VERIFY_VERBOSE ? 14 : 1).join(' | '));
     }
     check(`${w}px arrangement: no page errors`, errors.length === 0, errors.join('; '));
     await page.close();
