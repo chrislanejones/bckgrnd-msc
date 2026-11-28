@@ -214,6 +214,34 @@ export type PerformanceEvent = SceneRecord | FillRecord | RiseRecord | FillIntoR
 
 export type StopReason = 'user' | 'stop' | 'panic' | 'track' | 'mix' | 'cap';
 
+/** One stem's settings, by contracts/parameters.json stem-parameter id. */
+export type InitialStem = { volume: number; send: number; muted: boolean; solo: boolean };
+
+/**
+ * What the performer started from when Record was pressed: the track, tempo and swing,
+ * the active scene, the whole mix by contracts/parameters.json ids, the Fill style and
+ * length, Beat Repeat's division and the loop. Optional for a reader (a v2 take written
+ * before Night 11B lacks it); the app always writes it. Never a project.
+ */
+export type InitialState = {
+  track: string;
+  bpm: number;
+  swing: number;
+  /** The active scene slot (null: none), and whether the mix had moved away from it. */
+  scene: { slot: string | null; modified: boolean };
+  mix: {
+    /** Every contracts/parameters.json parameter, by id; a toggle is 0 or 1. */
+    params: Record<string, number>;
+    /** Every stem, by id. */
+    stems: Record<string, InitialStem>;
+  };
+  /** The Fill style menu's choice (a style, or random or rotate), and the length a press plays. */
+  fill: { style: string; length: FillLength };
+  repeatDivision: RepeatDivision;
+  /** The loop in bars, 0 for none (`performance.loopBars`). */
+  loopBars: number;
+};
+
 export type PerformanceRecording = {
   format: typeof PERFORMANCE_FORMAT;
   version: typeof PERFORMANCE_VERSION;
@@ -228,6 +256,8 @@ export type PerformanceRecording = {
   stoppedBy: StopReason | null;
   /** True if the cap stopped it. */
   truncated: boolean;
+  /** What the performer started from. Always written; a reader treats it as optional. */
+  initial?: InitialState;
   events: PerformanceEvent[];
 };
 
@@ -318,7 +348,7 @@ export class RecordingSession {
   }
 
   /** Start a new take. A take already recording, or a stopped one, is replaced. */
-  start(track: string, bpm: number, transportStep: number, recordedAt: string = new Date().toISOString()): void {
+  start(track: string, bpm: number, transportStep: number, recordedAt: string = new Date().toISOString(), initial?: InitialState): void {
     const startedAtStep = Number.isInteger(transportStep) && transportStep >= 0 ? transportStep % SONG_STEPS : -1;
     this.take = {
       format: PERFORMANCE_FORMAT,
@@ -330,6 +360,7 @@ export class RecordingSession {
       startedAtStep,
       stoppedBy: null,
       truncated: false,
+      ...(initial ? { initial: structuredClone(initial) } : {}),
       events: [],
     };
     this.clock = null;
@@ -607,10 +638,57 @@ export function parseTake(text: string): PerformanceRecording {
   if (!d || typeof d !== 'object' || d.format !== PERFORMANCE_FORMAT) throw new Error('Not a performance take.');
   if (typeof d.version !== 'number' || !Number.isInteger(d.version)) throw new Error('This take has no version.');
   if (d.version > PERFORMANCE_VERSION) throw new Error(`This take is version ${d.version}, newer than this app reads (${PERFORMANCE_VERSION}).`);
-  if (d.version < PERFORMANCE_VERSION) throw new Error(`Version ${d.version} takes are not read: they were never exported and have no onsets.`);
+  if (d.version < PERFORMANCE_VERSION) throw new Error(`This is a version ${d.version} take. This app opens version ${PERFORMANCE_VERSION} takes only: version ${d.version} has no onsets.`);
   if (!Array.isArray(d.events)) throw new Error('This take has no events.');
-  if (!hasOnsets(d as PerformanceRecording)) throw new Error('This take has an event with no onset.');
+  const missing = d.events.findIndex((e) => typeof (e as { onset?: unknown } | null)?.onset !== 'number');
+  if (missing >= 0) throw new Error(`Event ${missing + 1} has no onset, so it can't be placed. The take may be from an engine before Night 11.`);
   return d as PerformanceRecording;
+}
+
+export type OpenResult = { ok: true; take: PerformanceRecording } | { ok: false; error: string };
+
+const KNOWN_KINDS: readonly string[] = ['scene', 'fill', 'rise', 'fillInto', 'repeat'];
+
+/**
+ * Open a take file: `parseTake`, then the whole of contracts/performance.json
+ * (`validate`, frontend/lib/take-schema.ts). The error is plain English and names the
+ * first problem: not JSON, another format, a version, an event kind this app does not
+ * know, an event with no onset, or anything else the schema refuses.
+ */
+export function openTakeText(text: string, validate: (doc: unknown) => string[]): OpenResult {
+  let take: PerformanceRecording;
+  try {
+    take = parseTake(text);
+  } catch (e) {
+    return { ok: false, error: (e as Error).message };
+  }
+  for (const [i, raw] of take.events.entries()) {
+    const e = raw as { kind?: unknown; onset?: unknown } | null;
+    const n = i + 1;
+    if (!e || typeof e !== 'object') return { ok: false, error: `Event ${n} is not an event.` };
+    if (typeof e.kind === 'string' && (RESERVED_KINDS as readonly string[]).includes(e.kind)) {
+      return { ok: false, error: `Event ${n} is a ${e.kind} event, which this app does not record yet.` };
+    }
+    if (typeof e.kind !== 'string' || !KNOWN_KINDS.includes(e.kind)) {
+      return { ok: false, error: `Event ${n} is of a kind this app does not know (${JSON.stringify(e.kind ?? null)}).` };
+    }
+  }
+  const errors = validate(take);
+  if (errors.length > 0) {
+    const first = errors[0]!.replace(/^\$\.?/, '') || 'the document';
+    return { ok: false, error: `This take doesn't match the take format (${first}${errors.length > 1 ? `, and ${errors.length - 1} more` : ''}).` };
+  }
+  return { ok: true, take };
+}
+
+/** "Opened: <file>", or the track and when it was recorded: "warehouse · 11-26-2026 21:07". */
+export function openedLabel(take: PerformanceRecording, filename?: string | null): string {
+  if (filename) return filename;
+  const t = new Date(take.recordedAt);
+  const when = Number.isNaN(t.getTime())
+    ? ''
+    : ` · ${pad2(t.getMonth() + 1)}-${pad2(t.getDate())}-${t.getFullYear()} ${pad2(t.getHours())}:${pad2(t.getMinutes())}`;
+  return `${take.track}${when}`;
 }
 
 /** Save an export as a file in the browser. */

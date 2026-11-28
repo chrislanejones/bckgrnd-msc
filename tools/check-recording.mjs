@@ -37,6 +37,7 @@ function check(name, ok, detail = '') {
 }
 
 const valid = performanceValidator(schema);
+const without = (o, key) => Object.fromEntries(Object.entries(o).filter(([k]) => k !== key));
 
 // ---- Position math. --------------------------------------------------------------
 const p = r.positionOf;
@@ -256,7 +257,6 @@ function rig() {
 // The validator itself refuses what it should.
 {
   const head = { format: 'bckgrnd-msc/performance', version: 2, track: 't', bpm: 120, stepsPerBar: 16, recordedAt: AT, startedAtStep: 0, stoppedBy: null, truncated: false };
-  const without = (o, key) => Object.fromEntries(Object.entries(o).filter(([k]) => k !== key));
   const scene = { seq: 1, kind: 'scene', requestId: 1, step: 0, bar: 1, beat: 1, sixteenth: 1, onset: 0, pass: 1, slot: 'full', name: 'Full', timing: 'bar', crash: false };
   check('the schema takes a good v2 document', valid({ ...head, events: [scene] }).length === 0, valid({ ...head, events: [scene] }).join('; '));
   for (const kind of r.RESERVED_KINDS) {
@@ -354,7 +354,7 @@ function rig() {
   const refuses = (text, re) => { try { r.parseTake(text); return false; } catch (e) { return re.test(e.message); } };
   check('parseTake refuses another format', refuses(JSON.stringify({ ...back, format: 'bckgrnd-msc/project' }), /Not a performance take/));
   check('parseTake refuses a newer version', refuses(JSON.stringify({ ...back, version: 3 }), /newer/));
-  check('parseTake refuses version 1 (never exported, no onsets)', refuses(JSON.stringify({ ...back, version: 1 }), /never exported/));
+  check('parseTake refuses version 1 (no onsets)', refuses(JSON.stringify({ ...back, version: 1 }), /version 1 take/));
   check('parseTake refuses what is not JSON', refuses('{', /not JSON/));
   check('the filename keeps to safe characters', r.takeFilename('Deep House / Mix 2', AT).startsWith('bckgrnd-take-deep-house-mix-2-'), r.takeFilename('Deep House / Mix 2', AT));
 }
@@ -427,6 +427,83 @@ function rig() {
   check('no serial: such a take does not validate as v2', valid(s.recording()).length > 0);
   check('no serial: the session will not export it', s.exportTake() === null);
   check('describe: no pass without an onset', r.describeEvent(e).position === 'Bar 2.1');
+}
+
+// ---- Night 11B: the state at Record, and opening a take file. ------------------------
+{
+  const registry = JSON.parse(readFileSync(join(root, 'contracts/parameters.json'), 'utf8'));
+  const params = Object.fromEntries(registry.parameters.map((q) => [q.id, q.kind === 'toggle' ? 0 : typeof q.min === 'number' ? q.min : 1]));
+  params['transport.bpm'] = 124;
+  params['transport.swing'] = 0.12;
+  params['performance.loopBars'] = 4;
+  const stems = Object.fromEntries(registry.stems.map((id, i) => [id, { volume: 0.5 + i / 20, send: 0.1, muted: id === 'pad', solo: false }]));
+  const initial = {
+    track: 'warehouse', bpm: 124, swing: 0.12,
+    scene: { slot: 'sparse', modified: true },
+    mix: { params, stems },
+    fill: { style: 'random', length: 'beat' },
+    repeatDivision: 16,
+    loopBars: 4,
+  };
+  const schemaParams = Object.keys(schema.$defs.initial.properties.mix.properties.params.properties);
+  check('initial: the schema names every contracts/parameters.json parameter, and only those',
+    JSON.stringify(schemaParams) === JSON.stringify(registry.parameters.map((q) => q.id)), schemaParams.join(' '));
+  check('initial: the schema names every stem and stem parameter',
+    JSON.stringify(Object.keys(schema.$defs.initial.properties.mix.properties.stems.properties)) === JSON.stringify(registry.stems)
+      && JSON.stringify(schema.$defs.stemSettings.required) === JSON.stringify(registry.stemParameters.map((q) => q.id)));
+  check('initial: optional for a reader', !schema.required.includes('initial') && 'initial' in schema.properties);
+
+  const { s, c, feed, at } = rig();
+  at(0);
+  s.start('warehouse', 124, 0, AT, initial);
+  initial.bpm = 99; // the take keeps its own copy
+  c.remember({ kind: 'scene', requestId: 1, target: 'drop', timing: 'bar' });
+  feed(E.sa, 1, 16);
+  r.rememberFill(c, { requestId: 2, kind: 'plain', phrase: 0, style: 'busy' });
+  feed(E.fs, 2, 32);
+  feed(E.fe, 2, 48);
+  r.rememberFill(c, { requestId: 3, kind: 'plain', phrase: 0, style: 'simple', length: 'beat' });
+  feed(E.fs, 3, 60);
+  feed(E.fe, 3, 64);
+  feed(E.rs, 9, 64, 8);
+  feed(E.re, 9, 72, 0);
+  s.stop();
+  initial.bpm = 124;
+  const doc = s.recording();
+  check('initial: written into the take at Start, as given', JSON.stringify(doc.initial) === JSON.stringify(initial), JSON.stringify(doc.initial).slice(0, 120));
+  check('initial: the take with its initial state validates', valid(doc).length === 0, valid(doc).join('; '));
+
+  // Round trip: export, then open it again.
+  const out = s.exportTake();
+  const opened = r.openTakeText(out.json, valid);
+  check('open: an export opens', opened.ok === true, opened.error);
+  check('open: the same events and the same initial state',
+    opened.ok && JSON.stringify(opened.take.events) === JSON.stringify(doc.events) && JSON.stringify(opened.take.initial) === JSON.stringify(doc.initial));
+  check('open: the scene, the bar fill, the beat fill and the repeat',
+    opened.ok && opened.take.events.map((e) => `${e.kind}${e.length ? `:${e.length}` : ''}`).join(' ') === 'scene fill:bar fill:beat repeat',
+    opened.ok ? opened.take.events.map((e) => e.kind).join(' ') : '');
+  check('open: a v2 file without initial still opens', r.openTakeText(JSON.stringify((({ initial: _i, ...rest }) => rest)(doc)), valid).ok === true);
+
+  const bad = (text) => r.openTakeText(text, valid);
+  const v1 = bad(JSON.stringify({ ...doc, version: 1 }));
+  check('open: refuses a v1 file, in plain English', !v1.ok && /version 1 take/.test(v1.error) && /version 2/.test(v1.error), v1.error);
+  const v3 = bad(JSON.stringify({ ...doc, version: 3 }));
+  check('open: refuses a newer version', !v3.ok && /newer/.test(v3.error), v3.error);
+  const junk = bad('this is not a take');
+  check('open: refuses garbage', !junk.ok && /not JSON/.test(junk.error), junk.error);
+  const project = bad(JSON.stringify({ format: 'bckgrnd-msc/project', version: 4 }));
+  check('open: refuses a project file', !project.ok && /Not a performance take/.test(project.error), project.error);
+  const noOnset = bad(JSON.stringify({ ...doc, events: doc.events.map((e, i) => (i === 1 ? without(e, 'onset') : e)) }));
+  check('open: refuses an event with no onset, naming it', !noOnset.ok && /Event 2 has no onset/.test(noOnset.error), noOnset.error);
+  const unknown = bad(JSON.stringify({ ...doc, events: [{ ...doc.events[0], kind: 'scratch' }] }));
+  check('open: refuses an unknown kind', !unknown.ok && /kind this app does not know \("scratch"\)/.test(unknown.error), unknown.error);
+  const reserved = bad(JSON.stringify({ ...doc, events: [{ ...doc.events[0], kind: 'filter' }] }));
+  check('open: a reserved kind says it is not recorded yet', !reserved.ok && /filter event/.test(reserved.error), reserved.error);
+  const shape = bad(JSON.stringify({ ...doc, initial: { ...doc.initial, repeatDivision: 32 } }));
+  check('open: anything else the schema refuses is named', !shape.ok && /take format \(initial\.repeatDivision/.test(shape.error), shape.error);
+
+  check('openedLabel: the file name, or the track and when',
+    r.openedLabel(doc, 'my-take.json') === 'my-take.json' && /^warehouse · \d{2}-\d{2}-\d{4} \d{2}:\d{2}$/.test(r.openedLabel(doc)), r.openedLabel(doc));
 }
 
 console.log(failed ? `\n${failed} check(s) failed` : '\nall recording checks passed');

@@ -13,13 +13,18 @@
  * Crash). Export downloads the take as JSON and is unavailable, with the reason, until
  * there is a take; Clear empties a stopped take, as the Record indicator's own Clear.
  *
+ * Open (Night 11B) reads a take file (.json) through a hidden file input and lists the
+ * opened take instead, under "Opened: <file>" with a Close that goes back to the live
+ * take; Export (the live take's) steps aside meanwhile, so the header keeps its width. View only: opening never touches the live take, the transport or the engine.
+ * A file that is not a take says why on the status line.
+ *
  * Esc closes it from anywhere inside and gives focus back to the toggle; opening it
  * moves focus to its heading, so a screen reader lands in the labeled region.
  */
 
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type RefObject } from 'react';
-import { Download, ListOrdered, X } from 'lucide-react';
-import { describeEvent, type PerformanceEvent, type PerformanceRecording } from '../lib/recording';
+import { Download, FolderOpen, ListOrdered, X } from 'lucide-react';
+import { describeEvent, openedLabel, type PerformanceEvent, type PerformanceRecording } from '../lib/recording';
 import type { RecordingControls } from './RecordToggle';
 
 // ---- The adapter ------------------------------------------------------------------
@@ -36,6 +41,11 @@ export type TakeSource = RecordingControls & {
   recording?: () => PerformanceRecording | null;
   exportTake?: () => TakeExport | null;
   downloadTake?: (t?: TakeExport | null) => boolean;
+  /** A take file opened for viewing (Night 11B), and its file name. */
+  opened?: PerformanceRecording | null;
+  openedFile?: string | null;
+  openTake?: (text: string, filename?: string) => { ok: true } | { ok: false; error: string };
+  closeOpened?: () => void;
 };
 
 export type TakeExport = { filename: string; json: string };
@@ -194,7 +204,30 @@ export function EventsDrawer({
     void state;
     return open ? takeOf(read) : null;
   }, [open, read, log, count, state]);
-  const rows = useMemo(() => (take ? take.events.map(rowOf).reverse() : []), [take]);
+  const opened = source.opened ?? null;
+  const shown = opened ?? take;
+  const rows = useMemo(() => (shown ? shown.events.map(rowOf).reverse() : []), [shown]);
+
+  // Open: a hidden file input behind a button. Errors go to the status line.
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [openError, setOpenError] = useState<string | null>(null);
+  const { openTake, closeOpened } = source;
+  const onFile = async (file: File | undefined) => {
+    if (!file || !openTake) return;
+    let text: string;
+    try {
+      text = await file.text();
+    } catch {
+      setOpenError(`Couldn't read ${file.name}.`);
+      return;
+    }
+    const result = openTake(text, file.name);
+    setOpenError(result.ok ? null : `Couldn't open ${file.name}: ${result.error}`);
+  };
+  const closeTake = () => {
+    setOpenError(null);
+    closeOpened?.();
+  };
 
   // Opening moves focus to the heading, so the region is announced by its name.
   const wasOpen = useRef(open);
@@ -217,36 +250,88 @@ export function EventsDrawer({
   };
 
   const noTake = take === null;
-  const summary = noTake
-    ? 'No take'
-    : state === 'recording'
-      ? `Recording · ${events(rows.length)}`
-      : `Stopped · ${events(rows.length)}`;
+  const summary = opened
+    ? `Opened: ${openedLabel(opened, source.openedFile)} · ${events(rows.length)}`
+    : noTake
+      ? 'No take'
+      : state === 'recording'
+        ? `Recording · ${events(rows.length)}`
+        : `Stopped · ${events(rows.length)}`;
 
   return (
-    <section id={id} className="events-drawer" aria-labelledby={headingId} hidden={!open} data-state={state} onKeyDown={onKeyDown}>
-      <header className="events-head">
+    <section id={id} className="events-drawer" aria-labelledby={headingId} hidden={!open} data-state={opened ? 'opened' : state} onKeyDown={onKeyDown}>
+      {/* A grid item sizes to its content: let it shrink, so a long file name truncates instead of pushing the buttons out. */}
+      <header className="events-head" style={opened || openError ? { minWidth: 0 } : undefined}>
         <div className="events-title">
           <h2 id={headingId} ref={headingRef} tabIndex={-1} className="panel-title">
             Take events
           </h2>
-          <p className="events-summary">{summary}</p>
+          <p
+            className="events-summary"
+            role="status"
+            title={opened && !openError ? summary : undefined}
+            style={openError ? { whiteSpace: 'normal', color: 'var(--color-danger)' } : opened ? { overflow: 'hidden', textOverflow: 'ellipsis' } : undefined}
+          >
+            {openError ?? summary}
+          </p>
         </div>
         <div className="events-actions">
-          <button
-            type="button"
-            className="events-action tap"
-            aria-disabled={noTake || undefined}
-            aria-describedby={noTake ? reasonId : undefined}
-            title={noTake ? NO_TAKE : 'Download the take as JSON'}
-            onClick={() => {
-              if (!noTake) downloadOf(source, take);
-            }}
-          >
-            <Download aria-hidden="true" size={12} strokeWidth={2.5} />
-            Export
-          </button>
-          {state === 'stopped' ? (
+          {openTake ? (
+            <>
+              <input
+                ref={fileRef}
+                type="file"
+                accept=".json,application/json"
+                hidden
+                tabIndex={-1}
+                aria-hidden="true"
+                className="events-file"
+                onChange={(event) => {
+                  const input = event.currentTarget;
+                  void onFile(input.files?.[0]).finally(() => {
+                    input.value = '';
+                  });
+                }}
+              />
+              <button
+                type="button"
+                className="events-action tap"
+                title="Open a take file (.json) to view its events"
+                aria-label="Open a take file"
+                onClick={() => fileRef.current?.click()}
+              >
+                <FolderOpen aria-hidden="true" size={12} strokeWidth={2.5} />
+                Open
+              </button>
+            </>
+          ) : null}
+          {opened ? (
+            <button
+              type="button"
+              className="events-action tap"
+              aria-label="Close the opened take, back to the live take"
+              title="Close the opened take"
+              onClick={closeTake}
+            >
+              Close
+            </button>
+          ) : null}
+          {opened ? null : (
+            <button
+              type="button"
+              className="events-action tap"
+              aria-disabled={noTake || undefined}
+              aria-describedby={noTake ? reasonId : undefined}
+              title={noTake ? NO_TAKE : 'Download the take as JSON'}
+              onClick={() => {
+                if (!noTake) downloadOf(source, take);
+              }}
+            >
+              <Download aria-hidden="true" size={12} strokeWidth={2.5} />
+              Export
+            </button>
+          )}
+          {state === 'stopped' && !opened ? (
             <button
               type="button"
               className="events-action tap"
@@ -262,14 +347,17 @@ export function EventsDrawer({
           </button>
         </div>
       </header>
-      {noTake ? (
+      {opened && rows.length === 0 ? <p className="events-empty">The opened take is empty.</p> : null}
+      {!opened && noTake ? (
         <p id={reasonId} className="events-empty">
           {NO_TAKE}. Applied scenes, fills, Rises and repeats appear here, newest first.
         </p>
       ) : rows.length === 0 ? (
-        <p className="events-empty">
-          {state === 'recording' ? 'Recording. Nothing applied yet.' : 'This take is empty.'}
-        </p>
+        opened ? null : (
+          <p className="events-empty">
+            {state === 'recording' ? 'Recording. Nothing applied yet.' : 'This take is empty.'}
+          </p>
+        )
       ) : (
         <ol className="events-list" aria-label={`${events(rows.length)}, newest first`}>
           {rows.map((r) => (

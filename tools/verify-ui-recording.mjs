@@ -11,11 +11,18 @@
  * The repeat and the onsets need the engine's Night 11 events (61/62 and `s` on every
  * event); on an engine without them those checks fail.
  *
+ * Take files (Night 11B): record a scene, a fill, a Beat-length fill and a repeat,
+ * export, then Open that file in the events drawer and see the same events and the
+ * state at Record; a file that is not a take says so on the status line; Close goes
+ * back to the live take, which opening never touched.
+ *
  * Run by tools/verify-ui.mjs (recordingChecks), or on its own:
  *   node tools/verify-ui-recording.mjs [baseUrl]
  */
 
-import { existsSync } from 'node:fs';
+import { existsSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { performanceValidator } from './performance-schema.mjs';
 
@@ -166,6 +173,120 @@ export async function recordingChecks({ open, check }) {
       check('recording: the walk-through ran to the end', false, `at ${at}: ${String(e.message).split('\n')[0]} | ${JSON.stringify(seen)}`);
     }
     check('recording: no page errors', errors.length === 0, errors.join('; '));
+    await page.close();
+  }
+
+  // Take files (Night 11B): export a take, open it again in the events drawer, close it.
+  {
+    const { page, errors } = await open(1440, 1000);
+    const k = kit(page);
+    let at = 'open';
+    try {
+      await k.play();
+      await k.rec('start');
+      at = 'scene';
+      await k.pad(SPARSE).click();
+      await k.waitCount(1);
+      at = 'bar fill';
+      await page.locator('.fill-button').click();
+      await k.waitClosed('fill');
+      at = 'beat fill';
+      const lengths = page.getByRole('radiogroup', { name: 'Fill length', exact: true });
+      await lengths.getByRole('radio', { name: 'Beat', exact: true }).click();
+      await page.locator('.fill-button').click();
+      await page.waitForFunction(() => (window.__BCKGRND_RECORDING__.recording()?.events ?? []).some((e) => e.kind === 'fill' && e.length === 'beat' && e.outcome !== 'open'), null, RT);
+      await lengths.getByRole('radio', { name: 'Bar', exact: true }).click();
+      at = 'repeat';
+      const repeatPad = page.getByRole('button', { name: 'Beat repeat, while held', exact: true });
+      await repeatPad.scrollIntoViewIfNeeded();
+      const rb = await repeatPad.boundingBox();
+      await page.mouse.move(rb.x + rb.width / 2, rb.y + rb.height / 2);
+      await page.mouse.down();
+      await page.waitForFunction(() => (window.__BCKGRND_RECORDING__.recording()?.events ?? []).some((e) => e.kind === 'repeat'), null, RT);
+      await page.waitForTimeout(500);
+      await page.mouse.up();
+      await page.waitForFunction(() => (window.__BCKGRND_RECORDING__.recording()?.events ?? []).some((e) => e.kind === 'repeat' && e.endedBy !== 'open'), null, RT);
+      await k.rec('stop');
+      const live = await k.rec('recording');
+      const kinds = live.events.map((e) => `${e.kind}${e.length ? `:${e.length}` : ''}`).join(' ');
+      check('take files: the take holds a scene, a bar fill, a beat fill and a repeat', kinds === 'scene fill:bar fill:beat repeat', kinds);
+      const init = live.initial;
+      check('take files: the take has the state at Record: track, tempo, scene, the whole mix, fill, division, loop',
+        init?.track === live.track && init.bpm === live.bpm && typeof init.swing === 'number' && 'slot' in (init.scene ?? {})
+          && Object.keys(init.mix?.params ?? {}).length === 17 && Object.keys(init.mix?.stems ?? {}).length === 8
+          && init.fill?.length === 'bar' && init.repeatDivision === 8 && init.loopBars === 0, JSON.stringify(init).slice(0, 160));
+
+      // Export: the drawer's Export downloads it; save that file.
+      at = 'export';
+      await page.getByRole('button', { name: 'Take events', exact: true }).click();
+      const drawer = page.getByRole('region', { name: 'Take events', exact: true });
+      await drawer.waitFor();
+      const [download] = await Promise.all([page.waitForEvent('download', RT), drawer.getByRole('button', { name: 'Export' }).click()]);
+      const dir = mkdtempSync(join(tmpdir(), 'bckgrnd-take-'));
+      const file = join(dir, download.suggestedFilename());
+      await download.saveAs(file);
+      const liveRows = await page.locator('.events-row').allInnerTexts();
+      check('take files: the drawer lists the live take', liveRows.length === 4, liveRows.join(' | '));
+
+      // A file that is not a take: the status line says why, nothing opens.
+      at = 'open a bad file';
+      const bad = join(dir, 'not-a-take.json');
+      writeFileSync(bad, JSON.stringify({ format: 'bckgrnd-msc/project', version: 4 }));
+      await page.locator('.events-file').setInputFiles(bad);
+      await page.waitForFunction(() => /Couldn't open not-a-take\.json/.test(document.querySelector('.events-summary')?.textContent ?? ''), null, RT);
+      check('take files: a project file is refused on the status line, in plain English',
+        /Not a performance take/.test(await page.locator('.events-summary').innerText()) && (await page.evaluate(() => window.__BCKGRND_RECORDING__.opened())) === null,
+        await page.locator('.events-summary').innerText());
+
+      // Open the exported take.
+      at = 'open the export';
+      await page.locator('.events-file').setInputFiles(file);
+      await page.waitForFunction(() => /^Opened: /.test(document.querySelector('.events-summary')?.textContent ?? ''), null, RT);
+      const opened = await page.evaluate(() => window.__BCKGRND_RECORDING__.opened());
+      check('take files: Open reads the file: the same events and the same state at Record',
+        JSON.stringify(opened?.events) === JSON.stringify(live.events) && JSON.stringify(opened?.initial) === JSON.stringify(live.initial));
+      const head = await page.locator('.events-summary').innerText();
+      check('take files: the drawer says Opened: <file> and the count', head === `Opened: ${download.suggestedFilename()} · 4 events`, head);
+      const openedRows = await page.locator('.events-row').allInnerTexts();
+      check('take files: the opened take lists the same rows', JSON.stringify(openedRows) === JSON.stringify(liveRows), openedRows.join(' | '));
+      check('take files: opening left the live take alone',
+        JSON.stringify(await k.rec('recording')) === JSON.stringify(live) && (await k.rec('state')) === 'stopped'
+          && (await page.locator('.app').getAttribute('data-playing')) === 'yes');
+      const exportBtn = drawer.getByRole('button', { name: 'Export' });
+      check('take files: Export (the live take) steps aside while an opened take shows', (await exportBtn.count()) === 0);
+      const fits = await page.evaluate(() => {
+        const d = document.querySelector('.events-drawer').getBoundingClientRect();
+        return [...document.querySelectorAll('.events-head button')].every((b) => {
+          const r = b.getBoundingClientRect();
+          return r.left >= d.left && r.right <= d.right + 0.5;
+        });
+      });
+      check('take files: the header buttons stay inside the drawer with a long file name', fits);
+      const openBtn = drawer.getByRole('button', { name: 'Open a take file', exact: true });
+      const closeBtn = drawer.getByRole('button', { name: 'Close the opened take, back to the live take', exact: true });
+      check('take files: Open and Close are in the drawer', (await openBtn.count()) === 1 && (await closeBtn.count()) === 1);
+
+      // Close: back to the live take.
+      at = 'close';
+      await closeBtn.click();
+      await page.waitForFunction(() => /^Stopped · /.test(document.querySelector('.events-summary')?.textContent ?? ''), null, RT);
+      check('take files: Close goes back to the live take',
+        (await page.evaluate(() => window.__BCKGRND_RECORDING__.opened())) === null && (await page.locator('.events-row').count()) === 4
+          && (await exportBtn.count()) === 1 && (await exportBtn.getAttribute('aria-disabled')) === null, await page.locator('.events-summary').innerText());
+    } catch (e) {
+      check('take files: the walk-through ran to the end', false, `at ${at}: ${String(e.message).split('\n')[0]}`);
+    }
+    check('take files: no page errors', errors.length === 0, errors.join('; '));
+    await page.close();
+  }
+  {
+    const { page } = await open(390, 844, { hasTouch: true, isMobile: true });
+    await page.locator('.events-toggle').click();
+    const sizes = await page.locator('.events-drawer .events-action').evaluateAll((els) => els.map((el) => {
+      const b = el.getBoundingClientRect();
+      return { name: el.textContent?.trim(), w: Math.round(b.width), h: Math.round(b.height) };
+    }));
+    check('take files: on a phone Open and Export are at least 44px', sizes.length >= 2 && sizes.every((b) => b.w >= 44 && b.h >= 44), JSON.stringify(sizes));
     await page.close();
   }
 
