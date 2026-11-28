@@ -1041,11 +1041,43 @@ body {
 .arrangement-toolbar {
   position: relative;
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
   gap: var(--space-1);
   padding: var(--space-1) var(--space-2) var(--space-1) var(--space-3);
   border-bottom: 1px solid var(--color-line);
+}
+
+.arrangement-tools {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+/* The phone: the tools are one row that scrolls sideways (wrapped, three 44px rows
+   covered the lanes), the status line under them. */
+@media (max-width: 899.98px) {
+  .arrangement-toolbar {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.125rem;
+  }
+
+  .arrangement-tools {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
+    overscroll-behavior-x: contain;
+  }
+
+  .arrangement-toolbar .arrangement-status {
+    /* A column now: the desktop's 8rem basis would be its height (measured 128px). */
+    flex: none;
+    min-height: 1.2em;
+    margin: 0;
+  }
 }
 
 .arrangement-action,
@@ -1097,8 +1129,9 @@ body {
 }
 
 /* Snap and the Take | Edit switch: joined pills, like Fill length's. */
-.arrangement-snap,
-.arrangement-view {
+.arrangement-snap.segmented,
+.arrangement-view.segmented {
+  /* .segmented (a grid, later in this file) would stack the pills: measured 105px. */
   display: inline-flex;
   flex: none;
   align-items: center;

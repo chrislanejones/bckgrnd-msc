@@ -60,7 +60,14 @@ import { SCENE_SLOTS } from '../lib/contract';
 import { FILL_LENGTHS, FILL_LENGTH_LABEL, FILL_STYLES, FILL_STYLE_LABEL } from '../lib/fills';
 import { Segmented } from './controls';
 import type { TakeSource } from './EventsDrawer';
-import { SNAP_STEPS, sourceName, spanOf, type Arrangement, type ArrangementApi, type ArrangementEvent, type EditResult, type Snap } from './arrangementApi';
+import { SNAP_STEPS, snapAt, spanOf, type Arrangement, type ArrangementEvent, type Result as EditResult, type Snap, type UpdateProps } from '../lib/arrangement';
+import type { Instrument } from '../lib/instrument';
+
+/** `inst.arrangement` (Night 12, lib/arrangement): the working arrangement and its edits. */
+export type ArrangementApi = Instrument['arrangement'];
+
+/** "from <take>": the take an arrangement was made from, or its track. */
+const sourceName = (a: Arrangement) => a.source?.track ?? a.track;
 
 // ---- The source ---------------------------------------------------------------------
 //
@@ -270,7 +277,8 @@ function beatName(start: number): string {
 
 function marksOfWorking(a: Arrangement, conflicted: ReadonlySet<string>, sceneName: (slot: string) => string): Mark[] {
   const marks = a.events.map((e): Mark => {
-    const len = spanOf(e);
+    const [from, to] = spanOf(e);
+    const len = e.kind === 'scene' ? 0 : to - from;
     const text = textOf(e, sceneName);
     return {
       key: e.id,
@@ -307,12 +315,15 @@ const maxHeight = () =>
     ),
   );
 
+/** The remembered height; unset, 300px, or on a phone all the room there is (capped later). */
 function readHeight(): number {
+  const fallback = window.matchMedia('(max-width: 899.98px)').matches ? 10_000 : DEFAULT_H;
   try {
-    const n = Number(window.localStorage.getItem(ARRANGEMENT_HEIGHT_PREF));
-    return Number.isFinite(n) && n >= MIN_H ? n : DEFAULT_H;
+    const raw = window.localStorage.getItem(ARRANGEMENT_HEIGHT_PREF);
+    const n = Number(raw);
+    return raw !== null && Number.isFinite(n) && n >= MIN_H ? n : fallback;
   } catch {
-    return DEFAULT_H;
+    return fallback;
   }
 }
 
@@ -394,7 +405,14 @@ export function ArrangementDrawer({
   const snap: Snap = editor?.snap ?? 'beat';
   const snapSteps = SNAP_STEPS[snap];
 
-  const [chosen, setChosen] = useState<string | null>(null);
+  // Selection: the model's while editing (an edit selects its result; undo restores
+  // it), the drawer's own while showing the take.
+  const [takeChosen, setTakeChosen] = useState<string | null>(null);
+  const chosen = editing ? (editor?.selected ?? null) : takeChosen;
+  const setChosen = useCallback(
+    (key: string | null) => (editing ? editor?.select(key) : setTakeChosen(key)),
+    [editing, editor],
+  );
   const selected = marks.find((m) => m.key === chosen) ?? null;
   const tabStop = selected ?? marks[0] ?? null;
 
@@ -491,7 +509,11 @@ export function ArrangementDrawer({
   });
 
   /** Apply an edit: a refusal's reason to the status line (and inline when asked); else select its result. */
-  const act = (r: EditResult | boolean | void, opts: { select?: string | null; inline?: boolean; done?: string } = {}) => {
+  const act = (r: EditResult | boolean | void, opts: { select?: string | null; inline?: boolean; done?: string; none?: string } = {}) => {
+    if (r === false) {
+      setStatus({ text: opts.none ?? 'Nothing to do', tone: 'refused' });
+      return false;
+    }
     if (r && typeof r === 'object' && r.ok === false) {
       setStatus({ text: r.reason, tone: 'refused' });
       if (opts.inline) setInlineRefusal(r.reason);
@@ -568,19 +590,19 @@ export function ArrangementDrawer({
     const key = event.key.toLowerCase();
     if (isMod(event) && key === 'z') {
       event.preventDefault();
-      act(event.shiftKey ? editor.redo() : editor.undo());
+      act(event.shiftKey ? editor.redo() : editor.undo(), { none: event.shiftKey ? 'Nothing to redo' : 'Nothing to undo' });
     } else if (event.ctrlKey && !event.metaKey && key === 'y') {
       event.preventDefault();
-      act(editor.redo());
+      act(editor.redo(), { none: 'Nothing to redo' });
     }
   };
 
   // ---- Drag: a ghost on the snap grid; a refused drop springs back with the reason. ----
-  const drag = useRef<{ key: string; x0: number; at0: number; at: number; moved: boolean; pointer: number } | null>(null);
+  const drag = useRef<{ key: string; e: ArrangementEvent; x0: number; at0: number; at: number; moved: boolean; pointer: number } | null>(null);
   const [ghost, setGhost] = useState<{ key: string; at: number; back: boolean } | null>(null);
   const onPointerDown = (event: ReactPointerEvent<HTMLButtonElement>, m: Mark) => {
     if (!editing || !m.w || event.button !== 0) return;
-    drag.current = { key: m.key, x0: event.clientX, at0: m.start, at: m.start, moved: false, pointer: event.pointerId };
+    drag.current = { key: m.key, e: m.w, x0: event.clientX, at0: m.start, at: m.start, moved: false, pointer: event.pointerId };
     event.currentTarget.setPointerCapture(event.pointerId);
   };
   const onPointerMove = (event: ReactPointerEvent<HTMLButtonElement>) => {
@@ -589,7 +611,8 @@ export function ArrangementDrawer({
     const dx = event.clientX - d.x0;
     if (!d.moved && Math.abs(dx) < 4) return;
     d.moved = true;
-    const at = Math.max(0, Math.round((d.at0 + dx / pps) / snapSteps) * snapSteps);
+    // Where the model will put it: the coarser of the snap and the kind's own grid.
+    const at = snapAt(d.e, d.at0 + dx / pps, snap);
     if (at !== d.at || !ghost) {
       d.at = at;
       setGhost({ key: d.key, at, back: false });
@@ -795,7 +818,8 @@ export function ArrangementDrawer({
       </header>
 
       {editor ? (
-        <div className="arrangement-toolbar" role="toolbar" aria-label="Arrangement tools" aria-orientation="horizontal">
+        <div className="arrangement-toolbar">
+          <div className="arrangement-tools" role="toolbar" aria-label="Arrangement tools" aria-orientation="horizontal">
           {editing ? (
             <>
               <button type="button" className="arrangement-action tap" title={`Insert a scene at ${takePosition(insertAt)}`}
@@ -819,11 +843,11 @@ export function ArrangementDrawer({
               </button>
               <span className="arrangement-sep" aria-hidden="true" />
               <button type="button" className="arrangement-icon tap" aria-label="Undo" title="Undo (Ctrl or ⌘ Z)"
-                aria-disabled={!editor.canUndo || undefined} onClick={() => editor.canUndo && act(editor.undo())}>
+                aria-disabled={!editor.canUndo || undefined} onClick={() => act(editor.undo(), { none: 'Nothing to undo' })}>
                 <Undo2 aria-hidden="true" size={14} strokeWidth={2.25} />
               </button>
               <button type="button" className="arrangement-icon tap" aria-label="Redo" title="Redo (Ctrl or ⌘ Shift Z, Ctrl Y)"
-                aria-disabled={!editor.canRedo || undefined} onClick={() => editor.canRedo && act(editor.redo())}>
+                aria-disabled={!editor.canRedo || undefined} onClick={() => act(editor.redo(), { none: 'Nothing to redo' })}>
                 <Redo2 aria-hidden="true" size={14} strokeWidth={2.25} />
               </button>
               <span className="arrangement-sep" aria-hidden="true" />
@@ -886,6 +910,7 @@ export function ArrangementDrawer({
               ?
             </button>
           ) : null}
+          </div>
           <p id={statusId} className="arrangement-status" role="status" aria-live="polite" data-tone={status?.tone}>
             {status?.text ?? ''}
           </p>
@@ -1133,7 +1158,8 @@ function EditInspector({
       </section>
     );
   }
-  const set = (props: Record<string, unknown>) => act(editor.update(e.id, props));
+  // The pickers hand back strings and numbers; the model checks the values.
+  const set = (props: Record<string, unknown>) => act(editor.update(e.id, props as UpdateProps));
   const slots = SCENE_SLOTS.map((s) => ({ value: s as string, label: sceneName(s), aria: `Scene ${sceneName(s)}` }));
   return (
     <section id={id} className="arrangement-inspector is-edit" aria-label="Selected event" data-conflict={mark.conflict || undefined}>
