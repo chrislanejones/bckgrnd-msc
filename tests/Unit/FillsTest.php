@@ -7,6 +7,7 @@ namespace Tests\Unit;
 use App\Support\Music\Fills;
 use App\Support\Music\Library;
 use App\Support\Music\Phrase;
+use App\Support\Music\Track;
 use PHPUnit\Framework\TestCase;
 
 /**
@@ -170,6 +171,125 @@ final class FillsTest extends TestCase
     {
         foreach (Library::all() as $track) {
             $this->assertSame(json_encode(Fills::styles($track)), json_encode(Fills::styles($track)), $track->id);
+        }
+    }
+
+    // ---- Beat fills (Night 10) ------------------------------------------------------
+
+    public function test_every_track_has_four_beat_fills_in_style_order_each_four_one_bar_lanes(): void
+    {
+        foreach (Library::all() as $track) {
+            $beats = Fills::beatStyles($track);
+            $this->assertSame(Fills::STYLES, array_column($beats, 'style'), $track->id);
+            $this->assertSame(['classic-beat', 'simple-beat', 'busy-beat', 'syncopated-beat'], array_column($beats, 'id'), $track->id);
+            foreach ($beats as $fill) {
+                $this->assertSame(['id', 'name', 'style', ...Fills::LANES], array_keys($fill), "{$track->id} {$fill['id']}");
+                foreach (Fills::LANES as $lane) {
+                    $this->assertCount(Fills::BAR, $fill[$lane], "{$track->id} {$fill['id']} {$lane}");
+                    foreach ($fill[$lane] as $vel) {
+                        $this->assertIsFloat($vel);
+                        $this->assertTrue($vel >= 0 && $vel <= 1, "{$track->id} {$fill['id']} {$lane} velocity {$vel}");
+                    }
+                }
+            }
+        }
+    }
+
+    public function test_a_beat_fill_has_every_hit_on_the_last_beat(): void
+    {
+        foreach (Library::all() as $track) {
+            foreach (Fills::beatStyles($track) as $fill) {
+                $hits = 0;
+                foreach (Fills::LANES as $lane) {
+                    $this->assertSame(array_fill(0, Fills::BEAT_FROM, 0.0), array_slice($fill[$lane], 0, Fills::BEAT_FROM), "{$track->id} {$fill['id']} {$lane}: silent before step 12");
+                    $hits += count(array_filter(array_slice($fill[$lane], Fills::BEAT_FROM)));
+                }
+                $this->assertGreaterThan(0, $hits, "{$track->id} {$fill['id']} plays something");
+            }
+        }
+    }
+
+    public function test_the_four_beat_fills_differ_and_are_not_the_bar_fills_cut_short(): void
+    {
+        foreach (Library::all() as $track) {
+            $beats = Fills::beatStyles($track);
+            $last = fn (array $f): string => (string) json_encode(array_map(
+                fn (string $lane): array => array_slice($f[$lane], Fills::BEAT_FROM),
+                Fills::LANES,
+            ));
+            $this->assertCount(4, array_unique(array_map($last, $beats)), "{$track->id}: four different beat fills");
+            foreach (Fills::styles($track) as $i => $bar) {
+                $this->assertNotSame($last($bar), $last($beats[$i]), "{$track->id} {$bar['style']}: written for the beat, not the bar fill's last beat");
+            }
+        }
+    }
+
+    public function test_no_beat_fill_is_louder_than_the_tracks_own_peak_in_each_lane(): void
+    {
+        foreach (Library::all() as $track) {
+            foreach (Fills::beatStyles($track) as $fill) {
+                foreach (Fills::LANES as $lane) {
+                    $peak = (float) max($track->{$lane});
+                    $this->assertLessThanOrEqual($peak, max($fill[$lane]), "{$track->id} {$fill['id']} {$lane} peak {$peak}");
+                }
+            }
+        }
+    }
+
+    public function test_beat_fills_keep_to_their_sketch(): void
+    {
+        $on = fn (array $lane): array => array_keys(array_filter($lane));
+        foreach (Library::all() as $track) {
+            [$classic, $simple, $busy, $sync] = Fills::beatStyles($track);
+            // Classic: a clap pickup on 14 and 15 over the beat's kick.
+            $this->assertSame([14, 15], $on($classic['clap']), "{$track->id} classic clap");
+            $this->assertSame([12], $on($classic['kick']), "{$track->id} classic kick");
+            $this->assertLessThan($classic['clap'][15], $classic['clap'][14], "{$track->id} classic rises");
+            // Simple: one accent, kick and clap on the beat, nothing else.
+            $this->assertSame([12], $on($simple['clap']), "{$track->id} simple clap");
+            $this->assertSame([12], $on($simple['kick']), "{$track->id} simple kick");
+            $this->assertSame([], [...$on($simple['hat']), ...$on($simple['hatOpen'])], "{$track->id} simple hats");
+            // Busy: a sixteenth clap roll, rising, three or four hits.
+            $roll = array_values(array_filter($busy['clap']));
+            $sorted = $roll;
+            sort($sorted);
+            $this->assertSame($sorted, $roll, "{$track->id} busy roll rises");
+            $this->assertGreaterThanOrEqual(3, count($roll), "{$track->id} busy roll");
+            $this->assertSame(range(16 - count($roll), 15), $on($busy['clap']), "{$track->id} busy roll is in sixteenths up to the downbeat");
+            // Syncopated: the kick off the beat on 14, claps on 13 and 15, none on 12.
+            $this->assertSame([14], $on($sync['kick']), "{$track->id} syncopated kick");
+            $this->assertSame([13, 15], $on($sync['clap']), "{$track->id} syncopated clap");
+        }
+    }
+
+    /**
+     * Night 11 QA. Every library track plays all four drum lanes, so "only the track's
+     * own lanes" needs a track that doesn't: a lane it never plays stays silent in every
+     * beat fill (vel() caps at the lane's peak, 0), and the lanes it does play keep
+     * their sketch. No beat fill reaches the percussion or the melodic lanes.
+     */
+    public function test_a_lane_the_track_never_plays_stays_silent_in_its_beat_fills(): void
+    {
+        $silent = array_fill(0, Phrase::GROOVE_STEPS, 0.0);
+        foreach (Library::all() as $track) {
+            $args = get_object_vars($track);
+            $without = new Track(...[...$args, 'clap' => $silent, 'hatOpen' => $silent]);
+            foreach (Fills::beatStyles($without) as $i => $fill) {
+                $this->assertSame(array_fill(0, Fills::BAR, 0.0), $fill['clap'], "{$track->id} {$fill['id']}: no clap");
+                $this->assertSame(array_fill(0, Fills::BAR, 0.0), $fill['hatOpen'], "{$track->id} {$fill['id']}: no open hat");
+                $this->assertSame(Fills::beatStyles($track)[$i]['kick'], $fill['kick'], "{$track->id} {$fill['id']}: its kick as before");
+                $this->assertSame(Fills::beatStyles($track)[$i]['hat'], $fill['hat'], "{$track->id} {$fill['id']}: its hats as before");
+            }
+        }
+    }
+
+    public function test_beat_fills_are_deterministic_and_leave_the_track_alone(): void
+    {
+        $main = json_decode((string) file_get_contents(__DIR__.'/../fixtures/fills/classic.json'), true);
+        foreach (Library::all() as $track) {
+            $this->assertSame(json_encode(Fills::beatStyles($track)), json_encode(Fills::beatStyles($track)), $track->id);
+            $json = json_decode($track->arrange()->toJson(), true);
+            $this->assertSame(json_encode([$main[$track->id]]), json_encode($json['fills']), $track->id);
         }
     }
 }

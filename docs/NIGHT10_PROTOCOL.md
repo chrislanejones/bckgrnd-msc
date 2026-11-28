@@ -15,6 +15,8 @@ vector, the project file or any saved data.
 
 Event 21's `b` field is now the reason: 0 means the lease ran out (unchanged for kinds 1
 and 2), and 1 means a platter gesture took the deck. Hosts that ignore `b` keep working.
+Night 11 adds `repeat started` (61) and `repeat ended` (62) for when the stutter is
+actually heard; see Events below.
 
 Two tokens of kind 3 can be held at once. The stutter runs while either is held, as
 with the other kinds.
@@ -66,16 +68,64 @@ under `bckgrnd-msc:repeat-division` and sends it on load and on change.
 
 | Event | Beat Repeat |
 |---|---|
-| Stop, Panic, end of score | ends (all gestures end); 8 ms fade to live |
-| Track load | ends (all gestures end) |
-| Release FX | ends |
-| Lease expiry | ends; event 21 with `b` 0 |
-| Brake, backspin, scratch | ends; event 21 with `b` 1 |
+| Stop, Panic, end of score | ends (all gestures end); 8 ms fade to live; 62 with `b` 5, 4, 7 |
+| Track load | ends (all gestures end); 62 with `b` 6 |
+| Release FX | ends; 62 with `b` 3 |
+| Lease expiry | ends; event 21 with `b` 0, then 62 with `b` 0 |
+| Brake, backspin, scratch | ends; event 21 with `b` 1, then 62 with `b` 1 |
 | Cue or seek (`jump`) | keeps looping: the onset clock keeps its phase, so the stutter stays on the grid and release lands on the new position |
 | Loop wrap, loop change | keeps looping |
 | Play while playing (restart from step 0) | captures again at step 0 |
 | Tempo change or bend while held | keeps the captured length; release lands in time because the transport never stopped |
 | Solo or cutting every stem while held | the stutter keeps playing what it captured; the change is heard on release |
+
+## Events (Night 11)
+
+Two events let a take recorder place a stutter. They share the scene event ring, so
+each also carries the onset serial (`NIGHT3_PROTOCOL.md`, Events, "The onset serial").
+
+| kind | name | `requestId` | a | b |
+|---|---|---|---|---|
+| 61 | repeat started | the token held longest when it engaged | the step it engaged on (0-255, a grid line of the division) | the division: 4, 8 or 16 |
+| 62 | repeat ended | the same token 61 named | the step of the last onset (0-255; -1 if none has fired since a seek or Play) | why, below |
+
+`b` of 62:
+
+| b | why |
+|---|---|
+| 0 | lease: the last held token's lease ran out (21 comes first) |
+| 1 | platter: a brake, backspin or scratch took the deck (21 comes first) |
+| 2 | release: the host let go of the last held token (`gesture_end`) |
+| 3 | Release FX (`release_gestures`) |
+| 4 | Panic |
+| 5 | Stop |
+| 6 | track load |
+| 7 | end of score (offline render) |
+
+0 and 1 mean what they mean in 21's `b`.
+
+- **One stutter, one pair.** 61 means the stutter is heard from that onset's sample;
+  62 means it is let go (the 8 ms release fade starts on that sample). Every 61 is
+  followed by exactly one 62 with the same `requestId`, and no 62 comes without a 61.
+  A recorder can pair them by id.
+- **Let go before the grid line: nothing.** A press released while still armed never
+  engaged, made no sound, and reports neither event. (The host knows it pressed; the
+  engine only reports what was heard.)
+- **Two tokens held.** They share one stutter, so there is still one 61 and one 62. 61
+  names the token begun first among those held on the grid line, whichever slot it
+  sits in. Letting go of one while another is held reports nothing: the stutter keeps
+  playing. 62 comes when the last one is let go (or the engine ends it), and it names
+  the token 61 named, even if that one was let go earlier. A token pressed while a
+  stutter is already engaged reports nothing of its own.
+- **Not a new start.** A division change while engaged, or Play while playing, captures
+  again on the next grid line without a 61: it is the same stutter. The host already
+  knows the division it sent.
+- **Pressed again inside the release fade.** The first stutter's 62 came on the release.
+  The fade finishes, the repeat arms, and the next grid line reports a new 61 (named
+  for the token held now).
+- **Ordering on one onset.** 61 is raised on the onset it engages on, after the onset
+  is counted and before that onset's scene, pattern, build and fill events. Between
+  onsets, 62 carries the last onset's serial.
 
 ## Memory
 

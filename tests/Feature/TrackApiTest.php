@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Tests\Feature;
 
+use App\Support\Music\Fills;
 use App\Support\Music\Library;
 use Tests\TestCase;
 
@@ -44,6 +45,41 @@ final class TrackApiTest extends TestCase
         // The track keeps its one fill, Classic, so its hash as a project's source holds.
         $this->assertCount(1, $response->json('track.fills'));
         $this->assertSame($response->json('track.fills.0.id'), $response->json('fillStyles.0.id'));
+    }
+
+    public function test_a_track_arrives_with_its_four_beat_fills_beside_it(): void
+    {
+        $response = $this->getJson('/api/tracks/warehouse')->assertOk();
+
+        $this->assertSame(['classic', 'simple', 'busy', 'syncopated'], array_column($response->json('beatFillStyles'), 'style'));
+        $this->assertCount(1, $response->json('track.fills'));
+        $this->assertArrayNotHasKey('beatFillStyles', $response->json('track'));
+    }
+
+    public function test_every_exported_library_track_has_its_beat_fills(): void
+    {
+        $dir = dirname(__DIR__, 2).'/public/library';
+        foreach (Library::all() as $id => $track) {
+            $exported = json_decode((string) file_get_contents("{$dir}/{$id}.json"), true);
+            $this->assertSame(['classic', 'simple', 'busy', 'syncopated'], array_column($exported['beatFillStyles'] ?? [], 'style'), "public/library/{$id}.json");
+            $this->assertCount(1, $exported['track']['fills'], "public/library/{$id}.json");
+        }
+    }
+
+    /**
+     * Night 11 QA: the API and the static library ship the same beat fills, and they
+     * are today's generator's, so a stale export can't send the web build different
+     * fills from the desktop one.
+     */
+    public function test_the_api_and_the_exported_library_ship_the_generators_beat_fills(): void
+    {
+        $dir = dirname(__DIR__, 2).'/public/library';
+        foreach (Library::all() as $id => $track) {
+            $want = json_decode((string) json_encode(Fills::beatStyles($track)), true);
+            $exported = json_decode((string) file_get_contents("{$dir}/{$id}.json"), true);
+            $this->assertSame($want, $exported['beatFillStyles'], "public/library/{$id}.json is stale");
+            $this->assertSame($want, $this->getJson("/api/tracks/{$id}")->assertOk()->json('beatFillStyles'), "/api/tracks/{$id}");
+        }
     }
 
     public function test_an_unknown_track_is_a_json_404(): void

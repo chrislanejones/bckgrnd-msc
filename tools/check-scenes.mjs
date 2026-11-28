@@ -403,6 +403,116 @@ check('accentFired is not a launch event, so it never settles a request', !s.isL
 
   check('fill style: the buttons name the style', fl.fillStyleName('syncopated') === 'Syncopated fill'
     && fl.fillButtonAria(null, fl.fillStyleName('busy'), 0) === 'Busy fill for one bar, from the next bar');
+
+  // Night 10: fill length. The engine is sent the four styles, then the four beat fills.
+  const beats = fl.FILL_STYLES.map((style, i) => ({ id: `${style}-beat`, name: style, style, ...lanes, n: i }));
+  check('beat fill: a beat pick is the same style past the four bar fills (index 4-7)',
+    fl.FILL_STYLES.every((x, i) => { const p = fl.resolveFillAt(x, styles, beats, 'beat', C); return p.style === x && p.index === 4 + i; }));
+  check('beat fill: Bar is resolveFill, unchanged',
+    fl.FILL_CHOICES.every((x) => JSON.stringify(fl.resolveFillAt(x, styles, beats, 'bar', C)) === JSON.stringify(fl.resolveFill(x, styles, C))));
+  check('beat fill: Random and Rotate pick the same style for either length',
+    ['random', 'rotate'].every((m) => [C, { rotate: 2, draws: 5, last: 'busy' }].every((c) =>
+      fl.resolveFillAt(m, styles, beats, 'beat', c).style === fl.resolveFillAt(m, styles, beats, 'bar', c).style)));
+  check('beat fill: without beat fills a press plays the bar, named so',
+    fl.effectiveLength('beat', undefined, styles) === 'bar' && fl.effectiveLength('beat', [], styles) === 'bar' && fl.effectiveLength('beat', beats, styles) === 'beat'
+    && fl.resolveFillAt('busy', styles, undefined, 'beat', C).index === 2);
+  check('beat fill: withFillStyles sends styles then beat fills, and leaves the arrangement alone',
+    (() => { const a = { id: 't', fills: [{ id: 'own' }] }; const w = fl.withFillStyles(a, styles, beats);
+      return w.fills.length === 8 && w.fills[4].id === 'classic-beat' && a.fills.length === 1 && fl.withFillStyles(a, undefined, beats) === a; })());
+  check('beat fill: the length code is 0 for the bar and 1 for the beat', fl.fillLengthCode('bar') === 0 && fl.fillLengthCode('beat') === 1 && fl.fillLengthCode(undefined) === 0);
+  check('beat fill: the Fill button says beat after the style, "Beat fill" for Classic',
+    fl.fillButtonLabel({ ...job(), status: 'queued', bar: 8, style: 'busy', length: 'beat' }) === 'Busy beat · Bar 8'
+    && fl.fillButtonLabel({ ...job(), status: 'queued', bar: 8, style: 'classic', length: 'beat' }) === 'Beat fill · Bar 8'
+    && fl.fillButtonLabel({ ...job(), status: 'queued', bar: 8, late: true, style: 'syncopated', length: 'beat' }) === 'Synco beat · Next phrase'
+    && fl.fillButtonLabel({ ...job(), status: 'playing', style: 'simple', length: 'beat' }) === 'Simple beat playing');
+  check('beat fill: names, status and Fill → Drop words',
+    fl.fillStyleName('busy', 'beat') === 'Busy beat fill' && fl.fillChoiceName('rotate', 'simple', 'beat') === 'Simple beat fill, by Rotate'
+    && fl.fillQueuedStatus({ ...job({ phrase: 0 }), bar: 5, length: 'beat' }) === 'Beat fill queued for the last beat of bar 5'
+    && fl.fillQueuedStatus({ ...job(), bar: 8, length: 'beat' }) === 'Beat fill queued for the last beat of bar 8, the end of the phrase'
+    && fl.fillIntoLabel({ ...job(), kind: 'into', status: 'queued', bar: 8, length: 'beat' }, 'Drop') === 'Beat · Bar 8 → Drop');
+  check('beat fill: a late beat fill rolls over by the same rule (first step 12 of the bar)',
+    !fl.rolledOver(64, 124, 4) && fl.rolledOver(125, 188, 4));
+
+  // Night 11 QA. Beat fills without fillStyles never load (withFillStyles sends them
+  // only after the four styles), so Beat is Bar there, and is named so.
+  check('beat fill: beat fills but no fillStyles play the bar, named the bar',
+    !fl.beatFillsLoad(undefined, beats) && !fl.beatFillsLoad([], beats) && fl.beatFillsLoad(styles, beats)
+    && fl.effectiveLength('beat', beats, undefined) === 'bar' && fl.effectiveLength('beat', beats, []) === 'bar'
+    && fl.effectiveLength('bar', beats, styles) === 'bar');
+  // The index a press sends always names a fill the engine was loaded with, of the
+  // length it is sent with: a beat fill (4-7) with length 1, a bar fill otherwise, and
+  // the style it is named. Every library shape, choice, cursor and preference.
+  {
+    const own = { id: 'own', kick: [], clap: [], hat: [], hatOpen: [] };
+    const bad = [];
+    for (const [shape, st, bt] of [['both', styles, beats], ['no beats', styles, undefined], ['empty beats', styles, []],
+      ['no styles', undefined, beats], ['neither', undefined, undefined], ['two styles', styles.slice(0, 2), beats.slice(0, 2)]]) {
+      const loaded = fl.withFillStyles({ id: 't', fills: [own] }, st, bt).fills;
+      for (const pref of fl.FILL_LENGTHS) {
+        const length = fl.effectiveLength(pref, bt, st);
+        for (const choice of fl.FILL_CHOICES) {
+          for (const c of [C, { rotate: 3, draws: 7, last: 'simple' }, { rotate: 1, draws: 2, last: 'syncopated' }]) {
+            const p = fl.resolveFillAt(choice, st, bt, length, c);
+            const sent = loaded[p.index];
+            const isBeat = Boolean(sent?.id?.endsWith('-beat'));
+            const named = st?.length ? sent?.style === p.style : p.style === 'classic' && sent === own;
+            if (!sent || isBeat !== (length === 'beat') || !named) bad.push(`${shape}/${pref}/${choice}: ${length} index ${p.index} -> ${sent?.id}`);
+          }
+        }
+      }
+    }
+    check('beat fill: the index sent always matches the length sent, and the style named', bad.length === 0, bad.slice(0, 4).join('; '));
+  }
+  // Random and Rotate at Beat move on the same way, so a session alternating lengths
+  // keeps one sequence; a queued fill keeps its length through every event.
+  check('beat fill: Random and Rotate advance the same way at either length',
+    ['random', 'rotate'].every((m) => {
+      let a = C; let b = C;
+      for (let n = 0; n < 9; n += 1) {
+        const pa = fl.resolveFillAt(m, styles, beats, 'bar', a); const pb = fl.resolveFillAt(m, styles, beats, 'beat', b);
+        if (pa.style !== pb.style || pb.index !== pa.index + 4) return false;
+        a = fl.advanceFill(a, m, pa.style); b = fl.advanceFill(b, m, pb.style);
+      }
+      return JSON.stringify(a) === JSON.stringify(b);
+    }));
+  {
+    const sent = job({ length: 'beat', style: 'busy', choice: 'rotate' });
+    const steps = [ev(s.EVENT.fillQueued, 4, 60), ev(s.EVENT.fillQueued, 3, 44), ev(s.EVENT.fillStarted, 44, 12), ev(s.EVENT.fillEnded, 48)];
+    const seen = [];
+    steps.reduce((j, e) => { const n = fl.foldFillJob(j, e, 40); seen.push(n); return n; }, sent);
+    check('beat fill: a queued fill keeps its length and style through queued, re-announced, started and ended',
+      seen.every((j) => j.length === 'beat' && j.style === 'busy' && j.choice === 'rotate') && seen.at(-1).status === 'ended',
+      JSON.stringify(seen.map((j) => [j.status, j.length])));
+  }
+  // The real library: every track's beat fills load as 4-7 in style order.
+  {
+    const ids = library.tracks.map((t) => t.id);
+    const wrong = ids.filter((id) => {
+      const t = JSON.parse(readFileSync(join(root, `public/library/${id}.json`), 'utf8'));
+      const w = fl.withFillStyles(t.track, t.fillStyles, t.beatFillStyles);
+      return w.fills.length !== 8 || fl.FILL_STYLES.some((x, i) => {
+        const p = fl.resolveFillAt(x, t.fillStyles, t.beatFillStyles, 'beat', C);
+        return p.index !== 4 + i || w.fills[p.index].id !== `${x}-beat`;
+      }) || t.track.fills.length !== 1;
+    });
+    check('beat fill: every library track loads its four beat fills as 4-7, and its own track keeps one fill', ids.length > 0 && wrong.length === 0, wrong.join());
+  }
+  // A beat fill's words follow its length: the last beat, and it plays out its beat.
+  {
+    const bq = fl.foldFillJob(fl.foldFillJob(job({ kind: 'into', partner: 81, from: 50, length: 'beat' }), ev(s.EVENT.fillQueued, 4, 60), 50), ev(s.EVENT.fillLinked, 81, 64), 50);
+    const bl = fl.foldFillJob(job({ kind: 'into', from: 61, length: 'beat' }), ev(s.EVENT.fillQueued, 8, 124), 61);
+    const bp = fl.foldFillJob(bq, ev(s.EVENT.fillStarted, 60, 12), 60);
+    check('beat fill into: queued, late and playing names say the last beat and the beat',
+      fl.fillIntoAria(bq, 'Drop', 4) === 'Fill into Drop on the last beat of bar 4. Press again to cancel.'
+      && fl.fillIntoAria(bl, 'Drop', 4) === 'Fill into Drop on the last beat of the next phrase, bar 8. Press again to cancel.'
+      && fl.fillIntoAria(bp, 'Drop', 4) === 'Filling into Drop. Press again to cancel Drop; the fill plays out its beat.',
+      [fl.fillIntoAria(bq, 'Drop', 4), fl.fillIntoAria(bl, 'Drop', 4), fl.fillIntoAria(bp, 'Drop', 4)].join(' | '));
+    check('beat fill into: canceled while filling, the fill plays out its beat; a bar fill its bar',
+      fl.fillIntoCancelled('Drop', 10, true, 'beat') === 'Drop canceled; the fill plays out its beat'
+      && fl.fillIntoCancelled('Drop', 10, true, 'bar') === 'Drop canceled; the fill plays out its bar'
+      && fl.fillIntoCancelled('Drop', 10, true) === 'Drop canceled; the fill plays out its bar'
+      && fl.fillIntoCancelled('Drop', 10, false, 'beat') === 'Fill → Drop canceled');
+  }
 }
 
 const vec = s.sceneVector(applied);

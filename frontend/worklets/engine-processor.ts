@@ -100,6 +100,8 @@ type Inbound =
        */
       fillId?: number;
       fillIndex?: number;
+      /** That fill's length: 0 (or absent) the last bar, 1 its last beat (Night 10). */
+      fillLength?: number;
       /** 1: a crash on the onset it lands (docs/NIGHT8_PROTOCOL.md). */
       accent?: number;
     }
@@ -121,7 +123,7 @@ type Inbound =
       deck?: DeckId;
       /** 0 the next bar, or 2, 4, 8 or 16: end on that phrase line (docs/NIGHT8_PROTOCOL.md). */
       phrase?: number;
-      /** 0, one bar. The only length so far. */
+      /** 0 (or absent) one bar, 1 only its last beat (Night 10). */
       length?: number;
     }
   | { type: 'cancelFill'; requestId: number }
@@ -137,7 +139,7 @@ type Inbound =
       index: number;
       /** 0 the next bar, or 2, 4, 8 or 16: the fill ends on that phrase line. */
       phrase?: number;
-      /** 0, one bar. The only length so far. */
+      /** 0 (or absent) one bar, 1 only its last beat (Night 10). */
       length?: number;
       values: ArrayLike<number>;
       deck?: DeckId;
@@ -186,7 +188,13 @@ const MIX_ENTRY_KICK = 0.45;
  */
 const SCENE_LEN = 44;
 const SCENE_FX_FILTER = 32;
-const EVENT_WIDTH = 4;
+/**
+ * Numbers per event in the engine's ring: `[kind, id, a, b, serial]`. The worklet posts
+ * the first four as `events` (unchanged, four each) and the fifth as `s`, one per event.
+ */
+const EVENT_WIDTH = 5;
+/** Numbers per event in a posted `sceneEvents` message's `events`. */
+const POSTED_WIDTH = 4;
 /** `EVENT_CAPACITY` in engine-core/src/scheduler.rs: one drain empties the ring. */
 const EVENT_CAPACITY = 64;
 const EVENT_SCENE_APPLIED = 2;
@@ -219,9 +227,12 @@ function fillPhrase(phrase: number | undefined): number {
   return phrase === 0 || phrase === 2 || phrase === 4 || phrase === 8 || phrase === 16 ? phrase : 255;
 }
 
-/** A fill's length for the engine: 0 (or absent), one bar; anything else 255 (`invalid`). */
+/**
+ * A fill's length for the engine: 0 (or absent) one bar, 1 only its last beat (Night
+ * 10); anything else 255 (`invalid`).
+ */
 function fillLength(length: number | undefined): number {
-  return length === undefined || length === 0 ? 0 : 255;
+  return length === undefined || length === 0 ? 0 : length === 1 ? 1 : 255;
 }
 
 /** A scene's accent for the engine: 0 (or absent) none, 1 crash; anything else 255 (`invalid`). */
@@ -720,7 +731,7 @@ class EngineProcessor extends AudioWorkletProcessor {
     const bars = b === 2 || b === 4 || b === 8 ? b : 0;
     const fi = message.fillIndex ?? 0;
     const fillIndex = Number.isInteger(fi) && fi >= 0 ? fi : 0xffffffff;
-    const verdict = engine.queue_build_with(
+    const verdict = engine.queue_build_with_length(
       requestId,
       bars,
       this.buildTarget,
@@ -728,6 +739,7 @@ class EngineProcessor extends AudioWorkletProcessor {
       fillId,
       fillIndex >>> 0,
       accentCode(message.accent),
+      fillLength(message.fillLength),
     );
     if (verdict === 0) {
       this.buildPendingId = requestId;
@@ -870,8 +882,18 @@ class EngineProcessor extends AudioWorkletProcessor {
     this.drainEvents('b', this.engines.b);
   }
 
-  private postSceneEvents(deck: DeckId, events: number[]): void {
-    this.port.postMessage({ type: 'sceneEvents', deck, events });
+  /**
+   * Post events four numbers each, with `s` the onset serial of each
+   * (docs/NIGHT3_PROTOCOL.md, Events). Events the worklet raises itself (refusals) are
+   * stamped with the deck engine's serial now, 0 before it exists.
+   */
+  private postSceneEvents(deck: DeckId, events: number[], s?: number[]): void {
+    let serials = s;
+    if (!serials) {
+      const now = this.engines[deck]?.onset_serial() ?? 0;
+      serials = new Array<number>(Math.floor(events.length / POSTED_WIDTH)).fill(now);
+    }
+    this.port.postMessage({ type: 'sceneEvents', deck, events, s: serials });
   }
 
   /**
@@ -925,7 +947,14 @@ class EngineProcessor extends AudioWorkletProcessor {
       }
     }
     if (baseFor >= 0) this.postBuildBase(deck, baseFor);
-    this.postSceneEvents(deck, Array.from(buf.subarray(0, n * EVENT_WIDTH)));
+    const events = new Array<number>(n * POSTED_WIDTH);
+    const serials = new Array<number>(n);
+    for (let k = 0; k < n; k += 1) {
+      const at = k * EVENT_WIDTH;
+      for (let j = 0; j < POSTED_WIDTH; j += 1) events[k * POSTED_WIDTH + j] = buf[at + j];
+      serials[k] = buf[at + POSTED_WIDTH];
+    }
+    this.postSceneEvents(deck, events, serials);
   }
 
   /**

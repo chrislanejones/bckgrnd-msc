@@ -222,6 +222,9 @@ impl Engine {
     ///
     /// `accent` 1 plays a crash on the onset it lands (`accent fired`, 53), with or
     /// without a landing scene; 0 none; anything else is refused as invalid, part 3.
+    ///
+    /// The fill plays the whole last bar; [`Engine::queue_build_with_length`] takes a
+    /// fill length too.
     #[allow(clippy::too_many_arguments)]
     pub fn queue_build_with(
         &mut self,
@@ -233,6 +236,35 @@ impl Engine {
         fill_index: u32,
         accent: u8,
     ) -> u8 {
+        self.queue_build_with_length(
+            request_id,
+            bars,
+            target,
+            land,
+            fill_id,
+            fill_index,
+            accent,
+            scheduler::fill_length::BAR,
+        )
+    }
+
+    /// [`Engine::queue_build_with`] with the fill's length (Night 10,
+    /// [`scheduler::fill_length`]): 0 the build's whole last bar, 1 only that bar's last
+    /// beat, steps 12 to 15, with the bar's first three beats rising as without a
+    /// fill. The landing commits on the same downbeat either way. Any other length is
+    /// refused as invalid, part 5 (the fill). Ignored without a fill (`fill_id` 0).
+    #[allow(clippy::too_many_arguments)]
+    pub fn queue_build_with_length(
+        &mut self,
+        request_id: u32,
+        bars: u32,
+        target: &[f32],
+        land: &[f32],
+        fill_id: u32,
+        fill_index: u32,
+        accent: u8,
+        fill_length: u8,
+    ) -> u8 {
         let with_fill = fill_id != 0;
         let replacing = self.build.as_ref().map(|b| b.request_id);
         let (verdict, part) = if !BUILD_BARS.contains(&bars) {
@@ -242,7 +274,7 @@ impl Engine {
         } else if (!land.is_empty() && !scheduler::valid(land)) || accent > scheduler::accent::CRASH
         {
             (reason::INVALID, detail::LAND)
-        } else if with_fill && !self.fill_args_ok(fill_index, 0, 0) {
+        } else if with_fill && !self.fill_args_ok(fill_index, 0, fill_length) {
             (reason::INVALID, detail::FILL)
         } else if !self.transport.playing {
             (reason::NOT_PLAYING, detail::NONE)
@@ -319,6 +351,7 @@ impl Engine {
                 fill_id,
                 fill_index,
                 0,
+                fill_length,
                 Link::Build(request_id),
                 &self.transport,
             );
@@ -567,8 +600,11 @@ impl Engine {
                 .saturating_sub(self.scheduler.serial() + 1)
                 .min(crate::track::STEPS as u64 * 8) as usize
         } else {
-            // Starts on the next bar line; its last bar begins `bars - 1` bars later.
-            scheduler::fill_offset(&self.transport, 0) + ((b.bars - 1) * BAR) as usize
+            // Starts on the next bar line; its last bar begins `bars - 1` bars later,
+            // and a beat fill that bar's last beat, 12 steps on.
+            scheduler::fill_offset(&self.transport, 0)
+                + ((b.bars - 1) * BAR) as usize
+                + scheduler::fill_first(f.length)
         };
         let step = walk(&self.transport, ahead);
         self.scheduler.events.push(
@@ -577,7 +613,10 @@ impl Engine {
             (step / 16 + 1) as f64,
             step as f64,
         );
-        Some(walk(&self.transport, ahead + BAR as usize))
+        Some(walk(
+            &self.transport,
+            ahead + scheduler::fill_span(f.length),
+        ))
     }
 
     /// Cancel the build, queued or running, reporting `why`, and put back the base it
@@ -659,7 +698,8 @@ impl Engine {
             }
             b.keep = 0;
             b.touched = 0;
-            // Its fill plays the last bar, ending on the onset the build lands.
+            // Its fill plays the last bar (or that bar's last beat), ending on the
+            // onset the build lands.
             let last_bar = self.scheduler.serial() + (b.total() - BAR) as u64;
             self.scheduler.arm_fill(Link::Build(b.request_id), last_bar);
             self.scheduler.events.push(

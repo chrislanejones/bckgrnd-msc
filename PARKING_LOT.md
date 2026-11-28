@@ -549,3 +549,114 @@ not. Things to settle before or while building it:
   and waits for `gotpointercapture`. 23 of 24 standalone runs passed after the fix. The one
   failure was before the Panic check was split, so it isn't named; the Panic check now
   also waits for the engine's Stop. (Tara)
+
+## Found in Night 11 recording (11-26-2026)
+
+- **A take's onsets start at its first event, not at the Record press.** Telemetry carries
+  the song step only, so the host has no onset serial for the press. A timeline can't show
+  the empty bars between Record and the first event by onset (`startedAtStep` still says
+  where Record was pressed). Fix: the live deck's serial on the telemetry frame (Silas),
+  then fix the origin at the press. A change to v2's meaning of `onset`, so before takes
+  are imported anywhere. (recording)
+- **A repeat held when the take stops ends at an estimate.** `endOnset` counts forward
+  from the last engine event to the last playing frame's step. Right unless a loop, a cue
+  or a seek came after that event. The same telemetry serial would make it exact. (recording)
+- ~~**Events drawer, at the merge with `night11/recording`:** stand-ins for `describeEvent` /
+  `describePosition`.~~ **Done at the merge (171bad6):** the drawer imports `describeEvent` from
+  `lib/recording`. The `downloadOf` fallback stays only for a source with no `downloadTake`.
+- **The phone's stopped-take Clear can now go.** The events drawer offers Clear, so the
+  Record cell's × (which squeezes the phone's track name, above) could live only in the
+  drawer on the phone. Needs `verify-ui-recording.mjs`'s "stopped shows ... a Clear
+  button" check to look in the drawer there. (Lacey, Tara)
+- **The stopped-take × at 1180-1279 px is unmeasured with the Events toggle beside it.**
+  Idle and recording fit (measured: the meter gives way, CLIP drops its word); the
+  stopped state adds 36 px more and may push the track name to its 8rem floor and past
+  it. Measure, and if it overflows, take the same fix as the phone note above. (Lacey)
+- **Events drawer is a new overlay pattern** (non-modal, fixed under the transport, Esc
+  and focus handled in the component). If it becomes the pattern for other inspectors,
+  it may want an ADR. (Dara)
+
+## Found in Night 11 session (11-26-2026)
+
+- **The morning ran past its 110-minute timebox.** Both agents hit a usage limit
+  mid-task and resumed hours later. Integration order and the beat fills came first,
+  as the brief asked.
+- **ADR-026 is about 140 lines with the v2 amendment.** If v3 adds more, split the
+  take format into its own ADR-028 and leave ADR-026 the recording contract. (Dara)
+- **3 review threads on PR #12 are still unresolved on GitHub.** The code fixes landed
+  (c57013d, 224a7fb, 9611412); the threads need resolving by Chris or with a reply. (Chris)
+- **MCP PRs #2 and #4 are superseded.** #3 contains #2, and the Night 11 MCP resync
+  replaces #4's engine sync. Close both once #3 and the resync PR merge. (Chris)
+
+
+## Found in Night 11 engine events (11-26-2026)
+
+- **The engine's noise is one stream per thread, shared by every engine on it.**
+  `dsp::noise()` is a thread-local xorshift, so two engines on one thread (both decks in
+  the worklet, or one render after another in a test binary) draw from the same stream,
+  and a render depends on every noise draw before it. Audio is fine. But a bypass hash
+  harness that runs renders in sequence on one thread only compares fairly when both
+  binaries run exactly the same sequence (the Night 11 harness now gives each render its
+  own thread). And replaying a take (Nights 12–14) can't be bit-exact unless the noise
+  is per engine and seeded, which would change every render's bytes once. (Silas, Felix)
+- The serial column (`EVENT_WIDTH` 5, `docs/NIGHT3_PROTOCOL.md` § The onset serial)
+  answers "a take has no elapsed position" above on the engine side. The recorder's use
+  of it is the recording agent's. (Silas, recording)
+
+## Night 11 — beat fills QA (11-26-2026)
+
+- **The engine can't tell a beat fill's index from a bar fill's.** `queue_fill_at`,
+  `queue_fill_into` and `queue_build_with_length` accept any loaded index at either
+  length: index 0-3 at length 1 plays a bar fill's last beat, 4-7 at length 0 plays three
+  silent beats and then the beat fill. The track's `fills` carry no kind, so the engine
+  has nothing to check against. The app host is pinned by `check-scenes` (every library
+  shape, choice, cursor and preference sends an index of the length it sends). Any other
+  host (the MCP, a future one) is unguarded. A fix gives the engine the bar-fill count
+  at load, or a per-fill length. (Silas)
+- **`php artisan test` under-counts in a worktree without `.env`.** The 19 tests that boot
+  the app warn (or raise a notice) reading the missing `.env`, and artisan's summary
+  counts them as warnings, not passed: 299 passed of 318 here, while `vendor/bin/phpunit`
+  says OK (318 tests). That is the "298 vs 308" in the recorder's notes: 316 − 18 tonight
+  before the QA tests, 308 all green at night10/run in a checkout with `.env`. Read the
+  phpunit total, or give the test bootstrap its own env. (Scotty)
+- **"repeat: Panic stops the transport" is intermittent in the full desktop suite only.**
+  Failed 1 of 2 suite runs tonight; 0 of 16 standalone runs (12 with diagnostics armed),
+  and not with the track fetch delayed 1.5 s (the step before does wait for the new
+  track). Not touched by the beat-fills work. Telemetry posts at ~30 Hz, so 5 s still
+  "playing" after Panic is not a slow repaint: something kept or restarted playback. The
+  check now prints the transport state and status line on failure; read that on the
+  next occurrence before changing any timing. (Tara)
+- **Night 11B: "mixing: Panic abandons the mix and the pads come back" did the same**
+  (verify:desktop on 13752e0, 1 run). Not reproduced in 48 replays of its steps
+  (main thread throttled 4-6x, 12 busy CPU threads, track fetch +800 ms, Panic swept
+  across the whole handover from before the downbeat to after `mixEnd`) or in 2 full
+  verify:ui runs. Ruled out by reading: no host path posts `play` or `mix` after Panic
+  in this flow (`autoMix` posts `mix` before the pads go disabled; its `mixEnd`
+  callback sets state but never plays); the worklet's Panic clears the mix and stops
+  both decks; telemetry posts every block at ~30 Hz; continuous mix is off; the only
+  other pad gate (`sceneRestoring`) needs a pending restore this flow never sends.
+  The check now keeps a trail of the worklet port (messages sent, telemetry changes,
+  `mixEnd`) and prints it with `data-playing`, each pad's state, the lines and the
+  status when it fails, so the next failure names the half that failed and what
+  crossed the port after Panic. Not a fix to make: guarding the `mixEnd` callback
+  against Panic with a token. A `mixEnd` already in flight when Panic lands means the
+  worklet has made the incoming deck live; the callback following it is what keeps the
+  host's live deck the worklet's. Dropping it would send the next Play to the wrong
+  deck. (Tara)
+
+## Found in Night 11B (11-27-2026)
+
+- **ADR-026 is 164 lines.** Dara proposes moving take v2 into its own ADR-028 ("Performance
+  take v2: onsets, repeat, export, initial state and view-only open") and leaving ADR-026 at
+  its v1 text with a pointer. A proposal only; Chris decides. (Dara, Chris)
+- **Replay needs a rule for a missing `initial.mix` id.** Since 42a3bad a take opens with ids
+  missing or unknown. Harmless while opening is view only; Night 13 has to say what a missing
+  id starts from, or a replay quietly starts from defaults instead of what was heard. (Night 13)
+- **The timeline inspector doesn't show `initial` yet.** With nothing selected it shows a hint.
+  Small follow-up for Night 12. (Lacey)
+- **Two Panic checks fail now and then, only in the full suite.** "repeat: Panic stops the
+  transport" (Night 11) and "mixing: Panic abandons the mix and the pads come back" (Night 11B,
+  base gates on 13752e0). Not reproduced in 48 load runs or 4 standalone `verify:ui` runs;
+  no host race found in the code. Both checks now print the transport, pads and the worklet
+  port's traffic when they fail, so the next failure names the cause. (Tara)
+

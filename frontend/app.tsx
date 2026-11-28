@@ -11,7 +11,7 @@
  * file only decides where things go. React holds no audio state and no musical clock.
  */
 
-import { useCallback, useEffect, useId, useMemo, useState } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { useInstrument } from './lib/instrument';
 import { param } from './lib/contract';
 import { STEM_ORDER, soundingMap, stemState, stemStateLabel } from './lib/stems';
@@ -30,6 +30,8 @@ import { CompareBar } from './ui/CompareBar';
 import { SCENE_SLOTS } from './lib/contract';
 import { PanicButton, TransportBar } from './ui/Transport';
 import { RecordToggle } from './ui/RecordToggle';
+import { EventsDrawer, EventsToggle, useEventsOpen } from './ui/EventsDrawer';
+import { ArrangementDrawer, TimelineToggle, useArrangementOpen } from './ui/ArrangementDrawer';
 
 type View = 'perform' | 'mix' | 'edit';
 
@@ -71,6 +73,21 @@ export function App() {
   // On a phone the inspector is a sheet from the right, closed until asked for.
   const [knobsOpen, setKnobsOpen] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  // The take's event inspector (Night 11): folded by default, remembered per viewer.
+  const [eventsOpen, setEventsOpen] = useEventsOpen();
+  const eventsId = useId();
+  const eventsToggle = useRef<HTMLButtonElement>(null);
+  const closeEvents = useCallback(() => setEventsOpen(false), [setEventsOpen]);
+  // The take as a timeline (Night 11B): a bottom sheet, opened from the events drawer.
+  const [arrangementOpen, setArrangementOpen] = useArrangementOpen();
+  const arrangementId = useId();
+  const timelineToggle = useRef<HTMLButtonElement>(null);
+  const closeArrangement = useCallback(() => setArrangementOpen(false), [setArrangementOpen]);
+  // Back to the Timeline toggle, or to the Events toggle when its drawer is folded.
+  const arrangementReturn = useCallback(
+    () => (timelineToggle.current?.isConnected && timelineToggle.current.getClientRects().length ? timelineToggle.current : eventsToggle.current),
+    [],
+  );
   const [selected, setSelected] = useState<StemId>('kick');
   const [inspectorTab, setInspectorTab] = useState<InspectorTab>('master');
   // Compare A/B folds into the scenes header (Night 9B): closed until chosen, remembered
@@ -155,6 +172,8 @@ export function App() {
       // A modal dialog owns the keyboard: nothing behind it may play, cut or launch.
       if (document.querySelector('dialog[open]')) return;
       if (event.key === 'Escape') {
+        // Handled already: the events drawer closes itself on an Esc from inside it.
+        if (event.defaultPrevented) return;
         if (drawerOpen) {
           setDrawerOpen(false);
           return;
@@ -166,6 +185,17 @@ export function App() {
         if (phone && knobsOpen) {
           setKnobsOpen(false);
           document.querySelector<HTMLElement>('[aria-controls="inspector"]')?.focus();
+        }
+        // The take's drawers last: they are non-modal, so a sheet opened over them goes
+        // first; the arrangement (the bottom sheet) before the events drawer.
+        if (arrangementOpen && !libraryOpen && !(phone && knobsOpen)) {
+          setArrangementOpen(false);
+          if (document.activeElement === document.body) arrangementReturn()?.focus();
+          return;
+        }
+        if (eventsOpen && !libraryOpen && !(phone && knobsOpen)) {
+          setEventsOpen(false);
+          if (document.activeElement === document.body) eventsToggle.current?.focus();
         }
         return;
       }
@@ -265,7 +295,17 @@ export function App() {
         liveDeck={inst.liveDeck}
         onTogglePlay={() => void inst.togglePlay()}
         onPanic={phone ? undefined : inst.panic}
-        record={<RecordToggle recording={inst.recording} />}
+        record={
+          <RecordToggle recording={inst.recording}>
+            <EventsToggle
+              open={eventsOpen}
+              onToggle={() => setEventsOpen(!eventsOpen)}
+              controls={eventsId}
+              count={inst.recording.count}
+              buttonRef={eventsToggle}
+            />
+          </RecordToggle>
+        }
         libraryToggle={
           libraryDocked
             ? undefined
@@ -419,7 +459,18 @@ export function App() {
               actions={
                 <SceneHeader
                   status={sceneStatus}
-                  {...(inst.hasFill ? { fillStyle: { style: inst.fillStyle, next: inst.fillNextBy, onStyle: inst.setFillStyle } } : {})}
+                  {...(inst.hasFill
+                    ? {
+                        fillStyle: {
+                          style: inst.fillStyle,
+                          next: inst.fillNextBy,
+                          onStyle: inst.setFillStyle,
+                          length: inst.fillLength,
+                          onLength: inst.setFillLength,
+                          lengthUnavailable: inst.fillLengthUnavailable,
+                        },
+                      }
+                    : {})}
                   compare={{
                     shown: compareShown,
                     comparing: inst.compare !== null,
@@ -465,6 +516,9 @@ export function App() {
                         onAt: inst.setFillAt,
                         onPhraseBars: inst.setPhraseBars,
                         onRiseFill: inst.setRiseFill,
+                        length: inst.fillLength,
+                        onLength: inst.setFillLength,
+                        lengthUnavailable: inst.fillLengthUnavailable,
                       },
                     }
                   : {})}
@@ -643,6 +697,29 @@ export function App() {
         stem={selected}
         onStem={setSelected}
         phone={phone}
+      />
+
+      <EventsDrawer
+        id={eventsId}
+        open={eventsOpen}
+        source={inst.recording}
+        onClose={closeEvents}
+        returnFocus={eventsToggle}
+        timeline={
+          <TimelineToggle
+            open={arrangementOpen}
+            onToggle={() => setArrangementOpen(!arrangementOpen)}
+            controls={arrangementId}
+            buttonRef={timelineToggle}
+          />
+        }
+      />
+      <ArrangementDrawer
+        id={arrangementId}
+        open={arrangementOpen}
+        source={inst.recording}
+        onClose={closeArrangement}
+        returnFocus={arrangementReturn}
       />
 
       {phone ? (

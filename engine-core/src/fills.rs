@@ -20,7 +20,6 @@
 //! [`Timing::Linked`]: crate::scheduler::Timing::Linked
 
 use crate::scheduler::{self, event, reason, walk, Link, FILL_LENGTHS, FILL_PHRASE_BARS};
-use crate::track::FILL_STEPS;
 use crate::Engine;
 
 #[cfg(target_arch = "wasm32")]
@@ -47,9 +46,13 @@ impl Engine {
     ///
     /// `phrase_bars` is 0 (the next bar, as [`Engine::queue_fill`]) or 2, 4, 8 or 16:
     /// the fill plays the bar that ends on the next phrase line of that length, or on
-    /// the loop's wrap. `length` is 0, one bar; nothing else yet. Refused with 1 for any
-    /// other `phrase_bars` or `length`, or no such fill; 7 while stopped; 3 during a
-    /// scratch, brake or backspin; 8 while a fill is queued or playing.
+    /// the loop's wrap. `length` is 0, one bar, or 1, one beat (Night 10,
+    /// [`scheduler::fill_length`]): only that bar's last beat, steps 12 to 15, plays
+    /// the fill, from positions 12 to 15 of its recipe, and beats 1 to 3 play the
+    /// groove. A beat fill is due on the first such last beat ahead, so a press before
+    /// this bar's has started still catches it. Refused with 1 for any other
+    /// `phrase_bars` or `length`, or no such fill; 7 while stopped; 3 during a scratch,
+    /// brake or backspin; 8 while a fill is queued or playing.
     pub fn queue_fill_at(
         &mut self,
         request_id: u32,
@@ -66,8 +69,14 @@ impl Engine {
         } else if self.scheduler.fill_busy() {
             reason::ALREADY_PLAYING
         } else {
-            self.scheduler
-                .queue_fill(request_id, index, phrase_bars, Link::None, &self.transport);
+            self.scheduler.queue_fill(
+                request_id,
+                index,
+                phrase_bars,
+                length,
+                Link::None,
+                &self.transport,
+            );
             reason::OK
         };
         if verdict != reason::OK {
@@ -81,6 +90,8 @@ impl Engine {
     /// Fill into (`docs/NIGHT8_PROTOCOL.md`): fill `index` as [`Engine::queue_fill_at`]
     /// with `phrase_bars` and `length`, and the scene `values` (a 44-value vector)
     /// committed on the onset the fill ends, before that step's notes, as one request.
+    /// A beat fill ends on the same downbeat as a bar fill of its bar, so the scene
+    /// lands there either way.
     /// Returns 0 when accepted, otherwise the reason.
     ///
     /// Lanes staged just before with [`Engine::queue_patterns`] and `link` = `scene_id`
@@ -131,12 +142,13 @@ impl Engine {
 
         // The lanes staged for the scene are the scene's from here.
         let lanes = self.claim_staged(scene_id);
-        let ahead = scheduler::fill_offset(&self.transport, phrase_bars);
+        let ahead = scheduler::fill_offset_for(&self.transport, phrase_bars, length);
+        let span = scheduler::fill_span(length);
         let start = self.scheduler.serial() + 1 + ahead as u64;
         self.scheduler.queue_linked(
             scene_id,
             values,
-            start + FILL_STEPS as u64,
+            start + span as u64,
             accent == scheduler::accent::CRASH,
         );
         // The scene it replaced, if one was pending, takes its lanes along.
@@ -146,10 +158,11 @@ impl Engine {
             fill_id,
             index,
             phrase_bars,
+            length,
             Link::Scene(scene_id),
             &self.transport,
         );
-        let land = walk(&self.transport, ahead + FILL_STEPS);
+        let land = walk(&self.transport, ahead + span);
         self.scheduler
             .events
             .push(event::FILL_LINKED, fill_id, scene_id as f64, land as f64);
