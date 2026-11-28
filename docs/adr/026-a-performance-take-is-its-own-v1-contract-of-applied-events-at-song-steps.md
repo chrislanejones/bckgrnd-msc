@@ -65,18 +65,19 @@ Early warning sign to watch for: timeline code that guesses elapsed position fro
 and wrap detection, or a PR that saves or exports a take while
 `contracts/performance.json` still has no elapsed field.
 
-## Amendment: version 2 (2026-11-26, draft)
+## Amendment: version 2 (2026-11-26, extended 2026-11-27, draft)
 
 ### Context
 The pre-mortem's risk came due. Night 11 exports takes (`exportTake`, and Export in the
 events drawer), so a take needed an elapsed position before any file got written. Code:
-`contracts/performance.json` v2, `frontend/lib/recording.ts`,
-`tools/performance-schema.mjs`. Spec: `docs/PERFORMANCE_EVENTS.md`.
+`contracts/performance.json` v2, `frontend/lib/recording.ts`, and
+`frontend/lib/take-schema.ts` (one validator, shared by the app and the checks). Spec:
+`docs/PERFORMANCE_EVENTS.md`.
 
 ### Decision
 - **Engine:** every engine event carries the onset serial `s` (`Scheduler::serial`).
-  Beat Repeat reports events 61 (started) and 62 (ended). This is Silas's part and is
-  landing separately. At 171bad6, `EVENT_WIDTH` is still 4.
+  Beat Repeat reports events 61 (started) and 62 (ended). The ring is now five numbers
+  wide (`507d209`).
 - **Onset:** every event has `onset = s - s(first event of the take)`, and an end has
   `endOnset`. The origin is the take's first event, not the Record press, because
   telemetry carries no serial. `startedAtStep` still says where Record was pressed.
@@ -97,6 +98,19 @@ events drawer), so a take needed an elapsed position before any file got written
   export, and the project format doesn't change.
 - **Versions:** v2 readers (`parseTake`) refuse v1 as well as anything newer. No v1 file
   was ever written, and v1 has no onsets.
+- **`initial`** (11-27) is the state at Record: track, bpm, swing, `scene { slot | null,
+  modified }`, the mix (all 17 parameter ids, plus 8 stems × volume, send, muted and
+  solo), the fill style and its effective length, `repeatDivision` and `loopBars`. The
+  app always writes it. A reader treats it as optional.
+- **Opening a take** (11-27): `inst.recording.openTake(text, filename?)`, `opened`,
+  `openedFile` and `closeOpened()`, with an Open button in the events drawer. It runs
+  `parseTake`, then the event kinds, then the whole schema, and reports errors in plain
+  English. It's view only: it never touches the live take, the transport or the engine.
+
+`initial` is an amendment, not v3, because no v2 file has ever been pushed or released.
+A bump would mean a v2-to-v3 reader path for files nobody has, so v2 stays the one
+format. Opening is view only because replay is Night 13. Loading a mix without the
+timing would be a half replay, and it would overwrite the performer's live state.
 
 This replaces three v1 rules: "never part of ... an export", "no engine, wasm or
 event-ring change", and the reserved `repeat`.
@@ -105,6 +119,7 @@ event-ring change", and the reserved `repeat`.
 + A timeline can lay events at `onset` across wraps, loops, cues and seeks. The v1
   warning sign (an export with no elapsed field) is answered before export ships.
 + A repeat reads straight onto a timeline lane, with nothing to pair up.
++ Replay has a start state, so Night 13 won't have to guess the mix a take began from.
 - Onset 0 is the first event, so a timeline can't place the empty bars between Record
   and that event by onset. The fix is a serial on telemetry, but that changes what
   `onset` means, so it has to land before takes are imported anywhere (PARKING_LOT,
@@ -112,9 +127,13 @@ event-ring change", and the reserved `repeat`.
   estimate is wrong if a loop, cue or seek came after the last engine event.
 - The ring the MCP shares gains a column. An MCP on an older engine has no serials, so
   it can't write a valid v2 take.
-- The app itself doesn't enforce the validation rule. `exportTake` writes whatever the
-  session holds, and `parseTake` checks only the header. Only the schema in the checks
-  (`tools/performance-schema.mjs`) refuses a v2 file with no onsets.
+- `initial.mix.params` requires every id in `contracts/parameters.json`. A new
+  parameter makes every older v2 file fail to open, so it needs v3 or an optional id.
+- Tempo and loop now appear more than once (`bpm`, `initial.bpm` and
+  `mix.params['transport.bpm']`; `loopBars` twice), and nothing checks that the copies agree.
+- The v1 pre-mortem's warning sign has fired: `openTakeText` calls `parseTake` outside
+  the checks, and the origin is still the first event (PERFORMANCE_EVENTS, Deferred).
+  Moving the origin to the Record press now changes the meaning of files that exist.
 - `pass` is stored but derived, so two writers could disagree about it.
 
 ### Alternatives rejected
@@ -126,13 +145,16 @@ event-ring change", and the reserved `repeat`.
   file exists.
 - Making up onsets for an engine without serials: the file would look positioned when
   it isn't.
+- `initial` as v3: the reader paths would cost more than the change, and no v2 file
+  has been pushed or released.
+- Opening that loads the take's mix: that's replay's job (Night 13), and doing it now
+  would overwrite the live state.
 
 ### Pre-mortem
 It is six months later and this was a mistake. Most likely reason: the origin moved
 too late. Takes were imported (timeline, replay or MCP) before telemetry carried a
 serial. When the origin then moved to the Record press, `onset` 0 meant two different
-things in files with the same version number. Or a browser export from an engine
-without serials got saved and shared as v2, and the reader took it in because only the
-header was checked.
-Early warning sign to watch for: a `parseTake` caller outside the checks while
-telemetry still has no serial, or an exported take whose events have no `onset`.
+things in files with the same version number. Or a parameter was added, and every
+saved take stopped opening.
+Early warning sign to watch for: the v1 sign has already fired (Open). The next one is
+a parameter added to `contracts/parameters.json` with no decision about take versions.
