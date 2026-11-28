@@ -33,6 +33,9 @@ export type Telemetry = {
   clipped: boolean;
 };
 
+/** The telemetry frame's index for the last transport command the worklet handled. */
+const TELEMETRY_SERIAL = 15;
+
 /** When a queued scene applies (docs/NIGHT3_PROTOCOL.md, Timing). */
 export const SCENE_TIMING = { now: 0, beat: 1, bar: 2 } as const;
 export type SceneTiming = (typeof SCENE_TIMING)[keyof typeof SCENE_TIMING];
@@ -260,6 +263,9 @@ export class EngineHost {
 
   private bootPromise: Promise<void> | null = null;
 
+  /** The newest transport command's number (`transportCommand`); 0 before any. */
+  private transportSerial = 0;
+
   private mixEndHandler: (() => void) | null = null;
 
   /**
@@ -355,6 +361,10 @@ export class EngineHost {
     }
     if (message.type === 'telemetry') {
       const f = message.frame;
+      // Measured before the worklet handled the newest transport command: stale.
+      // The next frame, after it, follows within a block or two. (`[15]` is absent
+      // from a worklet older than this host: accepted, as before.)
+      if (f.length > TELEMETRY_SERIAL && f[TELEMETRY_SERIAL]! < this.transportSerial) return;
       this.telemetry = {
         levels: f.slice(0, 8),
         step: f[8],
@@ -595,6 +605,8 @@ export class EngineHost {
     if (this.ctx?.state !== 'closed') await this.ctx?.close();
     this.ctx = null;
     this.bootPromise = null;
+    // A new worklet counts its transport commands from 0 again.
+    this.transportSerial = 0;
   }
 
   // -- Transport ------------------------------------------------------------
@@ -602,11 +614,24 @@ export class EngineHost {
   async play(deck: Deck = 'a'): Promise<void> {
     await this.boot();
     await this.resume();
-    this.post({ type: 'transport', deck, action: 'play' });
+    this.post({ type: 'transport', deck, action: 'play', serial: this.transportCommand() });
   }
 
   stop(deck: Deck = 'a'): void {
-    this.post({ type: 'transport', deck, action: 'stop' });
+    this.post({ type: 'transport', deck, action: 'stop', serial: this.transportCommand() });
+  }
+
+  /**
+   * Number a command that changes whether the transport plays (Play, Stop, Panic, Cue,
+   * a mix). The worklet echoes the last number it handled in every telemetry frame,
+   * and a frame older than the newest such command is dropped: it was measured before
+   * the command, so its `playing` is stale. Without this, a frame posted just before
+   * Panic and read just after it said "playing" again, and stayed so if the audio
+   * thread then stalled (Night 12, PARKING_LOT.md).
+   */
+  private transportCommand(): number {
+    this.transportSerial += 1;
+    return this.transportSerial;
   }
 
   // -- Track ----------------------------------------------------------------
@@ -643,6 +668,7 @@ export class EngineHost {
     this.mixEndHandler = onEnd;
     this.post({
       type: 'mix',
+      serial: this.transportCommand(),
       deck,
       bpm,
       swing,
@@ -867,7 +893,7 @@ export class EngineHost {
    * progress is abandoned (no `mixEnd` follows).
    */
   panic(): void {
-    this.post({ type: 'panic' });
+    this.post({ type: 'panic', serial: this.transportCommand() });
   }
 
   /** Post `message` and resolve with the worklet's yes/no answer for `key`. */
@@ -1022,7 +1048,7 @@ export class EngineHost {
   // -- Deck gestures --------------------------------------------------------
 
   cue(): void {
-    this.post({ type: 'cue' });
+    this.post({ type: 'cue', serial: this.transportCommand() });
   }
 
   brake(): void {

@@ -1,6 +1,11 @@
 # ADR-025: Beat Repeat is held-gesture kind 3, looping the five-channel pre-master feed on the division grid
 Date: 2026-11-25   Status: draft
 
+> Note 11-28-2026. Since Night 11 the engine also reports a repeat's start and end as
+> events 61 and 62 (`507d209`), and a take records each repeat with its division, plus
+> `initial.repeatDivision` (ADR-026 v2). That answers this pre-mortem for takes. A
+> project still doesn't carry the division.
+
 ## Context
 Night 10 adds a momentary stutter: hold a pad, and the deck repeats a 1/4, 1/8 or 1/16
 slice until you let go. The held-gesture system (ADR-015, `NIGHT3_PROTOCOL.md` §

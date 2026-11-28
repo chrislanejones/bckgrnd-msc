@@ -40,8 +40,9 @@ shown before a press is the one that plays. Classic stays the default.
 - Two fill lists per track: `track.fills` (hashed, what a project names) and
   `fillStyles` (what the engine plays). Only a test (`FillsTest`, Classic byte for byte
   against `tests/fixtures/fills/classic.json`) keeps index 0 of each the same.
-- A host that loads only `track` gets Classic alone. The MCP companion doesn't read
-  `fillStyles` today.
+- A host that loads only `track` gets Classic alone. The MCP companion never queues a
+  fill. Its Night 11 sync (`be29a85`, branch `night11/mcp-integration`) only counts
+  `fillStyles` and `beatFillStyles` in its capabilities report.
 - A project doesn't record its style: what plays depends on each viewer's preference.
 - Random and Rotate live only in the host: an MCP render or another client can't
   reproduce a performance's sequence of fills (no render plays fills today).

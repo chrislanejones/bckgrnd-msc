@@ -660,3 +660,41 @@ not. Things to settle before or while building it:
   no host race found in the code. Both checks now print the transport, pads and the worklet
   port's traffic when they fail, so the next failure names the cause. (Tara)
 
+
+## Night 12 — Panic and stale telemetry (11-28-2026)
+
+- **Fixed: a telemetry frame from before Panic could say "playing" after it.** The worklet
+  posts telemetry from its render loop; one posted just before it handled Panic is read
+  on the page just after the host applied Panic, and set the transport back to playing.
+  The next frame corrected it about 33 ms later, unless the audio thread stalled. Forced
+  in a test (hold the last frame before Panic, drop every later one, deliver it after
+  Panic), `data-playing` stayed `yes`. Transport commands (Play, Stop, Panic, Cue, a
+  mix) now carry a serial that the worklet echoes in telemetry `[15]`, and the host drops
+  a frame older than its newest transport command. verify-ui "stale telemetry" pins it.
+- **Is that what failed in the suite?** It fits: both checks wait for `data-playing` to
+  read `no`, and only the full suite is loaded enough to stall. But it needs the render
+  thread to stall for the check's whole wait (5 s, 8 s) with the context still
+  `running`, and no run has shown that stall. (A suspended context can't cause it: the
+  host reads playing as `t.playing && engine.running`.) The port trail in the mixing
+  check now shows, on the next failure, whether frames stopped arriving after Panic. If
+  they did not, look elsewhere. (Tara)
+- **A stalled audio thread says nothing to the user.** `onstatechange` reports a context
+  that leaves `running`, but a render thread that stops calling `process` while the
+  context still reads `running` shows nothing: the meters freeze and the playhead stops
+  with no message. A host watchdog (no telemetry for, say, 1 s while playing) could say
+  "Audio has stalled". Not built. (Chris, Felix)
+
+## Found in Night 12 (11-28-2026)
+
+- **An arrangement's length can't be changed.** `fromTake` gives at least 16 bars, and 4
+  past the take (10a85d3), and `startEmpty` gives 16. A length control (`setLength`, plus
+  a field in the drawer) is the follow-up. (Lacey, recording agent)
+- **Clicking a conflict selects only its first event.** Multi-select would let it select
+  them all. (Lacey)
+- **One commit message isn't conventional:** `58b725d wip(ui): ...` sits under a merge on
+  `night12/run`. Left as is rather than rewriting history under a merge. (Lacey)
+- **The MCP resync for `contracts/arrangement.json` is deferred.** No engine file changed,
+  and the MCP doesn't read arrangements; resync when PR #15 merges. (main session)
+- **`docs/ARRANGEMENT.md` hasn't had a chris-voice pass.** It is a developer contract, like
+  PERFORMANCE_EVENTS.md. (recording agent)
+

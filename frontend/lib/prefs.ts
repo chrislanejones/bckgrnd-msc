@@ -9,7 +9,7 @@ export const PREF = {
   fillAt: 'bckgrnd-msc:fill-at',
   /** The phrase length a Phrase end fill ends on: 2, 4, 8 or 16. */
   phraseBars: 'bckgrnd-msc:fill-phrase-bars',
-  /** Fill style (Night 9): `classic`, `simple`, `busy` or `syncopated`. */
+  /** Fill style (Night 9): `classic`, `simple`, `busy`, `syncopated`, `random` or `rotate`. */
   fillStyle: 'bckgrnd-msc:fill-style',
   /** Fill length (Night 10): `bar` (the whole bar) or `beat` (its last beat). */
   fillLength: 'bckgrnd-msc:fill-length',

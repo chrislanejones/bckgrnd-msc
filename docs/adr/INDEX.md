@@ -41,6 +41,7 @@ and is marked `(backfilled)`.
 | [025](025-beat-repeat-is-gesture-kind-3-looping-the-pre-master-feed.md) | Beat Repeat is held-gesture kind 3: it loops the five-channel pre-master feed from the next grid line, releases at once, and its division is an app preference, not project data | draft | 2026-11-25 |
 | [026](026-a-performance-take-is-its-own-v1-contract-of-applied-events-at-song-steps.md) | A performance take is its own versioned contract (`bckgrnd-msc/performance` v1), held in memory and outside the project format: only applied scenes, fills and Rises, at engine song steps; elapsed position and replay are deferred. **Amended 2026-11-26 (v2, draft):** every event has an engine `onset` from the take's first event, Beat Repeat is one `repeat` event, fills record the length that played, a take exports as its own file, and v2 readers refuse v1. **Extended 2026-11-27:** `initial` (the state at Record) joins v2 without a bump, and a take file opens view only | draft | 2026-11-25 |
 | [027](027-one-beat-fills-are-dedicated-recipes-beside-the-track-played-as-fill-length-1.md) | One-beat fills are four dedicated PHP recipes shipped as `beatFillStyles` beside the track, played as engine fill length 1 (steps 12-15) at index 4-7; Bar stays the default and a library without them plays the bar; Fill length is an app preference | draft | 2026-11-26 |
+| [028](028-a-working-arrangement-is-its-own-v1-document-made-from-a-take-never-the-take.md) | A working arrangement is its own document (`bckgrnd-msc/arrangement` v1), made from a take and never the take, outside the project format: positions are `at` steps that never wrap, linked pairs are one event, an edit that adds a conflict is refused, and replay (Night 13) reads arrangements | draft | 2026-11-28 |
 
 Night 8's new event numbers (51 and up) and reason 11 (`linked`) are protocol, not
 decisions. They belong in a Night 8 protocol doc, alongside `docs/NIGHT7_PROTOCOL.md`,
@@ -50,7 +51,12 @@ Night 9 amended three drafts instead of adding ADRs for bug fixes: ADR-015 (the 
 keeps one record per request id), ADR-019 (a Rise keeps its own record and is followed
 in exact values) and ADR-016 (tone notes no longer allocate on the audio path).
 
-Night 11's events drawer (`frontend/ui/EventsDrawer.tsx`) is the first fixed sheet over
-the page, but it doesn't get an ADR. It's UI only: it reads the take and changes no data
-shape, storage or boundary. Its one stored value is an open/closed app preference
-(`bckgrnd-msc:events-open`). If a second overlay copies it, that's the time to write one.
+Night 11's events drawer (`frontend/ui/EventsDrawer.tsx`) and Night 11B's Arrangement
+drawer don't get ADRs. Both are fixed sheets, like the pattern drawer (`.drawer.is-open`,
+since `44a19e2`), so neither is a new pattern. They're UI only: they read the take and
+change no data shape, storage or boundary. Each stores only an open/closed app
+preference (`bckgrnd-msc:events-open`, `bckgrnd-msc:arrangement-open`).
+
+ADR-026 is proposed for a split (Night 12 review): v1 stays in 026, and its v2 amendment
+would move to a new ADR. ADR-028 is taken by the arrangement, so if Chris accepts the
+split, the take v2 ADR becomes **ADR-029**.

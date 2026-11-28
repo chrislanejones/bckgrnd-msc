@@ -1234,6 +1234,70 @@ try {
     await page.close();
   }
 
+  // ---- Panic against a stale telemetry frame (Night 12). -------------------------
+  // A frame the worklet posted just before it handled Panic can be read just after
+  // the host applied Panic. It said "playing", and if the audio thread then stalled
+  // nothing corrected it: the transport read playing after Panic. Forced here: hold
+  // the last frame before Panic, drop every later one (a stalled render thread with
+  // the context still running), deliver the held frame after Panic, and read it.
+  {
+    const { page, errors } = await open(1440, 1000);
+    try {
+      await page.addInitScript(() => {
+        const tel = (window.__STALE_TEL__ = { mode: 'pass', deliver: null });
+        const desc = Object.getOwnPropertyDescriptor(MessagePort.prototype, 'onmessage');
+        Object.defineProperty(MessagePort.prototype, 'onmessage', {
+          configurable: true,
+          get() { return desc.get.call(this); },
+          set(handler) {
+            desc.set.call(this, handler && ((e) => {
+              if (e.data?.type === 'telemetry' && tel.mode !== 'pass') {
+                if (tel.mode === 'hold' && e.data.frame[9] === 1) tel.deliver = () => handler.call(this, e);
+                return;
+              }
+              return handler.call(this, e);
+            }));
+          },
+        });
+      });
+      await page.reload({ waitUntil: 'networkidle' });
+      await page.waitForSelector('article.stem');
+      const playing = () => page.locator('.app').getAttribute('data-playing');
+      const waitPlaying = (want) => page.waitForFunction((w) => document.querySelector('.app')?.getAttribute('data-playing') === w, want, { timeout: 5000 });
+      await page.getByRole('button', { name: 'Play the track' }).click();
+      await waitPlaying('yes');
+      // Keep the newest frame that says playing, then let none through.
+      await page.evaluate(() => { window.__STALE_TEL__.mode = 'hold'; });
+      await page.waitForFunction(() => window.__STALE_TEL__.deliver !== null, null, { timeout: 5000 });
+      await page.evaluate(() => { window.__STALE_TEL__.mode = 'drop'; });
+      await page.getByRole('button', { name: 'Panic', exact: true }).click();
+      await waitPlaying('no');
+      await page.evaluate(() => window.__STALE_TEL__.deliver());
+      // Not a wait for something to change: nothing should, and a second is ~30
+      // frames' worth of time in which none arrive.
+      await page.waitForTimeout(1000);
+      const after = await playing();
+      check('stale telemetry: a frame from before Panic, read after it, does not say playing again', after === 'no', after);
+      await page.evaluate(() => { window.__STALE_TEL__.mode = 'pass'; });
+      await page.waitForTimeout(300);
+      check('stale telemetry: frames after Panic still say stopped', (await playing()) === 'no');
+      // Play sets "playing" itself; the bar readout shows and moves only on telemetry,
+      // so it moving shows current frames are taken.
+      await page.getByRole('button', { name: 'Play the track' }).click();
+      const readout = () => page.evaluate(() => document.querySelector('.bar-readout .tabular-nums')?.textContent ?? null);
+      const shown = await page.waitForFunction(() => Boolean(document.querySelector('.bar-readout .tabular-nums')?.textContent), null, { timeout: 8000 })
+        .then(() => true, () => false);
+      const bar = await readout();
+      const moved = shown && await page.waitForFunction((was) => document.querySelector('.bar-readout .tabular-nums')?.textContent !== was, bar, { timeout: 8000 })
+        .then(() => true, () => false);
+      check('stale telemetry: after Panic, Play plays and the playhead moves (current frames are taken)', moved && (await playing()) === 'yes', `${bar} -> ${await readout()}`);
+    } catch (e) {
+      check('stale telemetry: the walk-through ran to the end', false, String(e.message).split('\n')[0]);
+    }
+    check('stale telemetry: no page errors', errors.length === 0, errors.join('; '));
+    await page.close();
+  }
+
   // ---- Rise (Night 7 timed builds), the rest of the contract: tools/verify-ui-rise.mjs.
   await riseChecks({ open, check });
 

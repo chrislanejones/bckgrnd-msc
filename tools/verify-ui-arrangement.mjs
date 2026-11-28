@@ -223,6 +223,9 @@ export async function arrangementChecks({ open, check }) {
       at = 'Esc';
       await page.locator('.arrangement-marker').first().focus();
       await page.keyboard.press('Escape');
+      check('arrangement: the first Esc deselects and keeps it open (Night 12)',
+        (await page.locator('.arrangement-marker[aria-current="true"]').count()) === 0 && (await page.locator('.arrangement').isVisible()));
+      await page.keyboard.press('Escape');
       await page.waitForSelector('.arrangement[hidden]', { state: 'attached' });
       check('arrangement: Esc closes it and gives focus back to the Timeline toggle',
         (await page.evaluate(() => document.activeElement?.classList.contains('timeline-toggle'))) && (await toggle.getAttribute('aria-expanded')) === 'false');
@@ -231,6 +234,200 @@ export async function arrangementChecks({ open, check }) {
       check('arrangement: the walk-through ran to the end', false, `at ${at}: ${String(e.message).split('\n').slice(0, process.env.VERIFY_VERBOSE ? 14 : 1).join(' | ')}`);
     }
     check('arrangement: no page errors', errors.length === 0, errors.join('; '));
+    await page.close();
+  }
+
+  // ---- Night 12: the editor at 1440 ------------------------------------------------
+  {
+    const { page, errors } = await open(1440, 1000);
+    const k = kit(page);
+    const arr = page.locator('.arrangement');
+    let at = 'record';
+    try {
+      await k.play();
+      await k.record();
+      await k.pad(SPARSE).click();
+      await k.waitFor('scene');
+      await page.locator('.fill-button').click();
+      await k.waitFor('fill', true);
+      const rise = page.getByRole('radio', { name: 'Rise into the scene over several bars' });
+      if ((await rise.getAttribute('aria-checked')) !== 'true') await rise.click();
+      await page.getByRole('radio', { name: 'Rise over 2 bars' }).click();
+      await k.pad(DROP).click();
+      await k.waitFor('rise', true);
+      await page.locator('.record-toggle').click();
+      await page.waitForFunction(() => window.__BCKGRND_RECORDING__.state() === 'stopped', null, RT);
+      await page.evaluate(() => window.scrollTo(0, 0));
+      const takeBefore = JSON.stringify(await page.evaluate(() => window.__BCKGRND_RECORDING__.recording()));
+
+      at = 'arrange';
+      const closed = await measure(page);
+      await k.openTimeline();
+      await arr.getByRole('button', { name: 'Arrange this take', exact: true }).click();
+      await page.waitForSelector('.arrangement[data-source="working"] .arrangement-marker');
+      const head = (await page.locator('.arrangement-head').textContent()) ?? '';
+      check('editor: Arrange this take makes a working arrangement, headed "from" its take',
+        /from /.test(head) && (await arr.getByRole('radio', { name: 'Edit', exact: true }).getAttribute('aria-checked')) === 'true', head);
+      // The conversion's notes (what it chose: "a cancelled Rise was dropped"), quietly, when it has any.
+      const status0 = (await page.locator('.arrangement-status').textContent()) ?? '';
+      const notes = await page.evaluate(() => window.__BCKGRND_ARRANGEMENT__?.()?.notes ?? []);
+      check('editor: the conversion notes show once, quietly, on the status line (none: nothing shown)',
+        notes.length === 0 ? status0 === '' : status0 === notes.join(' · ') && (await page.locator('.arrangement-status').getAttribute('data-tone')) === 'note',
+        `notes ${JSON.stringify(notes)}, status "${status0}"`);
+      const opened = await measure(page);
+      check('editor: editing, the page is the same height and the toolbar 70px',
+        opened.pageH === closed.pageH && opened.toolbar === closed.toolbar && opened.toolbar <= MOUSE_TOOLBAR_MAX && opened.pageW <= 1440,
+        `page ${closed.pageH} -> ${opened.pageH}px, toolbar ${opened.toolbar}px`);
+      const lanePx = await page.evaluate(() => Math.round(document.querySelector('.arrangement-track').getBoundingClientRect().height));
+      check('editor: lanes are 28 to 32px with a mouse', lanePx >= 28 && lanePx <= 32, `${lanePx}px`);
+
+      // Where a marker is, in steps, from its left edge on the track.
+      const stepOf = (kind) => page.evaluate((kd) => {
+        const pps = parseFloat(getComputedStyle(document.querySelector('.arrangement-scroll')).getPropertyValue('--step-px'));
+        const m = document.querySelector(`.arrangement-marker[data-kind="${kd}"]`);
+        const track = m.closest('.arrangement-track').getBoundingClientRect().left;
+        return Math.round((m.parentElement.getBoundingClientRect().left - track) / pps);
+      }, kind);
+      const count = () => page.locator('.arrangement-marker').count();
+      const sceneMarker = page.locator('.arrangement-marker[data-kind="scene"]').first();
+
+      at = 'select and drag';
+      await arr.getByRole('radio', { name: 'Snap to the beat', exact: true }).click();
+      await sceneMarker.click();
+      check('editor: a click selects', (await sceneMarker.getAttribute('aria-current')) === 'true');
+      const s0 = await stepOf('scene');
+      const box = await sceneMarker.boundingBox();
+      await page.mouse.move(box.x + 6, box.y + box.height / 2);
+      await page.mouse.down();
+      await page.mouse.move(box.x + 6 + 30, box.y + box.height / 2, { steps: 4 });
+      await page.mouse.move(box.x + 6 + 50, box.y + box.height / 2, { steps: 4 });
+      const ghost = await page.evaluate(() => {
+        const g = document.querySelector('.arrangement-ghost');
+        if (!g) return null;
+        const pps = parseFloat(getComputedStyle(document.querySelector('.arrangement-scroll')).getPropertyValue('--step-px'));
+        return Math.round((g.getBoundingClientRect().left - g.closest('.arrangement-track').getBoundingClientRect().left) / pps);
+      });
+      await page.mouse.up();
+      await page.waitForSelector('.arrangement-ghost', { state: 'detached', timeout: 2000 });
+      const s1 = await stepOf('scene');
+      check('editor: dragging shows a ghost on the beat grid while it moves', ghost !== null && ghost % 4 === 0, `ghost at step ${ghost}`);
+      check('editor: a drag of 50px at 6px a step moves the scene two beats (snapped)', s1 - s0 === 8, `${s0} -> ${s1}`);
+
+      at = 'keyboard nudge';
+      await sceneMarker.focus();
+      await page.keyboard.press('ArrowRight');
+      const s2 = await stepOf('scene');
+      await page.keyboard.press('Shift+ArrowRight');
+      const s3 = await stepOf('scene');
+      check('editor: → nudges a beat (the snap), Shift+→ a bar', s2 - s1 === 4 && s3 - s2 === 16, `${s1} -> ${s2} -> ${s3}`);
+      check('editor: focus stays on the nudged event', (await page.evaluate(() => document.activeElement?.dataset.kind)) === 'scene');
+
+      at = 'refused move';
+      // The model snaps every kind to its own grid, so a refusal is a conflict: a scene
+      // change dropped inside the Rise (bar 4 to its landing at bar 6) is one.
+      const riseStart = await stepOf('rise');
+      const sb = await sceneMarker.boundingBox();
+      const target = riseStart + 16;
+      await page.mouse.move(sb.x + 6, sb.y + sb.height / 2);
+      await page.mouse.down();
+      await page.mouse.move(sb.x + 6 + (target - s3) * 6, sb.y + sb.height / 2, { steps: 8 });
+      const dropGhost = await page.evaluate(() => Boolean(document.querySelector('.arrangement-ghost')));
+      await page.mouse.up();
+      await page.waitForSelector('.arrangement-ghost', { state: 'detached', timeout: 2000 });
+      const refused = { tone: await page.locator('.arrangement-status').getAttribute('data-tone'), text: await page.locator('.arrangement-status').textContent() };
+      check('editor: a refused drop (a scene inside the Rise) springs back, and the status line says why',
+        dropGhost && (await stepOf('scene')) === s3 && refused.tone === 'refused' && /Rise/.test(refused.text ?? ''), JSON.stringify(refused));
+
+      at = 'delete, undo, redo';
+      const n0 = await count();
+      await sceneMarker.focus();
+      await page.keyboard.press('Delete');
+      const n1 = await count();
+      await page.keyboard.press('Control+z');
+      const n2 = await count();
+      await page.keyboard.press('Control+Shift+z');
+      const n3 = await count();
+      await arr.getByRole('button', { name: 'Undo', exact: true }).click();
+      const n4 = await count();
+      check('editor: Delete removes; Ctrl+Z undoes; Ctrl+Shift+Z redoes; the Undo button undoes',
+        n1 === n0 - 1 && n2 === n0 && n3 === n0 - 1 && n4 === n0, `${n0} -> ${n1} -> ${n2} -> ${n3} -> ${n4}`);
+      await arr.getByRole('button', { name: 'Redo', exact: true }).click();
+      await arr.getByRole('button', { name: 'Undo', exact: true }).click();
+      check('editor: the Redo button redoes', (await count()) === n0);
+
+      at = 'duplicate and insert';
+      await page.locator('.arrangement-marker[data-kind="scene"]').first().focus();
+      const before = await page.evaluate(() => document.activeElement?.dataset.key);
+      await page.keyboard.press('Control+d');
+      const after = await page.evaluate(() => ({ key: document.activeElement?.dataset.key, current: document.querySelector('.arrangement-marker[aria-current="true"]')?.dataset.key }));
+      check('editor: Ctrl+D duplicates and selects the copy', (await count()) === n0 + 1 && after.key !== before && after.current === after.key, JSON.stringify({ before, after }));
+      const scenes0 = await page.locator('.arrangement-lane[data-lane="scene"] .arrangement-marker').count();
+      const fills0 = await page.locator('.arrangement-lane[data-lane="fill"] .arrangement-marker').count();
+      await page.keyboard.press('Escape');
+      await arr.getByRole('button', { name: 'Scene', exact: true }).click();
+      await page.keyboard.press('Escape');
+      await arr.getByRole('button', { name: 'Fill', exact: true }).click();
+      check('editor: Insert Scene and Insert Fill add one to their lanes',
+        (await page.locator('.arrangement-lane[data-lane="scene"] .arrangement-marker').count()) === scenes0 + 1
+          && (await page.locator('.arrangement-lane[data-lane="fill"] .arrangement-marker').count()) === fills0 + 1,
+        await page.locator('.arrangement-status').textContent());
+
+      at = 'inspector';
+      await page.locator('.arrangement-marker[data-kind="fill"]').first().click();
+      await page.locator('.arrangement-inspector select').first().selectOption('busy');
+      check('editor: the inspector edits the selection (fill style)', /Busy/.test((await page.locator('.arrangement-marker[data-kind="fill"]').first().textContent()) ?? ''));
+
+      at = '? hint';
+      await arr.getByRole('button', { name: 'Keyboard shortcuts', exact: true }).click();
+      check('editor: "?" lists the shortcuts', /Nudge a bar/.test((await page.locator('.arrangement-help').textContent()) ?? ''));
+      await arr.getByRole('button', { name: 'Keyboard shortcuts', exact: true }).click();
+
+      at = 'save and open';
+      const snapshot = () => page.evaluate(() => [...document.querySelectorAll('.arrangement-marker')].map((m) => `${m.dataset.kind}@${m.parentElement.style.left}:${m.textContent}`).sort().join('|'));
+      const was = await snapshot();
+      const [download] = await Promise.all([page.waitForEvent('download', RT), arr.getByRole('button', { name: 'Save', exact: true }).click()]);
+      const file = await download.path();
+      check('editor: Save downloads the arrangement', /\.json$/.test(download.suggestedFilename()) && Boolean(file), download.suggestedFilename());
+      check('editor: saved, the dirty mark goes', (await page.locator('.arrangement-dirty').count()) === 0);
+      await page.locator('.arrangement-marker[data-kind="scene"]').first().focus();
+      await page.keyboard.press('Delete');
+      check('editor: an edit marks it dirty', (await page.locator('.arrangement-dirty').count()) === 1);
+      await page.locator('.arrangement input[type="file"]').setInputFiles({ name: download.suggestedFilename(), mimeType: 'application/json', buffer: (await import('node:fs')).readFileSync(file) });
+      await page.waitForFunction((w) => [...document.querySelectorAll('.arrangement-marker')].map((m) => `${m.dataset.kind}@${m.parentElement.style.left}:${m.textContent}`).sort().join('|') === w, was, { timeout: 5000 }).catch(() => {});
+      check('editor: Open reads the saved file back: the same events in the same places', (await snapshot()) === was);
+
+      at = 'take unchanged';
+      check('editor: the take is unchanged by every edit', JSON.stringify(await page.evaluate(() => window.__BCKGRND_RECORDING__.recording())) === takeBefore);
+      await arr.getByRole('radio', { name: 'Take', exact: true }).click();
+      check('editor: Take | Edit shows the take, read only, beside it',
+        (await page.locator('.arrangement').getAttribute('data-source')) === 'current' && (await page.locator('.arrangement-toolbar [aria-label="Undo"]').count()) === 0);
+      await arr.getByRole('radio', { name: 'Edit', exact: true }).click();
+
+      at = 'resize';
+      const h0 = await page.evaluate(() => document.querySelector('.arrangement').getBoundingClientRect().height);
+      const handle = arr.getByRole('separator', { name: 'Resize the arrangement' });
+      await handle.focus();
+      for (let i = 0; i < 3; i++) await page.keyboard.press('ArrowUp');
+      const h1 = await page.evaluate(() => document.querySelector('.arrangement').getBoundingClientRect().height);
+      const hb = await handle.boundingBox();
+      await page.mouse.move(hb.x + hb.width / 2, hb.y + hb.height / 2);
+      await page.mouse.down();
+      await page.mouse.move(hb.x + hb.width / 2, hb.y + hb.height / 2 - 40, { steps: 4 });
+      await page.mouse.up();
+      const h2 = await page.evaluate(() => document.querySelector('.arrangement').getBoundingClientRect().height);
+      check('editor: the handle resizes with the arrows (16px each) and by dragging',
+        Math.round(h1 - h0) === 48 && Math.round(h2 - h1) === 40 && (await handle.getAttribute('aria-valuenow')) === String(Math.round(h2)), `${h0} -> ${h1} -> ${h2}px`);
+      const stored = await page.evaluate(() => localStorage.getItem('bckgrnd-msc:arrangement-height'));
+      await page.reload({ waitUntil: 'networkidle' });
+      await page.waitForSelector('.arrangement:not([hidden])');
+      const h3 = await page.evaluate(() => document.querySelector('.arrangement').getBoundingClientRect().height);
+      check('editor: the height is remembered across a reload (bckgrnd-msc:arrangement-height)', stored === String(Math.round(h2)) && Math.round(h3) === Math.round(h2), `${stored} / ${h3}px`);
+      const page2 = await measure(page);
+      check('editor: taller, still no page growth and the toolbar 70px', page2.pageH === closed.pageH && page2.toolbar <= MOUSE_TOOLBAR_MAX, `${page2.pageH}px, ${page2.toolbar}px`);
+    } catch (e) {
+      check('editor: the walk-through ran to the end', false, `at ${at}: ${String(e.message).split('\n').slice(0, process.env.VERIFY_VERBOSE ? 14 : 1).join(' | ')}`);
+    }
+    check('editor: no page errors', errors.length === 0, errors.join('; '));
     await page.close();
   }
 
@@ -280,8 +477,42 @@ export async function arrangementChecks({ open, check }) {
         });
         check(`${w}px arrangement: nothing spills past the sheet (zoom and Close in reach)`, spill.length === 0, spill.join(', '));
       }
+      // Night 12: editing, at this width.
+      const arr = page.locator('.arrangement');
+      await arr.getByRole('button', { name: 'Arrange this take', exact: true }).click();
+      await page.waitForSelector('.arrangement[data-source="working"] .arrangement-marker');
+      await page.locator('.arrangement-marker').first().click();
+      const editing = await measure(page);
+      const tools = await page.evaluate(() => {
+        const t = document.querySelector('.arrangement-toolbar').getBoundingClientRect();
+        const a = document.querySelector('.arrangement');
+        return { h: Math.round(t.height), spill: a.scrollWidth > a.clientWidth + 0.5 };
+      });
+      console.log(`      editor ${w}px: sheet ${editing.drawer ? `${Math.round(editing.drawer.w)}x${Math.round(editing.drawer.h)} at y ${Math.round(editing.drawer.y)}` : 'missing'}; tools row ${tools.h}px; page ${editing.pageH}px; toolbar ${editing.toolbar}px`);
+      check(`${w}px editor: editing, the page neither grows nor scrolls sideways, nothing spills past the sheet`,
+        editing.pageH === closed.pageH && editing.pageW <= w && !tools.spill, `page ${closed.pageH} -> ${editing.pageH}px, spill ${tools.spill}`);
+      if (!touch) {
+        check(`${w}px editor: the scenes toolbar stays 70px`, editing.toolbar === closed.toolbar && editing.toolbar <= MOUSE_TOOLBAR_MAX, `${editing.toolbar}px`);
+        check(`${w}px editor: the tools are one row`, tools.h <= 34, `${tools.h}px`);
+      }
+      check(`${w}px editor: the sheet is inside the window`,
+        editing.drawer && editing.drawer.x >= -0.5 && editing.drawer.r <= w + 0.5 && editing.drawer.b <= h + 0.5 && editing.drawer.y >= 0, JSON.stringify(editing.drawer));
+      if (touch) {
+        check(`${w}px editor: the tools are one 44px row that scrolls sideways, the status line under it`, tools.h <= 80, `${tools.h}px`);
+        const small = await page.evaluate(() => [...document.querySelectorAll('.arrangement button, .arrangement select')]
+          .filter((b) => b.getClientRects().length && (b.getBoundingClientRect().width < 44 || b.getBoundingClientRect().height < 44))
+          .map((b) => `${b.getAttribute('aria-label') ?? b.textContent.trim()} ${Math.round(b.getBoundingClientRect().width)}x${Math.round(b.getBoundingClientRect().height)}`));
+        check(`${w}px editor: every button and menu in it is 44 x 44 or more, editing`, small.length === 0, small.join(', '));
+        const left = () => page.evaluate(() => document.querySelector('.arrangement-marker[aria-current="true"]')?.parentElement.style.left);
+        // A one-scene take makes a 1-bar arrangement: nudge by a sixteenth, inside it.
+        await arr.getByRole('radio', { name: 'Snap to the sixteenth', exact: true }).click();
+        const l0 = await left();
+        await arr.getByRole('button', { name: 'Nudge later', exact: true }).click();
+        const l1 = await left();
+        check(`${w}px editor: the inspector's ▶ nudges the selection (dragging is hard on a phone)`, l0 !== l1 && Boolean(l1), `${l0} -> ${l1}`);
+      }
     } catch (e) {
-      check(`${w}px arrangement: the walk-through ran to the end`, false, String(e.message).split('\n')[0]);
+      check(`${w}px arrangement: the walk-through ran to the end`, false, String(e.message).split('\n').slice(0, process.env.VERIFY_VERBOSE ? 14 : 1).join(' | '));
     }
     check(`${w}px arrangement: no page errors`, errors.length === 0, errors.join('; '));
     await page.close();

@@ -22,8 +22,9 @@ index `fillStyles.length + i`, which is 4-7 with all four. The engine doesn't kn
 which fills are beat fills; it plays whatever index and length it's sent.
 
 Host: Fill length is an app preference, `bckgrnd-msc:fill-length`, with Bar as the
-default. If a library has no `beatFillStyles` (exported before Night 10), a press plays
-the bar and names it the bar. Beat stays stored but is aria-disabled, with the reason
+default. If the engine has no beat fills loaded (no `beatFillStyles`, or no
+`fillStyles` to load them after; `beatFillsLoad`, `2e495cd`), a press plays the bar and
+names it the bar. Beat stays stored but is aria-disabled, with the reason
 shown. `resolveFillAt` picks the style with the same choice and cursor at either length,
 so Random and Rotate don't depend on it. A queued fill keeps the length it was sent with,
 like its style.
@@ -51,11 +52,14 @@ like its style.
   pending/active fill and the existing `length` argument already cover it.
 
 ## Open questions
-- Is length 0 bit-identical to Night 9? The commit and the protocol say so, but
-  PARKING_LOT (11-25-2026) says the bypass hash check has to be rerun.
+- ~~Is length 0 bit-identical to Night 9?~~ Yes: the Night 11 gates found 120/120
+  renders identical to main `5e2e809` (plain, Rise and bar fills).
 - ~~The take contract (ADR-026) has no length field.~~ Answered by ADR-026's v2
   amendment: `fill` and `fillInto` record the length that played.
-- The MCP companion (vendored engine has only `queue_fill`) reads neither fill field.
+- The MCP companion never queues a fill. Its Night 11 sync (`be29a85`, not on its
+  main) vendors `queue_fill_at` and `queue_build_with_length`, and only counts the
+  beat fills in its capabilities report. No host but the app is guarded against a
+  mismatched index (PARKING_LOT, beat fills QA, 11-26-2026).
 - Whether the four recipes sound right is for Chris to judge by ear. Not claimed here.
 
 ## Pre-mortem

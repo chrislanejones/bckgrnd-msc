@@ -123,6 +123,8 @@ event-ring change", and the reserved `repeat`.
   warning sign (an export with no elapsed field) is answered before export ships.
 + A repeat reads straight onto a timeline lane, with nothing to pair up.
 + Replay has a start state, so Night 13 won't have to guess the mix a take began from.
++ The Arrangement drawer (`e3ef8c2`) already lays a take out by `onset`, read only, so
+  it doesn't guess position from `seq`, which was v1's warning sign.
 - Onset 0 is the first event, so a timeline can't place the empty bars between Record
   and that event by onset. The fix is a serial on telemetry, but that changes what
   `onset` means, so it has to land before takes are imported anywhere (PARKING_LOT,

@@ -344,7 +344,8 @@ token. Nothing is sent to the engine.
 
 ## Deferred
 
-- Replay, a timeline, arrangement editing, automation curves and WAV export.
+- Replay (Night 13), automation curves and WAV export (Night 14). A read-only timeline
+  shipped in Night 11B (`frontend/ui/ArrangementDrawer.tsx`); editing is Night 12.
 - Capturing Filter Hold, Echo Throw and other gestures (the reserved kinds).
 - An onset origin at the Record press. It needs the onset serial on telemetry.
-- Replaying an opened take (Night 13), and laying it on a timeline (Lacey's drawer).
+- Replaying an opened take (Night 13).
