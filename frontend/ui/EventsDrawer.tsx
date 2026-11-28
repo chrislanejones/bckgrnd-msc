@@ -17,7 +17,7 @@
  * moves focus to its heading, so a screen reader lands in the labeled region.
  */
 
-import { useCallback, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type RefObject } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type ReactNode, type RefObject } from 'react';
 import { Download, ListOrdered, X } from 'lucide-react';
 import { describeEvent, type PerformanceEvent, type PerformanceRecording } from '../lib/recording';
 import type { RecordingControls } from './RecordToggle';
@@ -173,6 +173,7 @@ export function EventsDrawer({
   source,
   onClose,
   returnFocus,
+  timeline,
 }: {
   id: string;
   open: boolean;
@@ -180,6 +181,8 @@ export function EventsDrawer({
   onClose: () => void;
   /** The toggle, which gets focus back when Esc or Close shuts the drawer. */
   returnFocus: RefObject<HTMLButtonElement | null>;
+  /** The Arrangement drawer's Timeline toggle (Night 11B), first in the header's actions. */
+  timeline?: ReactNode;
 }) {
   const headingId = useId();
   const reasonId = useId();
@@ -233,6 +236,7 @@ export function EventsDrawer({
           <p className="events-summary">{summary}</p>
         </div>
         <div className="events-actions">
+          {timeline}
           <button
             type="button"
             className="events-action tap"

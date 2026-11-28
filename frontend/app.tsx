@@ -31,6 +31,7 @@ import { SCENE_SLOTS } from './lib/contract';
 import { PanicButton, TransportBar } from './ui/Transport';
 import { RecordToggle } from './ui/RecordToggle';
 import { EventsDrawer, EventsToggle, useEventsOpen } from './ui/EventsDrawer';
+import { ArrangementDrawer, TimelineToggle, useArrangementOpen } from './ui/ArrangementDrawer';
 
 type View = 'perform' | 'mix' | 'edit';
 
@@ -77,6 +78,16 @@ export function App() {
   const eventsId = useId();
   const eventsToggle = useRef<HTMLButtonElement>(null);
   const closeEvents = useCallback(() => setEventsOpen(false), [setEventsOpen]);
+  // The take as a timeline (Night 11B): a bottom sheet, opened from the events drawer.
+  const [arrangementOpen, setArrangementOpen] = useArrangementOpen();
+  const arrangementId = useId();
+  const timelineToggle = useRef<HTMLButtonElement>(null);
+  const closeArrangement = useCallback(() => setArrangementOpen(false), [setArrangementOpen]);
+  // Back to the Timeline toggle, or to the Events toggle when its drawer is folded.
+  const arrangementReturn = useCallback(
+    () => (timelineToggle.current?.isConnected && timelineToggle.current.getClientRects().length ? timelineToggle.current : eventsToggle.current),
+    [],
+  );
   const [selected, setSelected] = useState<StemId>('kick');
   const [inspectorTab, setInspectorTab] = useState<InspectorTab>('master');
   // Compare A/B folds into the scenes header (Night 9B): closed until chosen, remembered
@@ -175,7 +186,13 @@ export function App() {
           setKnobsOpen(false);
           document.querySelector<HTMLElement>('[aria-controls="inspector"]')?.focus();
         }
-        // The events drawer last: it is non-modal, so a sheet opened over it goes first.
+        // The take's drawers last: they are non-modal, so a sheet opened over them goes
+        // first; the arrangement (the bottom sheet) before the events drawer.
+        if (arrangementOpen && !libraryOpen && !(phone && knobsOpen)) {
+          setArrangementOpen(false);
+          if (document.activeElement === document.body) arrangementReturn()?.focus();
+          return;
+        }
         if (eventsOpen && !libraryOpen && !(phone && knobsOpen)) {
           setEventsOpen(false);
           if (document.activeElement === document.body) eventsToggle.current?.focus();
@@ -682,7 +699,28 @@ export function App() {
         phone={phone}
       />
 
-      <EventsDrawer id={eventsId} open={eventsOpen} source={inst.recording} onClose={closeEvents} returnFocus={eventsToggle} />
+      <EventsDrawer
+        id={eventsId}
+        open={eventsOpen}
+        source={inst.recording}
+        onClose={closeEvents}
+        returnFocus={eventsToggle}
+        timeline={
+          <TimelineToggle
+            open={arrangementOpen}
+            onToggle={() => setArrangementOpen(!arrangementOpen)}
+            controls={arrangementId}
+            buttonRef={timelineToggle}
+          />
+        }
+      />
+      <ArrangementDrawer
+        id={arrangementId}
+        open={arrangementOpen}
+        source={inst.recording}
+        onClose={closeArrangement}
+        returnFocus={arrangementReturn}
+      />
 
       {phone ? (
         <div className="phone-dock">
