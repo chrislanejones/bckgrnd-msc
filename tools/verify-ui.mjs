@@ -1130,6 +1130,39 @@ try {
   {
     const { page, errors } = await open(1440, 1000);
     try {
+      // Night 11B: "Panic abandons the mix" fails only in the full suite. Keep a trail
+      // of what crosses the worklet port (messages sent, telemetry and mixEnd
+      // received) so a failure says which half failed and what happened after Panic.
+      await page.addInitScript(() => {
+        const trail = (window.__MIX_TRAIL__ = { sent: [], got: [], last: null });
+        const t0 = performance.now();
+        const at = () => Math.round(performance.now() - t0);
+        const post = MessagePort.prototype.postMessage;
+        MessagePort.prototype.postMessage = function (message, ...rest) {
+          const type = message && typeof message === 'object' ? message.type : typeof message;
+          if (type && !['volume', 'send'].includes(type)) trail.sent.push([at(), type, message?.action ?? message?.deck ?? '']);
+          return post.call(this, message, ...rest);
+        };
+        const desc = Object.getOwnPropertyDescriptor(MessagePort.prototype, 'onmessage');
+        Object.defineProperty(MessagePort.prototype, 'onmessage', {
+          configurable: true,
+          get() { return desc.get.call(this); },
+          set(handler) {
+            desc.set.call(this, handler && ((e) => {
+              const m = e.data;
+              if (m?.type === 'telemetry') {
+                const f = m.frame;
+                const now = { playing: f[9] === 1, deck: f[10] === 0 ? 'a' : 'b', mixing: f[11] === 1, step: f[8] };
+                const was = trail.last;
+                if (!was || was.playing !== now.playing || was.deck !== now.deck || was.mixing !== now.mixing) trail.got.push([at(), 'telemetry', JSON.stringify(now)]);
+                trail.last = now;
+              } else if (m?.type && m.type !== 'sceneEvents') trail.got.push([at(), m.type, m.deck ?? '']);
+              return handler.call(this, e);
+            }));
+          },
+        });
+      });
+      await page.reload({ waitUntil: 'networkidle' });
       await page.waitForSelector('.scene-slot');
       await page.getByRole('button', { name: 'Play the track' }).click();
       await page.waitForFunction(() => document.querySelector('.app')?.getAttribute('data-playing') === 'yes');
@@ -1166,6 +1199,10 @@ try {
       const refusedStatus = await page.locator('.scene-status').textContent();
       check('mixing: the refused effect explains when it is available', /available after mix/i.test(refusedStatus), refusedStatus);
       await page.mouse.up();
+      const panicAt = await page.evaluate(() => {
+        const t = window.__MIX_TRAIL__;
+        return t ? t.sent.length : 0;
+      });
       await page.getByRole('button', { name: 'Panic', exact: true }).click();
       // The pads come back at once; playback reports stopped on the next telemetry
       // frame. Wait for both rather than reading the second straight after the first.
@@ -1175,9 +1212,21 @@ try {
         null,
         { timeout: 8000 },
       ).catch(() => {});
-      check('mixing: Panic abandons the mix and the pads come back',
-        (await page.locator('.app').getAttribute('data-playing')) === 'no' &&
-          (await page.locator('.scene-pad').evaluateAll((els) => els.every((el) => !el.disabled))));
+      const afterPanic = await page.evaluate((from) => {
+        const t = window.__MIX_TRAIL__;
+        return {
+          playing: document.querySelector('.app')?.getAttribute('data-playing'),
+          padsOn: [...document.querySelectorAll('.scene-pad')].map((el) => (el.disabled ? 0 : 1)).join(''),
+          lines: [...document.querySelectorAll('.scene-line')].map((el) => el.textContent?.trim()).join(' | '),
+          status: document.querySelector('.scene-status')?.textContent?.trim(),
+          liveWave: [...document.querySelectorAll('.deck-wave')].map((el) => el.getAttribute('data-live')).join(','),
+          telemetry: t?.last,
+          sentAfterPanic: t?.sent.slice(Math.max(0, from - 2)),
+          got: t?.got.slice(-8),
+        };
+      }, panicAt);
+      const panicOk = afterPanic.playing === 'no' && !afterPanic.padsOn.includes('0');
+      check('mixing: Panic abandons the mix and the pads come back', panicOk, panicOk ? '' : JSON.stringify(afterPanic));
     } catch (e) {
       check('mixing: the walk-through ran to the end', false, String(e.message).split('\n')[0]);
     }

@@ -626,3 +626,20 @@ not. Things to settle before or while building it:
   "playing" after Panic is not a slow repaint: something kept or restarted playback. The
   check now prints the transport state and status line on failure; read that on the
   next occurrence before changing any timing. (Tara)
+- **Night 11B: "mixing: Panic abandons the mix and the pads come back" did the same**
+  (verify:desktop on 13752e0, 1 run). Not reproduced in 48 replays of its steps
+  (main thread throttled 4-6x, 12 busy CPU threads, track fetch +800 ms, Panic swept
+  across the whole handover from before the downbeat to after `mixEnd`) or in 2 full
+  verify:ui runs. Ruled out by reading: no host path posts `play` or `mix` after Panic
+  in this flow (`autoMix` posts `mix` before the pads go disabled; its `mixEnd`
+  callback sets state but never plays); the worklet's Panic clears the mix and stops
+  both decks; telemetry posts every block at ~30 Hz; continuous mix is off; the only
+  other pad gate (`sceneRestoring`) needs a pending restore this flow never sends.
+  The check now keeps a trail of the worklet port (messages sent, telemetry changes,
+  `mixEnd`) and prints it with `data-playing`, each pad's state, the lines and the
+  status when it fails, so the next failure names the half that failed and what
+  crossed the port after Panic. Not a fix to make: guarding the `mixEnd` callback
+  against Panic with a token. A `mixEnd` already in flight when Panic lands means the
+  worklet has made the incoming deck live; the callback following it is what keeps the
+  host's live deck the worklet's. Dropping it would send the next Play to the wrong
+  deck. (Tara)
