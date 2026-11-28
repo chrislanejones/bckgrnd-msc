@@ -683,3 +683,18 @@ not. Things to settle before or while building it:
   context still reads `running` shows nothing: the meters freeze and the playhead stops
   with no message. A host watchdog (no telemetry for, say, 1 s while playing) could say
   "Audio has stalled". Not built. (Chris, Felix)
+
+## Found in Night 12 (11-28-2026)
+
+- **An arrangement's length can't be changed.** `fromTake` gives at least 16 bars, and 4
+  past the take (10a85d3), and `startEmpty` gives 16. A length control (`setLength`, plus
+  a field in the drawer) is the follow-up. (Lacey, recording agent)
+- **Clicking a conflict selects only its first event.** Multi-select would let it select
+  them all. (Lacey)
+- **One commit message isn't conventional:** `58b725d wip(ui): ...` sits under a merge on
+  `night12/run`. Left as is rather than rewriting history under a merge. (Lacey)
+- **The MCP resync for `contracts/arrangement.json` is deferred.** No engine file changed,
+  and the MCP doesn't read arrangements; resync when PR #15 merges. (main session)
+- **`docs/ARRANGEMENT.md` hasn't had a chris-voice pass.** It is a developer contract, like
+  PERFORMANCE_EVENTS.md. (recording agent)
+

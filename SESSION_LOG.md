@@ -548,3 +548,65 @@ branch to keep the PR backlog down. Written up in [docs/NIGHT11_SPEC.md](docs/NI
 The first full run on `d253f35` failed two checks, both from the new hidden take input; fixed
 in `c655135` and the browser stages rerun. The base run on `13752e0` failed the mixing Panic
 check once; the final runs passed it.
+
+# Night 12 session log (11-28-2026)
+
+Branch `night12/run`, worktree `~/ai-repo/bckgrnd-night12`, from `night11/run` at `aad127b`
+(PR #14, not merged yet). Spec: the Night 12 brief (the arrangement editor). Written up in
+[docs/NIGHT12_SPEC.md](docs/NIGHT12_SPEC.md). Paused 1:05–2:03 AM for a usage limit.
+
+## Who owned what
+
+| Area | Owner | Branch |
+|---|---|---|
+| PR review state, merges, gates, docs | main session | `night12/run` |
+| Arrangement model, contract, history, files | recording agent | `night12/model` |
+| Arrangement editor UI | Lacey | `night12/editor-ui` |
+| Stale telemetry after Panic | Tara | `night12/panic` |
+| ADR-024 to 027 review, ADR-028 | Dara | on `night12/run` |
+
+## Work
+
+| Task | Commits | Result |
+|---|---|---|
+| PR review state | — | #12, #13, #14 and MCP #5: **0** unresolved threads. CodeRabbit skips #13/#14 (not into `main`) |
+| ADR review | `0d11cf0` | 024–027 checked against `aad127b`; stale details fixed; recommendations for Chris |
+| **Arrangement model** | `3a5b631`, `b231cae`, `10a85d3` | `bckgrnd-msc/arrangement` v1; linked pairs folded; snapping; conflict refusal; 200-step undo; save and open. 68 checks, 22 of 22 mutants caught |
+| **Editor UI** | `58b725d`, `e6a1022`, `c2896e2` | Toolbar, drag and keys, editable inspector, conflicts, resizable drawer. 94 editor checks |
+| ADR-028 | `705186e` | The working arrangement contract, **draft** |
+| **Stale telemetry fix** | `b2181df` | Forced in a test (fails on the old code); transport serial echoed in telemetry |
+| Docs | `59f71a6` | Stale timeline and fill-style lines |
+
+## Decisions
+
+| Decision | Why |
+|---|---|
+| An arrangement is its own document | The take stays what was performed (ADR-028) |
+| Linked pairs fold into one event | Orphans can't exist, rather than being checked for |
+| Conflicting edits are refused | A working arrangement is always valid; a reason is always shown |
+| Canceled Rises are dropped from a take's arrangement | The take has no step for where it was cut |
+| A take's arrangement gets 16 bars or 4 past the take | A one-scene take made a one-bar arrangement with no room to edit |
+| No MCP resync tonight | Only a new contract file changed; the MCP doesn't read it |
+
+## Skipped or not claimed
+
+| Item | Why |
+|---|---|
+| Listening | Chris's ears; not claimed |
+| That the stale frame caused the suite failures | Likely, not proven: no run showed a long enough stall |
+| Installed native app | Needs `VERIFY_NATIVE=1` and the installed app |
+| Split, multi-select, length control | Stretch; parked |
+| npm publish, deploy | Chris's steps |
+
+## Final gates
+
+| Gate | Result |
+|---|---|
+| cargo fmt, clippy -D warnings | Pass (`10a85d3`) |
+| cargo test --release (no_alloc included) | **370 pass**, 0 fail (`10a85d3`; no Rust changed after) |
+| PHPUnit | **OK, 318 tests** (`10a85d3`) |
+| typecheck, lint | Pass (`3d3cf21`) |
+| build:netlify, verify:web | Pass (`3d3cf21`) |
+| verify:desktop | **11 of 11** stages, **1,658** ok checks (`3d3cf21`) |
+| Wasm | 251,517 B, unchanged |
+| Render parity | No engine change; bypass unchanged from Night 11 |
