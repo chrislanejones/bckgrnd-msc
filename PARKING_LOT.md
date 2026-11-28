@@ -643,3 +643,20 @@ not. Things to settle before or while building it:
   worklet has made the incoming deck live; the callback following it is what keeps the
   host's live deck the worklet's. Dropping it would send the next Play to the wrong
   deck. (Tara)
+
+## Found in Night 11B (11-27-2026)
+
+- **ADR-026 is 164 lines.** Dara proposes moving take v2 into its own ADR-028 ("Performance
+  take v2: onsets, repeat, export, initial state and view-only open") and leaving ADR-026 at
+  its v1 text with a pointer. A proposal only; Chris decides. (Dara, Chris)
+- **Replay needs a rule for a missing `initial.mix` id.** Since 42a3bad a take opens with ids
+  missing or unknown. Harmless while opening is view only; Night 13 has to say what a missing
+  id starts from, or a replay quietly starts from defaults instead of what was heard. (Night 13)
+- **The timeline inspector doesn't show `initial` yet.** With nothing selected it shows a hint.
+  Small follow-up for Night 12. (Lacey)
+- **Two Panic checks fail now and then, only in the full suite.** "repeat: Panic stops the
+  transport" (Night 11) and "mixing: Panic abandons the mix and the pads come back" (Night 11B,
+  base gates on 13752e0). Not reproduced in 48 load runs or 4 standalone `verify:ui` runs;
+  no host race found in the code. Both checks now print the transport, pads and the worklet
+  port's traffic when they fail, so the next failure names the cause. (Tara)
+

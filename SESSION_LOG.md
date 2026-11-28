@@ -473,3 +473,78 @@ recording second, one-beat fills moved to Night 11). Written up in
 
 The first gate run stopped during verify:desktop at a 10-minute limit set by mistake;
 verify:desktop was rerun alone and passed.
+
+# Night 11 and 11B session log (11-26-2026 and 11-27-2026)
+
+Branch `night11/run`, worktree `~/ai-repo/bckgrnd-night11`, from `night10/run` at `a362eea`
+(PR #13, not merged yet). Night 11 was the Thanksgiving morning brief; Night 11B, the Black
+Friday brief, finished it and added take files and a timeline preview. Both land on this one
+branch to keep the PR backlog down. Written up in [docs/NIGHT11_SPEC.md](docs/NIGHT11_SPEC.md).
+
+## Who owned what
+
+| Area | Owner | Branch |
+|---|---|---|
+| Integration order, PR #12 threads, merges, gates, MCP resync | main session | `night11/run` |
+| Repeat events 61/62, the onset serial, bypass hashes | Silas | `night11/engine-rec` |
+| Beat-fills QA, Dara's three fixes, Panic investigations | Tara | `night11/fills-qa`, `night11b/panic` |
+| Take v2, export, `initial`, opening a take | recording agent | `night11/recording`, `night11b/takes` |
+| Events drawer, Fill length pill, Arrangement timeline | Lacey | `night11/drawer`, `night11b/timeline` |
+| ADR-027, ADR-026 v2 amendment | Dara | on `night11/run` |
+
+## Work
+
+| Task | Commits | Result |
+|---|---|---|
+| **One-beat fills** | `5ce2fba`, `2e495cd` | PHP beat recipes beside the track; Bar (default) or Beat; all styles and modes; Fill into Drop and Rise with Fill. QA: phrase lines, loop wrap, cancel, old projects |
+| Fill length wording and guard | `2e495cd` | Beat plays only when beat fills loaded; "last beat of bar N" wording (Dara's review) |
+| **Repeat events and onset serial** | `507d209` | Events 61/62 with token, step, division or reason; a fifth event column with the onset serial. Wasm **+739 B** |
+| **Take v2 and export** | `defaae2`, `6952787`, `75de437` | Onsets, passes, repeats, fill length; `bckgrnd-take-<track>-<date>.json` |
+| Events drawer, Fill length pill | `015673b`, `132b659` | Collapsed by default; toolbar still **70 px** |
+| **State at Record** | `72c29aa` | `initial`: scene, full mix, fill, repeat division, loop. v2 amendment |
+| **Opening a take** | `72c29aa`, `69b6139`, `9fcb7af` | View only; plain-English errors; one shared validator |
+| Tolerant reader | `42a3bad` | A take still opens after a parameter or stem is added or removed |
+| **Arrangement timeline** | `e3ef8c2`, `2ac076e` | Read-only sheet: bars, four lanes, inspector, zoom 8–256 px/bar |
+| Panic diagnostics | `19c7a1a` | The mixing Panic check records the worklet port; no root cause found |
+| Gate fixes | `c655135` | The take input's accessible name; project checks pick the project input |
+| ADRs | `d80d522`, `18d6e46`, `b13b92f` | ADR-027 and the ADR-026 v2 amendment, both **draft** |
+| PR #12 review threads | — | **3 of 3** resolved on GitHub, each with the fixing commit |
+
+## Decisions
+
+| Decision | Why |
+|---|---|
+| Night 11B lands on `night11/run`, not a new stacked branch | Five PRs were open; one more layer, not two |
+| `initial` amends v2 instead of a v3 | No v2 file was ever pushed or released |
+| A reader requires no mix id | Adding a parameter must not lock old takes out (Dara) |
+| Opening a take is view only | Replay is Night 13; loading its mix would overwrite the live state |
+| The timeline opens from the events drawer | No room in the transport at 1180–1280 px or on a phone (Lacey, measured) |
+| The worklet event field stays `s` | The recorder reads `e.s`; renaming one side alone would lose serials silently (Silas) |
+
+## Skipped or not claimed
+
+| Item | Why |
+|---|---|
+| Listening to beat fills, Beat Repeat | Chris's ears; not claimed |
+| Installed native app | Needs `VERIFY_NATIVE=1` and the installed app |
+| npm publish, Netlify deploy | Chris's steps |
+| The Panic failures' cause | Not reproduced in 48 load runs; diagnostics left in |
+| Timebox | Night 11 ran hours over (agents hit a usage limit); 11B ran about 2½ h |
+
+## Final gates (`c655135`, under heavy)
+
+| Gate | Result |
+|---|---|
+| cargo fmt --check, clippy -D warnings | Pass |
+| cargo test --release (no_alloc included) | **370 pass**, 0 fail |
+| Bypass renders | **120/120** identical to main `5e2e809`; **160/160** to `5ce2fba` with Beat Repeat (Silas) |
+| build:netlify, typecheck, lint | Pass; lint 0 errors, the same 5 warnings |
+| verify:web | **9 of 9** stages ok |
+| verify:desktop | **11 of 11** stages ok; **1,516** ok checks |
+| PHPUnit | **OK, 318 tests**, 31,596 assertions |
+| Wasm | **251,517 B** |
+| MCP resync | See the MCP PR (parity against `c655135`) |
+
+The first full run on `d253f35` failed two checks, both from the new hidden take input; fixed
+in `c655135` and the browser stages rerun. The base run on `13752e0` failed the mixing Panic
+check once; the final runs passed it.
