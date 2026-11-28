@@ -18,9 +18,13 @@ a snapshot or a project export, and nothing saves it into one.
 | Positions | Song step only, so a step repeats after a wrap, a loop or a cue | Song step **and** `onset` (the engine's onset serial, from the take's first event) and `pass` |
 | Beat Repeat | Reserved, refused | `repeat`: start, end and division |
 | Fill length | Not recorded | `length: 'bar' \| 'beat'` on `fill` and `fillInto` |
-| Header | | `recordedAt` |
-| Saving | In memory only | Exports as a standalone file |
+| Header | | `recordedAt`, and `initial`: the state at Record (Night 11B) |
+| Saving | In memory only | Exports as a standalone file, and opens again for viewing (Night 11B) |
 | Reserved kinds | `repeat`, `filter`, `echo`, `gesture` | `filter`, `echo`, `gesture` |
+
+`initial` was added to v2 on Night 11B, before v2 was pushed or released, so it is not
+a version bump: it is optional for a reader (a v2 file without it still opens) and the
+app always writes it.
 
 v1 was never written to disk, so there are no v1 files. **A v2 reader refuses version
 1** as it refuses a newer version: a v1 take has no onsets, and nothing can recover the
@@ -39,6 +43,18 @@ distances it never recorded.
   "startedAtStep": 240,
   "stoppedBy": "user",
   "truncated": false,
+  "initial": {
+    "track": "warehouse", "bpm": 124, "swing": 0.12,
+    "scene": { "slot": "sparse", "modified": true },
+    "mix": {
+      "params": { "transport.bpm": 124, "transport.swing": 0.12, "master.level": 0.78, "fx.low": 1, "…": 0,
+                  "performance.loopBars": 0, "performance.echoThrow": 0 },
+      "stems": { "kick": { "volume": 0.9, "send": 0, "muted": false, "solo": false }, "…": {} }
+    },
+    "fill": { "style": "random", "length": "beat" },
+    "repeatDivision": 8,
+    "loopBars": 0
+  },
   "events": [
     { "seq": 1, "kind": "scene", "requestId": 71, "step": 240, "bar": 16, "beat": 1, "sixteenth": 1,
       "onset": 0, "pass": 1, "slot": "sparse", "name": "Sparse", "timing": "bar", "crash": false },
@@ -64,7 +80,27 @@ the song's wrap.
 | `startedAtStep` | The song step sounding when Record was pressed. -1 if no step had sounded yet: stopped, or pressed with Play before its first onset. |
 | `stoppedBy` | `user`, `stop`, `panic`, `track`, `mix` or `cap`. Null while recording. |
 | `truncated` | True when the cap ended the take. |
+| `initial` | What the performer started from when Record was pressed. See below. Optional for a reader; always written. |
 | `events` | In the order the engine applied them. At most 10,000. |
+
+### The state at Record
+
+`initial` is read once, when Record is pressed, and never changes after. It is what a
+replay starts from. It is not a project and is never saved into one: the project format
+and `snapshot.ts` are unchanged.
+
+| Field | Meaning |
+|---|---|
+| `track`, `bpm`, `swing` | The track id, the tempo and the swing sounding then. |
+| `scene` | `{ slot, modified }`: the active scene slot (`full`, `sparse`, `build`, `drop`, or null for none), and whether the mix had moved away from it. |
+| `mix.params` | **Every** `contracts/parameters.json` parameter, by id, as the working mix had it (what a save would write), plus the two performance values a project leaves out: `performance.loopBars` and `performance.echoThrow` (a held Echo Throw, 0 or 1). A toggle is 0 or 1. |
+| `mix.stems` | Every stem, by id: `volume`, `send`, `muted`, `solo` (the `stemParameters` ids). |
+| `fill` | `{ style, length }`: the Fill style menu's choice (a style, or `random` or `rotate`), and the length a press would play, the effective one (Bar when the track has no beat fills). |
+| `repeatDivision` | Beat Repeat's division: 4, 8 or 16. |
+| `loopBars` | The loop in bars, 0 for none. The same value as `mix.params['performance.loopBars']`, at the top for a reader that wants only the loop. |
+
+The schema names every parameter and stem id from `contracts/parameters.json`, and
+`tools/check-recording.mjs` fails if the two lists drift apart.
 
 Readers **reject** an unknown `format`, a newer `version`, and version 1.
 
@@ -224,7 +260,34 @@ into a project, a snapshot or a project export, and opening a project never read
 | `exportTake(take)` | `{ filename, json }`: pretty-printed JSON with a final newline |
 | `takeFilename(track, recordedAt)` | `bckgrnd-take-<track>-<YYYY-MM-DD-HHmm>.json`, in local time at `recordedAt`, so one take exports under one name. The track id is lowercased to `a-z0-9-`. |
 | `downloadTake({ filename, json })` | Saves it as a file in the browser |
-| `parseTake(text)` | Reads one back, refusing another format, a newer version and version 1. It checks the header; the full shape is the schema's. |
+| `parseTake(text)` | Reads one back, refusing another format, a newer version, version 1 and an event with no onset. It checks the header and the onsets. |
+| `openTakeText(text, validate)` | `parseTake`, then the event kinds, then the whole schema: `{ ok: true, take }` or `{ ok: false, error }` in plain English. |
+| `openedLabel(take, filename?)` | What the drawer shows after "Opened:": the file name, or the track and when it was recorded (`warehouse · 11-26-2026 21:07`). |
+
+The validator is `frontend/lib/take-schema.ts` (`validateTake`), the one copy: the app
+opens files with it, and `tools/performance-schema.mjs` bundles the same file for the
+checks.
+
+## Opening a take
+
+Open reads a take file for **viewing**. It never touches the live take, the transport or
+the engine; replay is Night 13. A bad file leaves whatever was open as it was.
+
+| A file that | Says |
+|---|---|
+| is not JSON | "Not a performance take: not JSON." |
+| has another `format` (a project, say) | "Not a performance take." |
+| is version 1 | "This is a version 1 take. This app opens version 2 takes only: version 1 has no onsets." |
+| is newer than version 2 | "This take is version 3, newer than this app reads (2)." |
+| has an event with no onset | "Event 2 has no onset, so it can't be placed. The take may be from an engine before Night 11." |
+| has a kind this app doesn't know | "Event 1 is of a kind this app does not know ("scratch")." A reserved kind says it is not recorded yet. |
+| fails the schema otherwise | "This take doesn't match the take format (initial.repeatDivision: 32 not in enum)." |
+
+In the events drawer, **Open** sits beside Export: a hidden file input that takes
+`.json`. With a take open the drawer lists its events under "Opened: <file> · N events",
+Export is unavailable (it exports the live take, so close first), and **Close** goes back
+to the live take. An error goes to the drawer's status line, prefixed "Couldn't open
+<file>:".
 
 An export taken while recording is valid too: `stoppedBy` is null, a fill or Rise still
 running says `open`, and a held repeat says `endedBy: "open"` with no end.
@@ -244,6 +307,10 @@ inst.recording: {
   recording(): PerformanceRecording | null;   // a copy of the take
   exportTake(): TakeExport | null;            // { filename, json }
   downloadTake(t?: TakeExport | null): boolean; // saves t, or a fresh export; false with no take
+  opened: PerformanceRecording | null;        // a take file open for viewing (reactive)
+  openedFile: string | null;                  // its file name, when opened from a file
+  openTake(text: string, filename?: string): { ok: true } | { ok: false; error: string };
+  closeOpened(): void;
 }
 ```
 
@@ -269,6 +336,7 @@ token. Nothing is sent to the engine.
 | `log()` | The newest 500 entries: `{ n, status, kind, requestId, step, recorded, detail }`. For `repeat`, `requestId` is the token. |
 | `recording()` | A copy of the take, as the contract describes it, or null. |
 | `exportTake()`, `download()` | The export, and the browser download. |
+| `openTake(text, filename?)`, `opened()`, `closeOpened()` | Open a take file for viewing, read it, close it. |
 | `state()`, `start()`, `stop()`, `clear()` | The session. |
 
 ## Deferred
@@ -276,4 +344,4 @@ token. Nothing is sent to the engine.
 - Replay, a timeline, arrangement editing, automation curves and WAV export.
 - Capturing Filter Hold, Echo Throw and other gestures (the reserved kinds).
 - An onset origin at the Record press. It needs the onset serial on telemetry.
-- Importing a take into the app. `parseTake` reads the header; nothing opens a take yet.
+- Replaying an opened take (Night 13), and laying it on a timeline (Lacey's drawer).

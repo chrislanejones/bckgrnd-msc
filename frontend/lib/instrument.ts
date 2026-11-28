@@ -18,6 +18,7 @@ import { DEFAULT_REPEAT_DIVISION, engine, GESTURE_KIND, REPEAT_DIVISIONS, SCENE_
 import type { Deck as DeckId, EngineEvent as WireEvent, RepeatDivision, SceneAccent } from './engine';
 import { emptyFlags, fetchLibrary, fetchTrack } from './api';
 import {
+  PARAMETERS,
   defaultSend,
   fixedDefault,
   projectFromTrack,
@@ -100,7 +101,21 @@ import { LANE_IDS, type LaneId, type ScenePatterns } from './patterns';
 import { usePatternWorkspace } from './workspace';
 import { useProjectHistory } from './project-history';
 import type { Fill, LibraryResponse, Mix, StemId, TrackArrangement, TrackSummary } from './types';
-import { RecordingSession, RequestCatalog, downloadTake as saveTakeFile, fromEngine, rememberBook, rememberFill, type LogEntry, type PerformanceRecording, type RecordingState, type TakeExport } from './recording';
+import {
+  RecordingSession,
+  RequestCatalog,
+  downloadTake as saveTakeFile,
+  fromEngine,
+  openTakeText,
+  rememberBook,
+  rememberFill,
+  type InitialState,
+  type LogEntry,
+  type PerformanceRecording,
+  type RecordingState,
+  type TakeExport,
+} from './recording';
+import { validateTake } from './take-schema';
 
 /** The scene slot Fill → Drop leads into: the fourth, whatever it is named now. */
 const FILL_INTO_SLOT: SceneSlotId = 'drop';
@@ -1854,6 +1869,8 @@ export function useInstrument() {
   const [recordingView, setRecordingView] = useState<{ state: RecordingState; count: number; log: readonly LogEntry[] }>(
     () => ({ state: recorder.state, count: recorder.count, log: recorder.log }));
   useEffect(() => recorder.subscribe(() => setRecordingView({ state: recorder.state, count: recorder.count, log: recorder.log })), [recorder]);
+  /** A take file opened for viewing, and its file name: view only, never the live take. */
+  const [openedView, setOpenedView] = useState<{ opened: PerformanceRecording | null; openedFile: string | null }>({ opened: null, openedFile: null });
 
   useEffect(
     () =>
@@ -1899,8 +1916,37 @@ export function useInstrument() {
     // Armed if the engine's last frame was playing; otherwise by its first one that is.
     recordSawPlaying.current = framePlaying.current;
     if (!framePlaying.current) lastPlayingStep.current = -1;
-    recorder.start(track.id, bpm, songStepRef.current, new Date().toISOString());
+    recorder.start(track.id, bpm, songStepRef.current, new Date().toISOString(), initialState());
   };
+
+  /**
+   * What the performer starts from, for the take's `initial`: the working mix as a save
+   * would write it, plus the performance values a project leaves out (the loop, a held
+   * Echo Throw), the active scene, the Fill choice and the length a press plays, and
+   * Beat Repeat's division. Read only, at Record.
+   */
+  function initialState(): InitialState | undefined {
+    if (!track || !project) return undefined;
+    const params: Record<string, number> = {};
+    for (const spec of PARAMETERS) {
+      const value = (project.params as Record<string, number | undefined>)[spec.id];
+      params[spec.id] = value ?? 0;
+    }
+    params['performance.loopBars'] = loopBars;
+    params['performance.echoThrow'] = held.echo ? 1 : 0;
+    const stems: InitialState['mix']['stems'] = {};
+    for (const id of STEM_ORDER) stems[id] = { ...project.stems[id] };
+    return {
+      track: track.id,
+      bpm,
+      swing,
+      scene: { slot: activeScene?.slot ?? null, modified: sceneModified },
+      mix: { params, stems },
+      fill: { style: fillStyle, length: playLength },
+      repeatDivision,
+      loopBars,
+    };
+  }
   const stopRecording = () => recorder.stop('user', lastPlayingStep.current);
   const clearRecording = () => recorder.clear();
   /** A copy of the take (contracts/performance.json), or null. Memo it on `log`, which changes with the take. */
@@ -1914,7 +1960,22 @@ export function useInstrument() {
     saveTakeFile(t);
     return true;
   };
-  const recordingActions = useStable({ startRecording, stopRecording, clearRecording, recording, exportTake, downloadTake });
+  /**
+   * Open a take file for viewing (`opened`). Never touches the live take, the transport
+   * or the engine; replay is Night 13. A bad file leaves what was open as it was.
+   */
+  const openTake = (text: string, filename?: string): { ok: true } | { ok: false; error: string } => {
+    const result = openTakeText(text, validateTake);
+    if (!result.ok) return result;
+    setOpenedView({ opened: result.take, openedFile: filename ?? null });
+    return { ok: true };
+  };
+  /** Close the opened take. The live take is untouched. */
+  const closeOpened = () => setOpenedView({ opened: null, openedFile: null });
+  const recordingActions = useStable({ startRecording, stopRecording, clearRecording, recording, exportTake, downloadTake, openTake, closeOpened });
+
+  const openedRef = useRef(openedView.opened);
+  openedRef.current = openedView.opened;
 
   // The developer log: `__BCKGRND_RECORDING__.table()` in the console, and the checks.
   useEffect(() => {
@@ -1925,6 +1986,9 @@ export function useInstrument() {
       table: () => console.table(recorder.log),
       exportTake: () => recorder.exportTake(),
       download: () => recordingActions.downloadTake(),
+      openTake: (text: string, filename?: string) => recordingActions.openTake(text, filename),
+      opened: () => openedRef.current,
+      closeOpened: () => recordingActions.closeOpened(),
       start: () => recordingActions.startRecording(),
       stop: () => recordingActions.stopRecording(),
       clear: () => recordingActions.clearRecording(),
@@ -2077,7 +2141,7 @@ export function useInstrument() {
       compare[compare.listening] !== null &&
       !sameMix({ params: project.params, stems: project.stems }, compare[compare.listening]!),
     /** The performance recording: what Lacey's Record indicator binds to. */
-    recording: { ...recordingView, ...recordingActions },
+    recording: { ...recordingView, ...openedView, ...recordingActions },
     // intents, each with one identity for the life of the app
     ...actions,
   };
@@ -2095,6 +2159,9 @@ declare global {
       table: () => void;
       exportTake: () => TakeExport | null;
       download: () => boolean;
+      openTake: (text: string, filename?: string) => { ok: true } | { ok: false; error: string };
+      opened: () => PerformanceRecording | null;
+      closeOpened: () => void;
       start: () => void;
       stop: () => void;
       clear: () => void;
