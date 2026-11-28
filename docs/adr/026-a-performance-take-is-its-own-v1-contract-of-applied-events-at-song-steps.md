@@ -101,7 +101,10 @@ events drawer), so a take needed an elapsed position before any file got written
 - **`initial`** (11-27) is the state at Record: track, bpm, swing, `scene { slot | null,
   modified }`, the mix (all 17 parameter ids, plus 8 stems × volume, send, muted and
   solo), the fill style and its effective length, `repeatDivision` and `loopBars`. The
-  app always writes it. A reader treats it as optional.
+  app always writes it. A reader treats it as optional. Inside `initial.mix`, a reader
+  requires no parameter or stem id, accepts ids it doesn't know, and still range-checks
+  the ones it knows (`42a3bad`). So a take opens after parameters or stems are added or
+  removed.
 - **Opening a take** (11-27): `inst.recording.openTake(text, filename?)`, `opened`,
   `openedFile` and `closeOpened()`, with an Open button in the events drawer. It runs
   `parseTake`, then the event kinds, then the whole schema, and reports errors in plain
@@ -127,8 +130,9 @@ event-ring change", and the reserved `repeat`.
   estimate is wrong if a loop, cue or seek came after the last engine event.
 - The ring the MCP shares gains a column. An MCP on an older engine has no serials, so
   it can't write a valid v2 take.
-- `initial.mix.params` requires every id in `contracts/parameters.json`. A new
-  parameter makes every older v2 file fail to open, so it needs v3 or an optional id.
+- The tolerant reader means an opened take can be missing mix values, or carry ids
+  this app doesn't know. That's harmless while opening is view only, but Night 13's
+  replay has to decide what a missing id starts from.
 - Tempo and loop now appear more than once (`bpm`, `initial.bpm` and
   `mix.params['transport.bpm']`; `loopBars` twice), and nothing checks that the copies agree.
 - The v1 pre-mortem's warning sign has fired: `openTakeText` calls `parseTake` outside
@@ -154,7 +158,7 @@ event-ring change", and the reserved `repeat`.
 It is six months later and this was a mistake. Most likely reason: the origin moved
 too late. Takes were imported (timeline, replay or MCP) before telemetry carried a
 serial. When the origin then moved to the Record press, `onset` 0 meant two different
-things in files with the same version number. Or a parameter was added, and every
-saved take stopped opening.
+things in files with the same version number. Or replay filled a missing `initial.mix`
+id with its default without saying so, and a replay didn't start from what was heard.
 Early warning sign to watch for: the v1 sign has already fired (Open). The next one is
-a parameter added to `contracts/parameters.json` with no decision about take versions.
+replay code that reads `initial.mix` with no rule for an id that's missing.
