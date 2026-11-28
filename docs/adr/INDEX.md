@@ -50,7 +50,8 @@ Night 9 amended three drafts instead of adding ADRs for bug fixes: ADR-015 (the 
 keeps one record per request id), ADR-019 (a Rise keeps its own record and is followed
 in exact values) and ADR-016 (tone notes no longer allocate on the audio path).
 
-Night 11's events drawer (`frontend/ui/EventsDrawer.tsx`) is the first fixed sheet over
-the page, but it doesn't get an ADR. It's UI only: it reads the take and changes no data
-shape, storage or boundary. Its one stored value is an open/closed app preference
-(`bckgrnd-msc:events-open`). If a second overlay copies it, that's the time to write one.
+Night 11's events drawer (`frontend/ui/EventsDrawer.tsx`) and Night 11B's Arrangement
+drawer don't get ADRs. Both are fixed sheets, like the pattern drawer (`.drawer.is-open`,
+since `44a19e2`), so neither is a new pattern. They're UI only: they read the take and
+change no data shape, storage or boundary. Each stores only an open/closed app
+preference (`bckgrnd-msc:events-open`, `bckgrnd-msc:arrangement-open`).
