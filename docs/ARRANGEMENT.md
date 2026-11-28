@@ -19,7 +19,7 @@ binds to.
   "track": "warehouse",
   "bpm": 124,
   "stepsPerBar": 16,
-  "lengthBars": 11,
+  "lengthBars": 16,
   "source": { "track": "warehouse", "recordedAt": "2026-11-26T21:07:00.000Z", "events": 10 },
   "initial": { "track": "warehouse", "bpm": 124, "…": "the take's initial, as it was" },
   "createdAt": "2026-11-28T05:45:00.000Z",
@@ -121,7 +121,8 @@ the conversion changed, for the UI to show.
   division change while held is noted. A repeat still held at the take's end runs to it.
 - **Off the grid**: a cue, seek or loop can move the song's bar lines against the
   onsets; an event that lands off its kind's grid snaps to the nearest place, with a note.
-- `lengthBars` covers the last event, span or landing, and the take's last end.
+- `lengthBars` covers the last event, span or landing, and the take's last end, plus 4 bars of
+  room to keep composing, rounded up to a 4-bar phrase, and never under 16 bars.
 
 ## The editor
 

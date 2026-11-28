@@ -107,7 +107,7 @@ async function runChecks(a, check) {
   check('fromTake: recaptures chain into one span, first division, noted',
     repeat?.division === 8 && repeat.at === 160 && repeat.length === 16 && notes.some((n) => /changed division while held \(1\/8 then 1\/4\)/.test(n)), JSON.stringify(repeat));
   check('fromTake: header: track, bpm, 16 steps, source, length, created', arr.track === 'warehouse' && arr.bpm === 124 && arr.stepsPerBar === 16
-    && JSON.stringify(arr.source) === JSON.stringify({ track: 'warehouse', recordedAt: AT, events: 10 }) && arr.lengthBars === 11 && arr.createdAt === NOW.toISOString(),
+    && JSON.stringify(arr.source) === JSON.stringify({ track: 'warehouse', recordedAt: AT, events: 10 }) && arr.lengthBars === 16 && arr.createdAt === NOW.toISOString(),
     JSON.stringify({ source: arr.source, lengthBars: arr.lengthBars }));
   check('fromTake: ids are unique strings', new Set(arr.events.map((e) => e.id)).size === arr.events.length && arr.events.every((e) => typeof e.id === 'string'));
   check('fromTake: the result is valid, by the schema and with no conflicts', arrValid(arr).length === 0 && a.validate(arr).length === 0,

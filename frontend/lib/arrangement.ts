@@ -40,6 +40,8 @@ export const HISTORY_LIMIT = 200;
 /** An empty arrangement's length. */
 export const DEFAULT_BARS = 16;
 export const MAX_BARS = 1024;
+/** Bars a take's arrangement gets past the take's own end, so there is room to add. */
+export const HEADROOM_BARS = 4;
 
 export const SCENE_SLOTS = ['full', 'sparse', 'build', 'drop'] as const;
 export type SceneSlot = (typeof SCENE_SLOTS)[number];
@@ -474,7 +476,12 @@ export function fromTake(take: PerformanceRecording, opts: { now?: Date } = {}):
     e.at = to;
   }
   const last = Math.max(takeEnd, ...placed.map(needs));
-  const arrangement: Arrangement = { ...base, lengthBars: Math.min(MAX_BARS, Math.max(1, Math.ceil(last / STEPS_PER_BAR))), events: sortEvents(placed) };
+  // Room to keep composing past the take: at least DEFAULT_BARS, and HEADROOM_BARS past
+  // what it used, rounded up to a 4-bar phrase. A one-scene take is otherwise one bar
+  // long, and every nudge or insert past it is refused.
+  const used = Math.ceil(last / STEPS_PER_BAR);
+  const lengthBars = Math.min(MAX_BARS, Math.max(DEFAULT_BARS, Math.ceil((used + HEADROOM_BARS) / 4) * 4));
+  const arrangement: Arrangement = { ...base, lengthBars, events: sortEvents(placed) };
   return { arrangement, notes };
 }
 
