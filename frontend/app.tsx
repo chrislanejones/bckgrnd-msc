@@ -32,6 +32,8 @@ import { PanicButton, TransportBar } from './ui/Transport';
 import { RecordToggle } from './ui/RecordToggle';
 import { EventsDrawer, EventsToggle, useEventsOpen } from './ui/EventsDrawer';
 import { ArrangementDrawer, TimelineToggle, useArrangementOpen } from './ui/ArrangementDrawer';
+import type { ArrangementApi } from './ui/arrangementApi';
+import { useArrangementFallback } from './ui/arrangementFallback';
 
 type View = 'perform' | 'mix' | 'edit';
 
@@ -83,6 +85,17 @@ export function App() {
   const arrangementId = useId();
   const timelineToggle = useRef<HTMLButtonElement>(null);
   const closeArrangement = useCallback(() => setArrangementOpen(false), [setArrangementOpen]);
+  // Night 12: until the model (night12/model) adds `inst.arrangement`, a stand-in with
+  // its API (ui/arrangementFallback.ts; delete both at the merge).
+  const takeOpened = inst.recording.opened;
+  const readRecording = inst.recording.recording;
+  const readTake = useCallback(() => takeOpened ?? readRecording(), [takeOpened, readRecording]);
+  const arrangementFallback = useArrangementFallback(readTake);
+  const sceneSlots = inst.scenes?.slots;
+  const sceneName = useCallback(
+    (slot: string) => sceneSlots?.find((s) => s.slot === slot)?.name ?? slot.charAt(0).toUpperCase() + slot.slice(1),
+    [sceneSlots],
+  );
   // Back to the Timeline toggle, or to the Events toggle when its drawer is folded.
   const arrangementReturn = useCallback(
     () => (timelineToggle.current?.isConnected && timelineToggle.current.getClientRects().length ? timelineToggle.current : eventsToggle.current),
@@ -717,6 +730,8 @@ export function App() {
       <ArrangementDrawer
         id={arrangementId}
         open={arrangementOpen}
+        editor={(inst as unknown as { arrangement?: ArrangementApi }).arrangement ?? arrangementFallback}
+        sceneName={sceneName}
         source={inst.recording}
         onClose={closeArrangement}
         returnFocus={arrangementReturn}

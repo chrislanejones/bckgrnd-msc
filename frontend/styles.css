@@ -969,20 +969,19 @@ body {
    column stays put while they scroll. */
 .arrangement {
   --lane-label: 4.5rem;
-  --lane-h: 1.75rem; /* 28px: a 24px marker and its air */
+  --lane-h: 1.875rem; /* 30px: a 24px marker and its air */
   --marker-h: 1.5rem;
   position: fixed;
   right: var(--space-4);
   bottom: 0;
   left: var(--space-4);
   z-index: 44;
-  display: grid;
-  /* minmax(0, 1fr): the column is the sheet's width, never its header's max-content
-     (measured 571px in a 375px sheet with a bare auto track). */
-  grid-template-columns: minmax(0, 1fr);
-  grid-template-rows: auto auto auto;
-  max-height: min(24rem, calc(100dvh - var(--transport-h) - var(--space-4)));
-  overflow-y: auto;
+  /* A column: the handle, header and toolbar at their size, the lanes take the rest
+     of the height (set inline from the handle, remembered), the inspector at the foot.
+     Fixed left and right, so no child's max-content can widen it. */
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
   border: 1px solid var(--color-line);
   border-bottom: 0;
   border-radius: var(--radius-control) var(--radius-control) 0 0;
@@ -992,6 +991,229 @@ body {
 
 .arrangement[hidden] {
   display: none;
+}
+
+.arrangement > * {
+  flex: none;
+  min-width: 0;
+}
+
+/* The resize handle: the sheet's top edge, a separator for drag and the arrows. */
+.arrangement-handle {
+  position: relative;
+  display: grid;
+  place-items: center;
+  height: 0.625rem;
+  cursor: ns-resize;
+  touch-action: none;
+}
+
+.arrangement-grip {
+  width: 2rem;
+  height: 3px;
+  border-radius: 999px;
+  background: var(--color-line);
+}
+
+.arrangement-handle:hover .arrangement-grip,
+.arrangement-handle:focus-visible .arrangement-grip {
+  background: var(--color-acid);
+}
+
+.arrangement-handle:focus-visible {
+  outline-offset: -2px;
+}
+
+@media (pointer: coarse) {
+  /* 24px drawn, 44px to the touch: the hit area reaches up over the page edge. */
+  .arrangement-handle {
+    height: 1.5rem;
+  }
+
+  .arrangement-handle::before {
+    content: "";
+    position: absolute;
+    inset: -1.25rem 0 0;
+  }
+}
+
+/* The edit toolbar: one compact row of pills, no menus; the status line takes the rest. */
+.arrangement-toolbar {
+  position: relative;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-1) var(--space-2) var(--space-1) var(--space-3);
+  border-bottom: 1px solid var(--color-line);
+}
+
+.arrangement-action,
+.arrangement-icon {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  gap: 0.3rem;
+  min-height: 1.5rem;
+  padding: 0 0.6rem;
+  border: 1px solid var(--color-line);
+  border-radius: 999px;
+  background: var(--color-surface);
+  color: var(--color-fg);
+  font-size: var(--text-label);
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.arrangement-icon {
+  min-width: 1.75rem;
+  padding: 0;
+}
+
+.arrangement-action:hover:not([aria-disabled="true"]),
+.arrangement-icon:hover:not([aria-disabled="true"]) {
+  border-color: color-mix(in srgb, var(--color-acid) 45%, var(--color-line));
+}
+
+.arrangement-action.is-primary {
+  border-color: color-mix(in srgb, var(--color-acid) 60%, var(--color-line));
+  color: var(--color-acid);
+}
+
+.arrangement-action[aria-disabled="true"],
+.arrangement-icon[aria-disabled="true"] {
+  border-style: dashed;
+  color: var(--color-muted);
+  cursor: not-allowed;
+}
+
+.arrangement-sep {
+  flex: none;
+  width: 1px;
+  height: 1rem;
+  margin-inline: var(--space-1);
+  background: var(--color-line);
+}
+
+/* Snap and the Take | Edit switch: joined pills, like Fill length's. */
+.arrangement-snap,
+.arrangement-view {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 0;
+}
+
+.arrangement-snap-label {
+  margin-inline-end: var(--space-1);
+  font-size: 0.625rem;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--color-muted);
+}
+
+.arrangement-snap .segment,
+.arrangement-view .segment {
+  position: relative;
+  min-height: 1.5rem;
+  margin-inline-start: -1px;
+  padding: 0.1rem 0.55rem;
+  border-radius: 0;
+  font-size: var(--text-label);
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.arrangement-snap .segment:first-of-type,
+.arrangement-view .segment:first-of-type {
+  border-radius: 999px 0 0 999px;
+}
+
+.arrangement-snap .segment:last-of-type,
+.arrangement-view .segment:last-of-type {
+  border-radius: 0 999px 999px 0;
+}
+
+.arrangement-snap .segment[aria-checked="true"],
+.arrangement-view .segment[aria-checked="true"],
+.arrangement-snap .segment:focus-visible,
+.arrangement-view .segment:focus-visible {
+  z-index: 1;
+}
+
+.arrangement-status {
+  flex: 1 1 8rem;
+  min-width: 0;
+  margin: 0 0 0 var(--space-2);
+  overflow: hidden;
+  font-size: var(--text-label);
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--color-muted);
+}
+
+/* A refused edit: the warning color and a mark, and the reason in words. */
+.arrangement-status[data-tone="refused"] {
+  color: var(--color-warn);
+}
+
+.arrangement-status[data-tone="refused"]::before {
+  content: "! ";
+  font-weight: 800;
+}
+
+.arrangement-help {
+  position: absolute;
+  top: calc(100% + var(--space-1));
+  right: var(--space-2);
+  z-index: 4;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-control);
+  background: var(--color-raised);
+  box-shadow: 0 0.75rem 2rem rgba(0, 0, 0, 0.6);
+}
+
+.arrangement-help dl {
+  display: grid;
+  gap: 0.2rem;
+  margin: 0;
+  font-size: var(--text-label);
+}
+
+.arrangement-help dl > div {
+  display: grid;
+  grid-template-columns: 9rem auto;
+  gap: var(--space-3);
+}
+
+.arrangement-help dt {
+  font-weight: 800;
+  color: var(--color-fg);
+}
+
+.arrangement-help dd {
+  margin: 0;
+  color: var(--color-muted);
+}
+
+.arrangement-dirty {
+  font-size: 0.5rem;
+  line-height: 1;
+  color: var(--color-warn);
+}
+
+@media (pointer: coarse) {
+  .arrangement-action,
+  .arrangement-icon,
+  .arrangement-snap .segment,
+  .arrangement-view .segment {
+    min-width: var(--control-md);
+    min-height: var(--control-md);
+  }
 }
 
 @media (pointer: coarse) {
@@ -1115,16 +1337,26 @@ body {
 }
 
 .arrangement-empty {
-  margin: 0;
+  flex: 1 1 auto;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  align-content: flex-start;
+  gap: var(--space-2) var(--space-3);
   padding: var(--space-3);
   font-size: 0.75rem;
   color: var(--color-muted);
 }
 
+.arrangement-empty p {
+  margin: 0;
+}
+
 .arrangement-scroll {
-  overflow-x: auto;
-  overflow-y: hidden;
-  overscroll-behavior-x: contain;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
 }
 
 .arrangement-grid {
@@ -1261,10 +1493,50 @@ body {
   border-color: var(--color-warn);
 }
 
+.arrangement-marker[data-conflict] {
+  border-color: var(--color-warn);
+  background: color-mix(in srgb, var(--color-warn) 18%, var(--color-surface));
+}
+
 .arrangement-marker[aria-current="true"] {
   border-color: var(--color-acid);
   background: var(--color-acid);
   color: var(--color-acid-ink);
+}
+
+/* Editing: markers drag. The one being dragged dims; its ghost rides the snap grid and,
+   refused, glides back home. */
+.arrangement[data-editor] .arrangement-marker {
+  cursor: grab;
+}
+
+.arrangement[data-dragging] .arrangement-marker {
+  cursor: grabbing;
+}
+
+.arrangement-item[data-ghosted] {
+  opacity: 0.35;
+}
+
+.arrangement-ghost {
+  z-index: 3;
+  pointer-events: none;
+}
+
+.arrangement-ghost .arrangement-marker {
+  border: 1px dashed var(--color-acid);
+  background: color-mix(in srgb, var(--color-acid) 22%, var(--color-surface));
+}
+
+.arrangement-ghost[data-back] {
+  transition: left 180ms cubic-bezier(0.2, 0, 0, 1), opacity 180ms ease-out;
+  opacity: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .arrangement-ghost[data-back] {
+    transition: none;
+  }
 }
 
 @media (pointer: coarse) {
@@ -1275,6 +1547,40 @@ body {
 
 /* The inspector: what the selected event was, where (the take's bar and the song's),
    how long and how it went. */
+.arrangement-conflicts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1) var(--space-2);
+  padding: var(--space-1) var(--space-3);
+  border-top: 1px solid var(--color-line);
+}
+
+.arrangement-conflicts-label {
+  font-size: 0.625rem;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--color-warn);
+}
+
+.arrangement-conflict {
+  min-height: 1.5rem;
+  padding: 0 0.6rem;
+  border: 1px dashed var(--color-warn);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--color-warn);
+  font-size: var(--text-label);
+  font-weight: 700;
+}
+
+@media (pointer: coarse) {
+  .arrangement-conflict {
+    min-height: var(--control-md);
+  }
+}
+
 .arrangement-inspector {
   display: flex;
   flex-wrap: wrap;
@@ -1337,6 +1643,84 @@ body {
   font-weight: 600;
   font-variant-numeric: tabular-nums;
   color: var(--color-fg);
+}
+
+/* Editing the selection: the app's own pickers, compact with a mouse. */
+.arrangement-inspector.is-edit {
+  align-items: center;
+  gap: var(--space-1) var(--space-4);
+}
+
+.arrangement-field {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.arrangement-field .segmented-block {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.arrangement-field .segmented {
+  display: inline-flex;
+  gap: 3px;
+}
+
+.arrangement-field .segment {
+  min-height: 1.5rem;
+  padding: 0.1rem 0.55rem;
+  font-size: var(--text-label);
+  font-weight: 700;
+}
+
+.arrangement-at-value {
+  min-width: 3.5rem;
+  font-size: var(--text-label);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ◀ ▶ nudges: on touch, where dragging is hard; the arrows do it with a keyboard. */
+.arrangement-nudge {
+  display: none;
+}
+
+.arrangement-refusal {
+  flex-basis: 100%;
+  margin: 0;
+  font-size: var(--text-label);
+  font-weight: 600;
+  color: var(--color-warn);
+}
+
+.arrangement-refusal::before {
+  content: "! ";
+  font-weight: 800;
+}
+
+@media (pointer: coarse) {
+  .arrangement-nudge {
+    display: inline-grid;
+    place-items: center;
+    width: var(--control-md);
+    height: var(--control-md);
+    padding: 0;
+    border: 1px solid var(--color-line);
+    border-radius: 999px;
+    background: var(--color-surface);
+    color: var(--color-fg);
+  }
+
+  .arrangement-field .segment {
+    min-width: var(--control-md);
+    min-height: var(--control-md);
+  }
+
+  .arrangement-field .fill-style-select {
+    min-height: var(--control-md);
+  }
 }
 
 /* The phone: edge to edge, above the view dock. */
