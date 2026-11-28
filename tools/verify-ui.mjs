@@ -18,6 +18,7 @@ import { fillChecks } from './verify-ui-fills.mjs';
 import { repeatChecks } from './verify-ui-repeat.mjs';
 import { recordingChecks } from './verify-ui-recording.mjs';
 import { drawerChecks } from './verify-ui-drawer.mjs';
+import { arrangementChecks } from './verify-ui-arrangement.mjs';
 
 const baseUrl = process.argv[2] ?? 'http://127.0.0.1:8080';
 const executablePath =
@@ -1198,6 +1199,9 @@ try {
 
   // ---- The take's events drawer and Fill length's place (Night 11): tools/verify-ui-drawer.mjs.
   await drawerChecks({ open, check });
+
+  // ---- The take as a timeline (Night 11B): tools/verify-ui-arrangement.mjs.
+  await arrangementChecks({ open, check });
 
   // ---- Tablet: the library is an overlay opened from the transport. -----------
   {

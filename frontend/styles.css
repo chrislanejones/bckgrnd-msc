@@ -765,8 +765,22 @@ body {
   border-bottom: 1px solid var(--color-line);
 }
 
-.events-title {
+.events-title,
+.events-head {
   min-width: 0;
+}
+
+/* An opened take's file name (Night 11B, night11/run): cut with an ellipsis, not the
+   header; a take that would not open says so in the danger color and may wrap. These
+   replaced the inline styles the header and summary carried before the merge. */
+.events-drawer[data-state="opened"] .events-summary {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.events-summary.is-error {
+  white-space: normal;
+  color: var(--color-danger);
 }
 
 .events-title .panel-title {
@@ -942,6 +956,416 @@ body {
 .events-row[data-flag] .events-outcome::before {
   content: "! ";
   font-weight: 800;
+}
+
+/* The Timeline toggle in the events drawer's header: on while the arrangement shows. */
+.timeline-toggle[aria-expanded="true"] {
+  border-color: color-mix(in srgb, var(--color-acid) 55%, var(--color-line));
+  color: var(--color-acid);
+}
+
+/* The Arrangement drawer (Night 11B): a bottom sheet like the pattern drawer's, fixed,
+   so it adds no page height; the lanes scroll sideways inside it. One lane label
+   column stays put while they scroll. */
+.arrangement {
+  --lane-label: 4.5rem;
+  --lane-h: 1.75rem; /* 28px: a 24px marker and its air */
+  --marker-h: 1.5rem;
+  position: fixed;
+  right: var(--space-4);
+  bottom: 0;
+  left: var(--space-4);
+  z-index: 44;
+  display: grid;
+  /* minmax(0, 1fr): the column is the sheet's width, never its header's max-content
+     (measured 571px in a 375px sheet with a bare auto track). */
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: auto auto auto;
+  max-height: min(24rem, calc(100dvh - var(--transport-h) - var(--space-4)));
+  overflow-y: auto;
+  border: 1px solid var(--color-line);
+  border-bottom: 0;
+  border-radius: var(--radius-control) var(--radius-control) 0 0;
+  background: var(--color-bg);
+  box-shadow: 0 -1rem 3rem rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(243, 239, 230, 0.05);
+}
+
+.arrangement[hidden] {
+  display: none;
+}
+
+@media (pointer: coarse) {
+  .arrangement {
+    --lane-h: 3rem;
+    --marker-h: var(--control-md);
+  }
+}
+
+.arrangement-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-1) var(--space-2) var(--space-1) var(--space-3);
+  border-bottom: 1px solid var(--color-line);
+}
+
+.arrangement-title {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: baseline;
+  gap: var(--space-2);
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.arrangement-title .panel-title {
+  outline-offset: 2px;
+}
+
+.arrangement-source {
+  padding: 0.05rem 0.45rem;
+  border: 1px solid var(--color-line);
+  border-radius: 999px;
+  font-size: var(--text-label);
+  font-weight: 700;
+  color: var(--color-fg);
+}
+
+.arrangement[data-source="opened"] .arrangement-source {
+  border-color: color-mix(in srgb, var(--color-acid) 55%, var(--color-line));
+  color: var(--color-acid);
+}
+
+/* An opened take's file name beside "Opened": cut short before the summary is. */
+.arrangement-file {
+  flex: 0 1 auto;
+  min-width: 2rem;
+  overflow: hidden;
+  font-size: var(--text-label);
+  font-weight: 600;
+  text-overflow: ellipsis;
+  color: var(--color-fg);
+}
+
+.arrangement-summary {
+  min-width: 0;
+  overflow: hidden;
+  font-size: var(--text-label);
+  font-weight: 600;
+  text-overflow: ellipsis;
+  color: var(--color-muted);
+}
+
+.arrangement-zoom {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.arrangement-zoom-button,
+.arrangement-close {
+  display: inline-grid;
+  place-items: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  padding: 0;
+  border: 1px solid var(--color-line);
+  border-radius: 999px;
+  background: var(--color-surface);
+  color: var(--color-fg);
+}
+
+.arrangement-close {
+  border-color: transparent;
+  background: transparent;
+  color: var(--color-muted);
+}
+
+.arrangement-zoom-button:hover:not([aria-disabled="true"]) {
+  border-color: color-mix(in srgb, var(--color-acid) 45%, var(--color-line));
+}
+
+.arrangement-close:hover {
+  color: var(--color-fg);
+}
+
+.arrangement-zoom-button[aria-disabled="true"] {
+  border-style: dashed;
+  color: var(--color-muted);
+  cursor: not-allowed;
+}
+
+.arrangement-zoom-value {
+  min-width: 4.5rem;
+  font-size: var(--text-label);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+  color: var(--color-fg);
+}
+
+@media (pointer: coarse) {
+  .arrangement-zoom-button,
+  .arrangement-close {
+    width: var(--control-md);
+    height: var(--control-md);
+  }
+}
+
+.arrangement-empty {
+  margin: 0;
+  padding: var(--space-3);
+  font-size: 0.75rem;
+  color: var(--color-muted);
+}
+
+.arrangement-scroll {
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
+}
+
+.arrangement-grid {
+  display: grid;
+  padding-bottom: var(--space-1);
+}
+
+.arrangement-ruler,
+.arrangement-lane {
+  display: flex;
+}
+
+/* The label column: sticky, so a lane keeps its name while the take scrolls by. */
+.arrangement-corner,
+.arrangement-lane-label {
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  flex: none;
+  width: var(--lane-label);
+  padding-inline: var(--space-3) var(--space-2);
+  background: var(--color-bg);
+  border-right: 1px solid var(--color-line);
+  font-size: 0.625rem;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--color-muted);
+}
+
+.arrangement-corner {
+  height: 1.25rem;
+  line-height: 1.25rem;
+}
+
+.arrangement-lane-label {
+  height: var(--lane-h);
+  line-height: var(--lane-h);
+  border-top: 1px solid color-mix(in srgb, var(--color-line) 55%, transparent);
+}
+
+/* Bar lines on every bar; beat lines once a bar is 64px or wider. */
+.arrangement-ruler-track,
+.arrangement-track {
+  position: relative;
+  flex: none;
+  background-image: linear-gradient(to right, var(--color-line) 1px, transparent 1px);
+  background-size: var(--bar-px) 100%;
+}
+
+.arrangement-scroll[data-beats] .arrangement-track {
+  background-image:
+    linear-gradient(to right, var(--color-line) 1px, transparent 1px),
+    linear-gradient(to right, color-mix(in srgb, var(--color-line) 45%, transparent) 1px, transparent 1px);
+  background-size: var(--bar-px) 100%, calc(var(--bar-px) / 4) 100%;
+}
+
+.arrangement-ruler-track {
+  height: 1.25rem;
+}
+
+.arrangement-bar-number {
+  position: absolute;
+  top: 0;
+  padding-inline-start: 0.25rem;
+  font-size: var(--text-label);
+  font-weight: 700;
+  line-height: 1.25rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-fg);
+}
+
+.arrangement-track {
+  height: var(--lane-h);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border-top: 1px solid color-mix(in srgb, var(--color-line) 55%, transparent);
+}
+
+.arrangement-item {
+  position: absolute;
+  top: calc((var(--lane-h) - var(--marker-h)) / 2);
+  height: var(--marker-h);
+}
+
+/* Markers. A span runs from its start to its end; a point (a scene, a Fill into) is
+   a tag whose left edge is the moment. Neutral by kind (the lane says which); acid
+   only for the one selected, the warning color only for an outcome that needs it. */
+.arrangement-marker {
+  display: flex;
+  align-items: center;
+  gap: 0.2rem;
+  width: 100%;
+  min-width: 1.5rem;
+  height: 100%;
+  padding: 0 0.4rem;
+  overflow: hidden;
+  border: 1px solid var(--color-line);
+  border-radius: 0.375rem;
+  background: color-mix(in srgb, var(--color-fg) 7%, var(--color-surface));
+  color: var(--color-fg);
+  font-size: var(--text-label);
+  font-weight: 700;
+  line-height: 1;
+  white-space: nowrap;
+  outline-offset: 1px;
+}
+
+.arrangement-marker:not([data-span]) {
+  width: auto;
+  border-left: 2px solid var(--color-fg);
+  border-radius: 0 0.375rem 0.375rem 0;
+}
+
+.arrangement-marker-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.arrangement-marker:hover {
+  border-color: color-mix(in srgb, var(--color-acid) 45%, var(--color-line));
+}
+
+.arrangement-marker[data-open] {
+  border-right-style: dashed;
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
+.arrangement-marker[data-flag] {
+  border-style: dashed;
+  border-color: var(--color-warn);
+}
+
+.arrangement-marker[aria-current="true"] {
+  border-color: var(--color-acid);
+  background: var(--color-acid);
+  color: var(--color-acid-ink);
+}
+
+@media (pointer: coarse) {
+  .arrangement-marker {
+    min-width: var(--control-md);
+  }
+}
+
+/* The inspector: what the selected event was, where (the take's bar and the song's),
+   how long and how it went. */
+.arrangement-inspector {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-1) var(--space-4);
+  min-height: 2.5rem;
+  padding: var(--space-2) var(--space-3);
+  border-top: 1px solid var(--color-line);
+}
+
+.arrangement-inspector-hint {
+  margin: 0;
+  font-size: var(--text-label);
+  color: var(--color-muted);
+}
+
+.arrangement-inspector-title {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  margin: 0;
+}
+
+.arrangement-inspector-kind {
+  font-size: 0.625rem;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--color-muted);
+}
+
+.arrangement-inspector-label {
+  font-size: var(--text-value);
+  font-weight: 700;
+  color: var(--color-fg);
+}
+
+.arrangement-facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-4);
+  margin: 0;
+  font-size: var(--text-label);
+}
+
+.arrangement-facts > div {
+  display: flex;
+  gap: var(--space-1);
+}
+
+.arrangement-facts dt {
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--color-muted);
+}
+
+.arrangement-facts dd {
+  margin: 0;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-fg);
+}
+
+/* The phone: edge to edge, above the view dock. */
+@media (max-width: 899.98px) {
+  .arrangement {
+    right: 0;
+    /* The dock is a 44px row, 1rem of padding and a 1px rule. */
+    bottom: calc(var(--control-md) + 1rem + 1px + env(safe-area-inset-bottom));
+    left: 0;
+    max-height: calc(100dvh - var(--transport-h) - var(--control-md) - 1rem - 1px - env(safe-area-inset-bottom));
+    border-width: 1px 0;
+    border-radius: 0;
+    --lane-label: 3.75rem;
+  }
+
+  /* The title and its source on one row; zoom and Close on the next, Close at its end. */
+  .arrangement-head {
+    flex-wrap: wrap;
+    row-gap: 0;
+  }
+
+  .arrangement-title {
+    flex: 1 0 100%;
+    padding-top: var(--space-1);
+  }
+
+  .arrangement-close {
+    margin-inline-start: auto;
+  }
 }
 
 /* The phone: the inspector's sheet, from the bar's line to the dock. */
