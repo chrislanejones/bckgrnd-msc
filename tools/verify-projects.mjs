@@ -161,7 +161,7 @@ try {
   // Import portable accepted composition before editing and saving it.
   await menu();
   const releaseBytes = readFileSync('tests/fixtures/release/edited.bckgrnd.json', 'utf8');
-  await page.locator('input[type=file]').setInputFiles('tests/fixtures/release/edited.bckgrnd.json');
+  await page.locator('input[type=file][aria-label="Import project file"]').setInputFiles('tests/fixtures/release/edited.bckgrnd.json');
   await page.waitForFunction(() => document.querySelector('[data-testid="project-status"]')?.textContent?.startsWith('Opened '));
   // A v3 release file opens as v4 with every scene's crash off, and the file is left alone.
   assert.equal(JSON.parse(releaseBytes).project.version, 3);
@@ -222,7 +222,7 @@ try {
   assert.equal(bytes.readUInt32LE(40), bytes.length - 44); assert(bytes.subarray(44).some((b) => b !== 0));
   // Import migration leaves the original file unchanged and opens stopped.
   const older = readFileSync('tests/fixtures/contract/v1-sparse.input.json', 'utf8');
-  await page.locator('input[type=file]').setInputFiles('tests/fixtures/contract/v1-sparse.input.json');
+  await page.locator('input[type=file][aria-label="Import project file"]').setInputFiles('tests/fixtures/contract/v1-sparse.input.json');
   await page.waitForFunction(() => document.querySelector('[data-testid="project-status"]')?.textContent?.startsWith('Opened '));
   { const migrated = (await file()).project; assert.equal(migrated.version, 4); assert.ok(migrated.scenes.slots.every((x) => x.crash === false), 'a v1 import states every crash off'); }
   assert.equal(readFileSync('tests/fixtures/contract/v1-sparse.input.json', 'utf8'), older);
@@ -263,7 +263,7 @@ try {
   await assert.rejects(readSnapshot(changed, library.tracks, source), /Source library mismatch/);
   await assert.rejects(readSnapshot({ ...changed, source: { trackId: 'not-this-track', sha256: realHash } }, library.tracks, source, () => {}), /different track/);
   const changedPath = join(temp, 'library-changed.bckgrnd.json'); writeFileSync(changedPath, JSON.stringify(changed));
-  await page.locator('input[type=file]').setInputFiles(changedPath);
+  await page.locator('input[type=file][aria-label="Import project file"]').setInputFiles(changedPath);
   await page.locator('[data-testid="source-warning"]').waitFor();
   assert.equal(await page.locator('.save-status').textContent(), 'Unsaved');
   assert.deepEqual((await file()).project.patterns, changed.project.patterns);

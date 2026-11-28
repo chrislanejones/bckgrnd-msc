@@ -288,6 +288,7 @@ export function EventsDrawer({
                 hidden
                 tabIndex={-1}
                 aria-hidden="true"
+                aria-label="Open take file"
                 className="events-file"
                 onChange={(event) => {
                   const input = event.currentTarget;
