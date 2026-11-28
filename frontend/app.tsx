@@ -83,6 +83,11 @@ export function App() {
   const arrangementId = useId();
   const timelineToggle = useRef<HTMLButtonElement>(null);
   const closeArrangement = useCallback(() => setArrangementOpen(false), [setArrangementOpen]);
+  const sceneSlots = inst.scenes?.slots;
+  const sceneName = useCallback(
+    (slot: string) => sceneSlots?.find((s) => s.slot === slot)?.name ?? slot.charAt(0).toUpperCase() + slot.slice(1),
+    [sceneSlots],
+  );
   // Back to the Timeline toggle, or to the Events toggle when its drawer is folded.
   const arrangementReturn = useCallback(
     () => (timelineToggle.current?.isConnected && timelineToggle.current.getClientRects().length ? timelineToggle.current : eventsToggle.current),
@@ -717,6 +722,8 @@ export function App() {
       <ArrangementDrawer
         id={arrangementId}
         open={arrangementOpen}
+        editor={inst.arrangement}
+        sceneName={sceneName}
         source={inst.recording}
         onClose={closeArrangement}
         returnFocus={arrangementReturn}
